@@ -16,5 +16,8 @@ ort = { version = "2.0.0-rc.13", features = ["directml"] }
 rapidocr-core = { version = "0.2.2", default-features = false }
 ultralytics-inference = { version = "0.0.44", default-features = false }
 
+# examples 用（ocr_probe 等）
+image = { workspace = true }
+
 [lints]
 workspace = true

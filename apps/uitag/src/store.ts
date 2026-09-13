@@ -12,6 +12,9 @@ export type DragState =
 
 export type Handle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
 
+/** 画布工具态：draw = 十字光标拖拽画框；select = 常规光标选中/移动/缩放。 */
+export type Tool = 'draw' | 'select';
+
 interface UiTagStore {
   tags: TagsConfig;
   images: ImageEntry[];
@@ -20,6 +23,7 @@ interface UiTagStore {
   dims: Record<string, { width: number; height: number }>;
   annos: Record<string, AnnoBox[]>;
   activeTag: string;
+  tool: Tool;
   selected: number | null;
   drag: DragState;
   zoom: number;
@@ -38,6 +42,7 @@ interface UiTagStore {
   setCurrent: (path: string | null) => void;
   setDim: (path: string, width: number, height: number) => void;
   setActiveTag: (name: string) => void;
+  setTool: (t: Tool) => void;
   select: (index: number | null) => void;
   setDrag: (d: DragState) => void;
   setZoom: (z: number) => void;
@@ -48,7 +53,6 @@ interface UiTagStore {
   redo: () => void;
   deleteSelected: () => void;
   relabelBox: (index: number, tag: string) => void;
-  previewDragBox: () => AnnoBox | null;
   /** 把当前图的标注传播到其余所有图片（NCC 模板匹配） */
   propagateToAll: () => Promise<void>;
 
@@ -66,6 +70,7 @@ export const useStore = create<UiTagStore>((set, get) => ({
   dims: {},
   annos: {},
   activeTag: '',
+  tool: 'draw',
   selected: null,
   drag: null,
   zoom: 1,
@@ -103,7 +108,8 @@ export const useStore = create<UiTagStore>((set, get) => ({
     })),
   setDim: (path, width, height) =>
     set((s) => ({ dims: { ...s.dims, [path]: { width, height } } })),
-  setActiveTag: (name) => set({ activeTag: name }),
+  setActiveTag: (name) => set({ activeTag: name, tool: 'draw' }),
+  setTool: (t) => set({ tool: t }),
   select: (index) => set({ selected: index }),
   setDrag: (d) => set({ drag: d }),
   setZoom: (z) => set({ zoom: z }),
@@ -160,20 +166,6 @@ export const useStore = create<UiTagStore>((set, get) => ({
     const box = (s.annos[s.current] ?? [])[index];
     if (!box || box.tag === tag) return;
     s.commit({ kind: 'relabel', path: s.current, index, before: box.tag, after: tag });
-  },
-
-  /** 拖拽进行中的预览框（绘框 / 移动 / 缩放三种统一为「当前应显示的框」）。 */
-  previewDragBox: () => {
-    const s = get();
-    if (s.current == null || !s.drag) return null;
-    const d = s.drag;
-    if (d.kind === 'draw') {
-      return normRect(d.startX, d.startY, d.curX, d.curY, s.activeTag);
-    }
-    if (d.kind === 'move') {
-      return { ...d.orig, x: d.orig.x + d.curX, y: d.orig.y + d.curY };
-    }
-    return null;
   },
 
   /** 把当前图的标注传播到其余所有图片（NCC 模板匹配，预标注待人修）。 */
@@ -238,22 +230,6 @@ export const useStore = create<UiTagStore>((set, get) => ({
     return api.exportZip({ images, annos, tags: s.tags, dest });
   },
 }));
-
-function normRect(
-  x1: number,
-  y1: number,
-  x2: number,
-  y2: number,
-  tag: string,
-): AnnoBox {
-  return {
-    tag,
-    x: Math.min(x1, x2),
-    y: Math.min(y1, y2),
-    w: Math.abs(x2 - x1),
-    h: Math.abs(y2 - y1),
-  };
-}
 
 export function stemOf(path: string): string {
   const base = path.split(/[\\/]/).pop() ?? path;

@@ -35,6 +35,12 @@ arc-swap = "1"
 # 图像（截图缓冲 / 图片日志）
 image = { version = "0.25", default-features = false, features = ["png"] }
 
+# 推理（M3 定稿：ort 2.0.0-rc.13 + DirectML EP；本项目仅面向 Windows，directml 全平台开启）
+ort = { version = "2.0.0-rc.13", features = ["directml"] }
+
+# OCR 三件套流水线（M3 选型 §5.3：det→cls→rec 全封装 + 协作取消）
+rapidocr-core = { version = "0.2.2", default-features = false }
+
 # 内部 crate
 dc-core = { path = "crates/dc-core" }
 dc-sys = { path = "crates/dc-sys" }

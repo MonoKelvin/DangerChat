@@ -128,6 +128,40 @@ def matmul_chain(path: Path, tokens: int = 512, dim: int = 384, layers: int = 6)
     return flops
 
 
+def yolo_test_stub(path: Path, mode: str, side: int = 320, classes: int = 4) -> None:
+    """M4 测试用 YOLO 输出桩（不做卷积，只 Constant → 输出形状）。
+
+    - mode=empty：输出全零 → layout Stage 得到空检出（UT-LAY-04）
+    - mode=fixed：输出一个固定框（cx=0.5,cy=0.5,w=0.25,h=0.25,class0,score=0.9）
+      → 解码 + letterbox 逆变换的确定性断言
+
+    输出形状 1×(4+classes)×8400 与 v8/v11 导出一致；文件只有几 KB，入库随测试走。
+    """
+    anchors = 8400
+    data = np.zeros((1, 4 + classes, anchors), np.float32)
+    if mode == "fixed":
+        data[0, 0, 0] = side / 2          # cx
+        data[0, 1, 0] = side / 2          # cy
+        data[0, 2, 0] = side / 4          # w
+        data[0, 3, 0] = side / 4          # h
+        data[0, 4, 0] = 0.9               # class0 score
+        # 其余锚点 class 分数给 0.05（低于阈值，不产生检出）
+        data[0, 4:, 1:] = 0.05
+
+    out = helper.make_tensor_value_info("output", TensorProto.FLOAT, [1, 4 + classes, anchors])
+    graph = helper.make_graph(
+        [helper.make_node("Constant", [], ["output"], value=numpy_helper.from_array(data, "v"))],
+        f"yolo-test-{mode}",
+        [helper.make_tensor_value_info("images", TensorProto.FLOAT, [1, 3, side, side])],
+        [out],
+        [],
+    )
+    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
+    model.ir_version = 10
+    onnx.checker.check_model(model)
+    onnx.save(model, str(path))
+
+
 def main() -> int:
     out = Path(sys.argv[1] if len(sys.argv) > 1 else "spikes/m3-inference/models")
     out.mkdir(parents=True, exist_ok=True)
@@ -159,6 +193,12 @@ def main() -> int:
 
     g = matmul_chain(out / "sem-proxy-int64.onnx")
     print(f"sem-proxy-int64.onnx  输入 1x512(i64)   约 {g:.2f} GFLOPs（bge-small 级 6 层代理）")
+
+    # M4 测试桩（小尺寸轻量，入库到 dc-pipeline/tests/fixtures/）
+    yolo_test_stub(out / "yolo-test-empty.onnx", "empty")
+    print("yolo-test-empty.onnx  恒零输出 → 空检出（UT-LAY-04）")
+    yolo_test_stub(out / "yolo-test-fixed.onnx", "fixed")
+    print("yolo-test-fixed.onnx  固定框输出 → 解码确定性（UT-LAY-06 伴随）")
     return 0
 
 

@@ -23,26 +23,26 @@ export function TagPalette() {
             onClick={() => setActiveTag(t.name)}
             title={`${t.label}　快捷键 ${i + 1}`}
             className={cn(
-              'group flex items-center gap-2 rounded-md px-2.5 py-1.5 text-xs transition-colors',
+              'flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] transition-all duration-150',
               active
-                ? 'bg-accent font-medium text-accent-foreground'
+                ? 'bg-accent font-medium text-accent-foreground shadow-[inset_0_0_0_1px_var(--border)]'
                 : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
             )}
           >
             <span
               className={cn(
-                'size-2.5 rounded-full transition-transform',
-                active && 'ring-2 ring-offset-1 ring-offset-card',
+                'size-2.5 rounded-full transition-transform duration-150',
+                active && 'scale-110 ring-2 ring-offset-1 ring-offset-card',
               )}
               style={{ backgroundColor: t.color, ...(active ? { boxShadow: `0 0 0 2px ${t.color}40` } : {}) }}
             />
             {t.label}
             {n > 0 && (
-              <span className="rounded bg-foreground/10 px-1 text-[10px] tabular-nums">{n}</span>
+              <span className="rounded bg-foreground/10 px-1 text-[11px] tabular-nums">{n}</span>
             )}
             <kbd
               className={cn(
-                'ml-0.5 rounded border px-1 text-[10px] leading-tight',
+                'ml-0.5 rounded border px-1 text-[11px] leading-tight',
                 active ? 'border-foreground/20 text-muted-foreground' : 'border-transparent text-muted-foreground/50',
               )}
             >
@@ -51,12 +51,6 @@ export function TagPalette() {
           </button>
         );
       })}
-
-      <div className="ml-auto flex items-center gap-3 text-[11px] text-muted-foreground/70">
-        <span>拖拽绘制</span>
-        <span>右键改标签</span>
-        <span>Del 删除</span>
-      </div>
     </div>
   );
 }

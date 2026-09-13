@@ -855,7 +855,10 @@ dependencies = [
  "dc-core",
  "dc-sys",
  "image",
+ "ort",
+ "rapidocr-core",
  "serde",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.20",
  "tracing",
@@ -2459,6 +2462,7 @@ checksum = "e20f57f9918e5bd7bc58c22cdd70a6afc7375d4dd9683af5f2b34bd3d2bba619"
 name = "m3-inference"
 version = "0.1.0"
 dependencies = [
+ "image",
  "ort",
  "rapidocr-core",
  "ultralytics-inference",
