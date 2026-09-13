@@ -73,14 +73,32 @@ fn it_sys_01_real_desktop_capabilities() {
         colors.len()
     );
 
-    // 5) 键盘钩子可安装/卸载（安装即卸载，不与用户按键冲突）
-    let hook = sys
-        .install_keyboard_hook(Box::new(|ev| {
-            println!("  [钩子回调] vk={:#X} down={}", ev.vk, ev.is_key_down);
+    // 5) 键盘钩子：注册**两个**回调，验证多消费者语义
+    //    （回归：曾用单槽回调存放钩子，后装者会静默顶替先装者）
+    let hits_a = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let hits_b = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let a = std::sync::Arc::clone(&hits_a);
+    let hook_a = sys
+        .install_keyboard_hook(Box::new(move |ev: &dc_sys::KeyEvent| {
+            a.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if ev.is_key_down {
+                println!("  [回调 A] vk={:#04X}", ev.vk);
+            }
             dc_sys::HookAction::Pass
         }))
-        .expect("WH_KEYBOARD_LL 安装");
-    println!("键盘钩子：已安装（8 秒观察窗，请随意敲几下键盘；随后自动卸载）");
+        .expect("注册回调 A");
+    let b = std::sync::Arc::clone(&hits_b);
+    let hook_b = sys
+        .install_keyboard_hook(Box::new(move |ev: &dc_sys::KeyEvent| {
+            b.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if ev.is_key_down {
+                println!("  [回调 B] vk={:#04X}", ev.vk);
+            }
+            dc_sys::HookAction::Pass
+        }))
+        .expect("注册回调 B");
+
+    println!("键盘钩子：已注册 2 个回调（8 秒观察窗，请随意敲几下键盘）；随后自动卸载");
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
     let mut checked_ime = false;
     while std::time::Instant::now() < deadline {
@@ -92,10 +110,25 @@ fn it_sys_01_real_desktop_capabilities() {
             checked_ime = true;
         }
     }
-    drop(hook);
+
+    // 卸载 A 后 B 仍应完好（守卫只摘除自己的回调）
+    drop(hook_a);
+    let (count_a, count_b) = (
+        hits_a.load(std::sync::atomic::Ordering::SeqCst),
+        hits_b.load(std::sync::atomic::Ordering::SeqCst),
+    );
+    println!("观察窗按键：回调 A={count_a} 次，回调 B={count_b} 次");
+    assert_eq!(
+        count_a, count_b,
+        "两个回调应收到完全相同的事件流（说明未被互相顶替）"
+    );
+    if count_a == 0 {
+        println!("提示：观察窗内未按任何键，多回调链路未取得实测样本（不影响其余验证项）");
+    }
+    drop(hook_b);
     println!("键盘钩子：已卸载");
 
     println!(
-        "\nIT-SYS-01 通过：前台检测 / 窗口矩形 / DPI / 屏幕直拷 / 钩子装卸 / IME 查询 均正常。"
+        "\nIT-SYS-01 通过：前台检测 / 窗口矩形 / DPI / 屏幕直拷 / 钩子多回调 / IME 查询 均正常。"
     );
 }

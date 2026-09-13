@@ -229,6 +229,8 @@ pub trait SysApi: Send + Sync {
     ///
     /// 与设计文档 §5.2 的签名差异：这里额外返回 `Result`，使订阅失败可被上层感知并降级；
     /// 失败时返回 `Err` 而非静默的空守卫。
+    ///
+    /// **多消费者语义**：多个回调全部都会被调用（前台事件没有「吞掉」概念）。
     fn watch_foreground(&self, cb: ForegroundCallback) -> Result<WatchGuard, SysError>;
 
     /// 目标窗口矩形（**物理像素**，已完成 DPI 换算）与缩放比。
@@ -241,6 +243,12 @@ pub trait SysApi: Send + Sync {
     fn capture_region(&self, rect: Rect) -> Result<RgbaImage, SysError>;
 
     /// 安装全局低级键盘钩子（`WH_KEYBOARD_LL`）。
+    ///
+    /// **多消费者语义（重要）**：多个回调按**注册顺序**依次调用，任一返回 [`HookAction::Swallow`]
+    /// 即终止本次分发——后续回调收不到该事件。这条语义是可控的：把「只关心放行事件的观察者」
+    /// 注册在裁决者之后，即可精确统计被吞掉的按键。
+    ///
+    /// [`HookGuard`] 释放时只摘除**自己的**回调；最后一个回调被摘除后才真正卸载系统钩子。
     fn install_keyboard_hook(&self, cb: KeyCallback) -> Result<HookGuard, SysError>;
 
     /// 输入法是否处于组合态（`VK_PROCESSKEY` + `EVENT_OBJECT_IME_*`，FR-SRC-09）。

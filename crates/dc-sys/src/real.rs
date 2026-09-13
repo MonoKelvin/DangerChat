@@ -63,9 +63,17 @@ use crate::api::{
 // ---------------------------------------------------------------------------
 
 thread_local! {
-    static KEY_CB: std::cell::RefCell<Option<KeyCallback>> = const { std::cell::RefCell::new(None) };
-    static FG_CB: std::cell::RefCell<Option<ForegroundCallback>> =
-        const { std::cell::RefCell::new(None) };
+    /// 键盘回调注册表：`(token, callback)`，**按注册顺序**依次调用，
+    /// 任一回调返回 `Swallow` 即终止本次分发（后续回调收不到该事件）。
+    ///
+    /// 为什么是「一个 OS 钩子 + 回调表」而不是「一次安装一个钩子」：
+    /// 低级钩子回调只能经 thread-local 取到；若每次安装都覆盖单槽回调，
+    /// 先安装者会被**静默顶替**（钩子过程还在被系统调用，但跑的是后装者的逻辑）。
+    static KEY_CBS: std::cell::RefCell<Vec<(u64, KeyCallback)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+    /// 前台回调注册表（同上；前台事件没有「吞掉」语义，全部回调都会收到）。
+    static FG_CBS: std::cell::RefCell<Vec<(u64, ForegroundCallback)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// IME 组合态：`VK_PROCESSKEY` 为主信号（最近一次消费键的单调毫秒），
@@ -94,18 +102,28 @@ fn ime_composing_now() -> bool {
 // ---------------------------------------------------------------------------
 
 enum SysReq {
-    InstallKeyboard(KeyCallback, Sender<Result<(), String>>),
-    UninstallKeyboard(Sender<()>),
-    WatchForeground(ForegroundCallback, Sender<Result<(), String>>),
-    UnwatchForeground(Sender<()>),
+    /// 注册键盘回调；返回本次注册的 token（卸载时用它精确摘除）。
+    RegisterKeyboard(KeyCallback, Sender<Result<u64, String>>),
+    UnregisterKeyboard(u64, Sender<()>),
+    RegisterForeground(ForegroundCallback, Sender<Result<u64, String>>),
+    UnregisterForeground(u64, Sender<()>),
     Quit(Sender<()>),
 }
 
 #[derive(Default)]
 struct ThreadState {
+    /// 进程内唯一的键盘钩子（只有回调表清空时才真正卸载）。
     keyboard: Option<windows::Win32::UI::WindowsAndMessaging::HHOOK>,
     foreground: Option<HWINEVENTHOOK>,
     ime: Option<HWINEVENTHOOK>,
+    next_token: u64,
+}
+
+impl ThreadState {
+    fn token(&mut self) -> u64 {
+        self.next_token += 1;
+        self.next_token
+    }
 }
 
 impl ThreadState {
@@ -210,63 +228,90 @@ fn sys_thread_main(ctrl: Receiver<SysReq>, event: isize, shutdown: Arc<AtomicBoo
 
 fn handle_request(req: SysReq, state: &mut ThreadState) {
     match req {
-        SysReq::InstallKeyboard(cb, reply) => match install_keyboard(cb) {
-            Ok(hook) => {
-                state.keyboard = Some(hook);
-                // IME 组合态边界修正（EVENT_OBJECT_IME_SHOW..CHANGE，连续区间一次订阅）。
-                // 失败不致命：主信号 VK_PROCESSKEY 仍在低级钩子里生效（§5.2）。
-                match install_win_event(
-                    EVENT_OBJECT_IME_SHOW,
-                    EVENT_OBJECT_IME_CHANGE,
-                    Some(ime_proc),
-                ) {
-                    Ok(ime) => state.ime = Some(ime),
+        SysReq::RegisterKeyboard(cb, reply) => {
+            let token = state.token();
+            KEY_CBS.with(|cbs| cbs.borrow_mut().push((token, cb)));
+            // 只在首个回调注册时才装 OS 钩子：装两个钩子会让同一事件被投递两次
+            if state.keyboard.is_none() {
+                match install_keyboard() {
+                    Ok(hook) => {
+                        state.keyboard = Some(hook);
+                        // IME 组合态边界修正（EVENT_OBJECT_IME_SHOW..CHANGE，连续区间一次订阅）。
+                        // 失败不致命：主信号 VK_PROCESSKEY 仍在低级钩子里生效（§5.2）。
+                        match install_win_event(
+                            EVENT_OBJECT_IME_SHOW,
+                            EVENT_OBJECT_IME_CHANGE,
+                            Some(ime_proc),
+                        ) {
+                            Ok(ime) => state.ime = Some(ime),
+                            Err(e) => {
+                                tracing::warn!(
+                                    error = %e,
+                                    "IME 事件订阅失败，退化为仅 VK_PROCESSKEY 判定"
+                                )
+                            }
+                        }
+                        let _ = reply.send(Ok(token));
+                    }
                     Err(e) => {
-                        tracing::warn!(error = %e, "IME 事件订阅失败，退化为仅 VK_PROCESSKEY 判定")
+                        // 安装失败：回滚刚注册的回调，不留永远收不到事件的条目
+                        KEY_CBS.with(|cbs| cbs.borrow_mut().retain(|(t, _)| *t != token));
+                        let _ = reply.send(Err(e));
                     }
                 }
-                let _ = reply.send(Ok(()));
+            } else {
+                let _ = reply.send(Ok(token));
             }
-            Err(e) => {
-                let _ = reply.send(Err(e));
-            }
-        },
-        SysReq::UninstallKeyboard(reply) => {
-            if let Some(h) = state.keyboard.take() {
-                unsafe {
-                    let _ = UnhookWindowsHookEx(h);
+        }
+        SysReq::UnregisterKeyboard(token, reply) => {
+            KEY_CBS.with(|cbs| cbs.borrow_mut().retain(|(t, _)| *t != token));
+            let empty = KEY_CBS.with(|cbs| cbs.borrow().is_empty());
+            if empty {
+                if let Some(h) = state.keyboard.take() {
+                    unsafe {
+                        let _ = UnhookWindowsHookEx(h);
+                    }
                 }
-            }
-            if let Some(h) = state.ime.take() {
-                unsafe {
-                    let _ = UnhookWinEvent(h);
+                if let Some(h) = state.ime.take() {
+                    unsafe {
+                        let _ = UnhookWinEvent(h);
+                    }
                 }
             }
             let _ = reply.send(());
         }
-        SysReq::WatchForeground(cb, reply) => {
-            FG_CB.with(|c| *c.borrow_mut() = Some(cb));
-            match install_win_event(
-                EVENT_SYSTEM_FOREGROUND,
-                EVENT_SYSTEM_FOREGROUND,
-                Some(foreground_proc),
-            ) {
-                Ok(hook) => {
-                    state.foreground = Some(hook);
-                    let _ = reply.send(Ok(()));
+        SysReq::RegisterForeground(cb, reply) => {
+            let token = state.token();
+            FG_CBS.with(|cbs| cbs.borrow_mut().push((token, cb)));
+            if state.foreground.is_none() {
+                match install_win_event(
+                    EVENT_SYSTEM_FOREGROUND,
+                    EVENT_SYSTEM_FOREGROUND,
+                    Some(foreground_proc),
+                ) {
+                    Ok(hook) => {
+                        state.foreground = Some(hook);
+                        let _ = reply.send(Ok(token));
+                    }
+                    Err(e) => {
+                        FG_CBS.with(|cbs| cbs.borrow_mut().retain(|(t, _)| *t != token));
+                        let _ = reply.send(Err(e));
+                    }
                 }
-                Err(e) => {
-                    let _ = reply.send(Err(e));
-                }
+            } else {
+                let _ = reply.send(Ok(token));
             }
         }
-        SysReq::UnwatchForeground(reply) => {
-            if let Some(h) = state.foreground.take() {
-                unsafe {
-                    let _ = UnhookWinEvent(h);
+        SysReq::UnregisterForeground(token, reply) => {
+            FG_CBS.with(|cbs| cbs.borrow_mut().retain(|(t, _)| *t != token));
+            let empty = FG_CBS.with(|cbs| cbs.borrow().is_empty());
+            if empty {
+                if let Some(h) = state.foreground.take() {
+                    unsafe {
+                        let _ = UnhookWinEvent(h);
+                    }
                 }
             }
-            FG_CB.with(|c| *c.borrow_mut() = None);
             let _ = reply.send(());
         }
         SysReq::Quit(reply) => {
@@ -275,10 +320,7 @@ fn handle_request(req: SysReq, state: &mut ThreadState) {
     }
 }
 
-fn install_keyboard(
-    cb: KeyCallback,
-) -> Result<windows::Win32::UI::WindowsAndMessaging::HHOOK, String> {
-    KEY_CB.with(|c| *c.borrow_mut() = Some(cb));
+fn install_keyboard() -> Result<windows::Win32::UI::WindowsAndMessaging::HHOOK, String> {
     unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), None, 0) }
         .map_err(|e| format!("SetWindowsHookExW(WH_KEYBOARD_LL): {e}"))
 }
@@ -339,14 +381,17 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARA
         shift: key_pressed(VK_SHIFT.0),
     };
 
-    let action = KEY_CB.with(|c| match c.borrow().as_ref() {
-        Some(cb) => cb(&ev),
-        None => HookAction::Pass,
+    // 按注册顺序分发；任一回调吞键即终止分发（后续回调收不到该事件）
+    let swallow = KEY_CBS.with(|cbs| {
+        cbs.borrow()
+            .iter()
+            .any(|(_, cb)| cb(&ev) == HookAction::Swallow)
     });
 
-    match action {
-        HookAction::Swallow => LRESULT(1),
-        HookAction::Pass => unsafe { CallNextHookEx(None, code, wparam, lparam) },
+    if swallow {
+        LRESULT(1)
+    } else {
+        unsafe { CallNextHookEx(None, code, wparam, lparam) }
     }
 }
 
@@ -370,9 +415,9 @@ unsafe extern "system" fn foreground_proc(
     let Some(info) = foreground_info(target) else {
         return;
     };
-    FG_CB.with(|c| {
-        if let Some(cb) = c.borrow().as_ref() {
-            cb(info);
+    FG_CBS.with(|cbs| {
+        for (_, cb) in cbs.borrow().iter() {
+            cb(info.clone());
         }
     });
 }
@@ -487,15 +532,16 @@ impl RealSys {
     }
 
     /// 请求 + 等待回执（安装/卸载是低频动作，可同步等待；失败返回错误由上层降级）。
+    /// 返回本次注册的 token，卸载时用它**精确摘除自己的回调**（不会误伤其他消费者）。
     fn call(
         &self,
-        build: impl FnOnce(Sender<Result<(), String>>) -> SysReq,
-    ) -> Result<(), SysError> {
+        build: impl FnOnce(Sender<Result<u64, String>>) -> SysReq,
+    ) -> Result<u64, SysError> {
         let thread = self.sys_thread()?;
         let (tx, rx) = crossbeam_channel::bounded(1);
         thread.request(build(tx));
         match rx.recv_timeout(Duration::from_secs(3)) {
-            Ok(Ok(())) => Ok(()),
+            Ok(Ok(token)) => Ok(token),
             Ok(Err(msg)) => Err(SysError::HookInstallFailed(msg)),
             Err(_) => Err(SysError::ThreadDown),
         }
@@ -524,12 +570,12 @@ impl SysApi for RealSys {
     }
 
     fn watch_foreground(&self, cb: ForegroundCallback) -> Result<WatchGuard, SysError> {
-        self.call(|reply| SysReq::WatchForeground(cb, reply))?;
+        let token = self.call(|reply| SysReq::RegisterForeground(cb, reply))?;
         let this = self as *const RealSys as usize;
         Ok(WatchGuard::new(move || {
             // 安全：RealSys 生命周期长于守卫（进程级单实例），且 call_void 只做线程通信
             if let Some(sys) = unsafe { (this as *const RealSys).as_ref() } {
-                sys.call_void(SysReq::UnwatchForeground);
+                sys.call_void(|reply| SysReq::UnregisterForeground(token, reply));
             }
         }))
     }
@@ -644,11 +690,11 @@ impl SysApi for RealSys {
     }
 
     fn install_keyboard_hook(&self, cb: KeyCallback) -> Result<HookGuard, SysError> {
-        self.call(|reply| SysReq::InstallKeyboard(cb, reply))?;
+        let token = self.call(|reply| SysReq::RegisterKeyboard(cb, reply))?;
         let this = self as *const RealSys as usize;
         Ok(HookGuard::new(move || {
             if let Some(sys) = unsafe { (this as *const RealSys).as_ref() } {
-                sys.call_void(SysReq::UninstallKeyboard);
+                sys.call_void(|reply| SysReq::UnregisterKeyboard(token, reply));
             }
         }))
     }

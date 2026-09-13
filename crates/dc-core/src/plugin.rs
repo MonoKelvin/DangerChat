@@ -33,19 +33,26 @@ pub enum ModuleError {
 }
 
 /// 运行期指标快照（§4 `ModuleMetrics`）。
+///
+/// 耗时以**纳秒**累计：按键路径的单次回调是亚微秒级（实测 ~200ns），
+/// 按微秒累计会被整数截断成 0，指标就失去意义。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ModuleMetrics {
     pub invocations: u64,
     pub failures: u64,
-    pub total_duration_us: u64,
-    pub max_duration_us: u64,
+    pub total_duration_ns: u64,
+    pub max_duration_ns: u64,
 }
 
 impl ModuleMetrics {
-    pub fn avg_duration_us(&self) -> u64 {
-        self.total_duration_us
+    pub fn avg_duration_ns(&self) -> u64 {
+        self.total_duration_ns
             .checked_div(self.invocations)
             .unwrap_or(0)
+    }
+
+    pub fn avg_duration_us(&self) -> u64 {
+        self.avg_duration_ns() / 1_000
     }
 }
 
@@ -54,16 +61,16 @@ impl ModuleMetrics {
 pub struct MetricsRecorder {
     invocations: AtomicU64,
     failures: AtomicU64,
-    total_us: AtomicU64,
-    max_us: AtomicU64,
+    total_ns: AtomicU64,
+    max_ns: AtomicU64,
 }
 
 impl MetricsRecorder {
     pub fn record(&self, duration: Duration) {
-        let us = duration.as_micros() as u64;
+        let ns = duration.as_nanos().min(u64::MAX as u128) as u64;
         self.invocations.fetch_add(1, Ordering::Relaxed);
-        self.total_us.fetch_add(us, Ordering::Relaxed);
-        self.max_us.fetch_max(us, Ordering::Relaxed);
+        self.total_ns.fetch_add(ns, Ordering::Relaxed);
+        self.max_ns.fetch_max(ns, Ordering::Relaxed);
     }
 
     pub fn record_failure(&self) {
@@ -74,8 +81,8 @@ impl MetricsRecorder {
         ModuleMetrics {
             invocations: self.invocations.load(Ordering::Relaxed),
             failures: self.failures.load(Ordering::Relaxed),
-            total_duration_us: self.total_us.load(Ordering::Relaxed),
-            max_duration_us: self.max_us.load(Ordering::Relaxed),
+            total_duration_ns: self.total_ns.load(Ordering::Relaxed),
+            max_duration_ns: self.max_ns.load(Ordering::Relaxed),
         }
     }
 }
