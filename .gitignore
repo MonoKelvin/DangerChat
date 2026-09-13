@@ -26,3 +26,7 @@ Thumbs.db
 .idea/
 .vscode/
 .claude/
+.workbuddy/
+
+# Projcet files
+resources/training_set/wechat_snapcaptures/
