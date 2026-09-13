@@ -9,25 +9,26 @@
 //! - 只属于本进程，不与任何第三方程序交互。
 //! - 提供像素级真值矩形，供区域定位精度评估。
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, CreateFontW, CreatePen, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint,
     FillRect, InvalidateRect, LineTo, MoveToEx, SelectObject, SetBkMode, SetTextColor,
-    CLEARTYPE_QUALITY, DEFAULT_CHARSET, DEFAULT_PITCH, DT_LEFT, DT_NOPREFIX, DT_SINGLELINE,
-    DT_VCENTER, FF_DONTCARE, FW_NORMAL, HBRUSH, HDC, OUT_DEFAULT_PRECIS, PAINTSTRUCT, PS_SOLID,
-    TRANSPARENT,
+    UpdateWindow, CLEARTYPE_QUALITY, DEFAULT_CHARSET, DEFAULT_PITCH, DT_LEFT, DT_NOPREFIX,
+    DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FW_NORMAL, HBRUSH, HDC, OUT_DEFAULT_PRECIS,
+    PAINTSTRUCT, PS_SOLID, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect, HWND_TOPMOST, PostQuitMessage,
-    RegisterClassW, SetWindowTextW, SetWindowPos, ShowWindow, CS_HREDRAW, CS_VREDRAW,
-    CW_USEDEFAULT, SW_SHOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, WINDOW_EX_STYLE, WM_DESTROY,
-    WM_PAINT, WNDCLASSW, WS_OVERLAPPEDWINDOW,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect, PostQuitMessage, RegisterClassW,
+    SetWindowPos, SetWindowTextW, ShowWindow, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, HWND_TOPMOST,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_SHOW, WINDOW_EX_STYLE, WM_DESTROY, WM_PAINT,
+    WNDCLASSW, WS_OVERLAPPEDWINDOW,
 };
-
 /// 主题。影响背景与文字颜色，用于验证定位对配色不敏感。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Theme {
@@ -161,8 +162,36 @@ struct WindowState {
 
 static SCENE: OnceLock<std::sync::Mutex<Option<WindowState>>> = OnceLock::new();
 
+/// 已完成的 `WM_PAINT` 次数。捕获前必须确认目标场景已真正绘制，
+/// 否则 GDI 屏幕级捕获会读到尚未呈现的半成品帧，导致定位随机失败。
+static PAINT_COUNT: AtomicU64 = AtomicU64::new(0);
+
 fn scene_slot() -> &'static std::sync::Mutex<Option<WindowState>> {
     SCENE.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+/// 等待窗口完成至少一次新的绘制并呈现到屏幕。
+///
+/// 返回 false 表示超时未观察到新的绘制，调用方必须按失败处理，不得继续捕获。
+pub fn wait_for_repaint(hwnd: HWND, timeout: Duration) -> bool {
+    let baseline = PAINT_COUNT.load(Ordering::Acquire);
+    // SAFETY: 只操作本进程自己创建的窗口。
+    unsafe {
+        let _ = InvalidateRect(Some(hwnd), None, true);
+        let _ = UpdateWindow(hwnd);
+    }
+
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        crate::harness::layout_eval::pump_messages_public(Duration::from_millis(16));
+        if PAINT_COUNT.load(Ordering::Acquire) > baseline {
+            // 绘制已完成，再让桌面合成器把该帧呈现到屏幕。
+            std::thread::sleep(Duration::from_millis(80));
+            crate::harness::layout_eval::pump_messages_public(Duration::from_millis(16));
+            return true;
+        }
+    }
+    false
 }
 
 /// 创建并显示测试聊天窗口。返回窗口句柄。
@@ -274,6 +303,7 @@ unsafe extern "system" fn window_proc(
                 paint(hwnd, hdc);
                 let _ = EndPaint(hwnd, &ps);
             }
+            PAINT_COUNT.fetch_add(1, Ordering::Release);
             LRESULT(0)
         }
         WM_DESTROY => {

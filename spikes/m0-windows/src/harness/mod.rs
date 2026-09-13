@@ -4,3 +4,4 @@ pub mod chat_window;
 pub mod e2e_latency;
 pub mod layout_eval;
 pub mod ocr_export;
+mod ocr_sidecar;
