@@ -1,66 +1,87 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Trash2 } from 'lucide-react';
 import { useStore } from '../store';
 
-declare global {
-  interface Window {
-    lastMouseX?: number;
-    lastMouseY?: number;
-  }
+interface MenuState {
+  x: number;
+  y: number;
+  index: number;
 }
 
-/** 右键改标签菜单：AnnoCanvas 派发 uitag-relabel 事件，此处渲染浮层。 */
+/** 右键改标签浮层：AnnoCanvas 派发 uitag-relabel（带真实鼠标坐标）。 */
 export function RelabelMenu() {
   const tags = useStore((s) => s.tags.tags);
   const relabelBox = useStore((s) => s.relabelBox);
-  const [pos, setPos] = useState<{ x: number; y: number; index: number } | null>(null);
+  const deleteSelected = useStore((s) => s.deleteSelected);
+  const current = useStore((s) => s.current);
+  const annos = useStore((s) => s.annos);
+  const [menu, setMenu] = useState<MenuState | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const open = (e: Event) => {
-      const me = e as CustomEvent<{ index: number }>;
-      setPos({
-        x: (window.lastMouseX ?? 100) - 8,
-        y: (window.lastMouseY ?? 100) - 8,
-        index: me.detail.index,
-      });
+      const { index, x, y } = (e as CustomEvent<{ index: number; x: number; y: number }>).detail;
+      setMenu({ index, x, y });
     };
-    const track = (e: MouseEvent) => {
-      window.lastMouseX = e.clientX;
-      window.lastMouseY = e.clientY;
-    };
-    const close = () => setPos(null);
+    const close = () => setMenu(null);
     window.addEventListener('uitag-relabel', open);
-    window.addEventListener('mousemove', track);
-    window.addEventListener('click', close);
+    window.addEventListener('pointerdown', close);
+    window.addEventListener('blur', close);
+    window.addEventListener('keydown', (e) => e.key === 'Escape' && close());
     return () => {
       window.removeEventListener('uitag-relabel', open);
-      window.removeEventListener('mousemove', track);
-      window.removeEventListener('click', close);
+      window.removeEventListener('pointerdown', close);
+      window.removeEventListener('blur', close);
     };
   }, []);
 
-  if (!pos) return null;
+  // 贴边收敛：菜单不出视口
+  useLayoutEffect(() => {
+    if (!menu || !ref.current) return;
+    const r = ref.current.getBoundingClientRect();
+    const nx = Math.min(menu.x, window.innerWidth - r.width - 8);
+    const ny = Math.min(menu.y, window.innerHeight - r.height - 8);
+    if (nx !== menu.x || ny !== menu.y) setMenu({ ...menu, x: nx, y: ny });
+  }, [menu]);
+
+  if (!menu) return null;
+  const box = current ? (annos[current] ?? [])[menu.index] : undefined;
+
   return (
     <div
       ref={ref}
-      className="fixed z-50 min-w-36 overflow-hidden rounded-md border border-border bg-popover py-1 shadow-lg"
-      style={{ left: pos.x, top: pos.y }}
-      onClick={(e) => e.stopPropagation()}
+      className="fixed z-50 min-w-40 overflow-hidden rounded-lg border bg-popover p-1 text-popover-foreground shadow-lg"
+      style={{ left: menu.x, top: menu.y }}
+      onPointerDown={(e) => e.stopPropagation()}
     >
-      <p className="px-3 pb-1 pt-0.5 text-xs text-muted-foreground">改为标签</p>
+      <p className="px-2 py-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+        改为标签
+      </p>
       {tags.map((t) => (
         <button
           key={t.name}
-          className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-accent"
+          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent"
           onClick={() => {
-            relabelBox(pos.index, t.name);
-            setPos(null);
+            relabelBox(menu.index, t.name);
+            setMenu(null);
           }}
         >
-          <span className="size-3 rounded-sm" style={{ backgroundColor: t.color }} />
-          {t.label}
+          <span className="size-2.5 rounded-full" style={{ backgroundColor: t.color }} />
+          <span className="flex-1">{t.label}</span>
+          {box?.tag === t.name && <span className="text-muted-foreground">·</span>}
         </button>
       ))}
+      <div className="my-1 h-px bg-border" />
+      <button
+        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-destructive transition-colors hover:bg-destructive/10"
+        onClick={() => {
+          deleteSelected();
+          setMenu(null);
+        }}
+      >
+        <Trash2 className="size-3.5" />
+        删除此框
+      </button>
     </div>
   );
 }

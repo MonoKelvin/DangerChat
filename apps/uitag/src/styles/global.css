@@ -1,1 +1,127 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ---- 设计基调 ----
+   深色专业工具（标注软件的正确形态：暗环境、低饱和、截图为视觉焦点）。
+   应用强制深色——不跟随系统，避免半途切换造成标注状态视认混乱。 */
+
+/* 只保留 dark 一套 token：整卡应用挂在 :root，语义按深色调配 */
+:root {
+  --radius: 0.5rem;
+  --font-ui:
+    "Segoe UI Variable Text", "Segoe UI", system-ui, "Microsoft YaHei UI",
+    "Microsoft YaHei", sans-serif;
+  --font-mono:
+    "Cascadia Mono", "JetBrains Mono", ui-monospace, Consolas, monospace;
+
+  /* 表面三级：画布最暗 < 侧栏 < 内容面板 < 弹层 */
+  --canvas: oklch(0.152 0.012 254);
+  --canvas-grid: oklch(0.196 0.012 254);
+  --sidebar: oklch(0.185 0.014 254);
+  --background: oklch(0.208 0.014 254);
+  --card: oklch(0.232 0.015 254);
+  --popover: oklch(0.262 0.016 254);
+
+  --foreground: oklch(0.955 0.003 248);
+  --card-foreground: oklch(0.955 0.003 248);
+  --popover-foreground: oklch(0.955 0.003 248);
+
+  /* 强调色：蓝（工具感、非默认 Tailwind 蓝） */
+  --primary: oklch(0.62 0.16 255);
+  --primary-foreground: oklch(0.985 0.002 248);
+
+  --secondary: oklch(0.279 0.014 254);
+  --secondary-foreground: oklch(0.955 0.003 248);
+  --muted: oklch(0.258 0.014 254);
+  --muted-foreground: oklch(0.685 0.018 252);
+  --accent: oklch(0.295 0.016 254);
+  --accent-foreground: oklch(0.975 0.003 248);
+  --destructive: oklch(0.63 0.19 25);
+
+  --border: oklch(1 0 0 / 8%);
+  --input: oklch(1 0 0 / 12%);
+  --ring: oklch(0.62 0.16 255);
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-mono);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-canvas: var(--canvas);
+  --color-canvas-grid: var(--canvas-grid);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--foreground);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+    outline-color: color-mix(in oklch, var(--ring) 50%, transparent);
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family:
+      system-ui,
+      -apple-system,
+      "Segoe UI",
+      "Microsoft YaHei",
+      sans-serif;
+    /* 桌面应用：禁掉文本选择与橡皮筋滚动，靠近原生观感 */
+    -webkit-user-select: none;
+    user-select: none;
+    overscroll-behavior: none;
+  }
+
+  /* 细滚动条：默认那条太重 */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: color-mix(in oklch, var(--muted-foreground) 30%, transparent);
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklch, var(--muted-foreground) 55%, transparent);
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+}

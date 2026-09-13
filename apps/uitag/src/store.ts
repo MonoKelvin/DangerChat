@@ -23,9 +23,15 @@ interface UiTagStore {
   selected: number | null;
   drag: DragState;
   zoom: number;
+  /** 自增计数：请求画布重新按视口 fit（「适应窗口」按钮与切图都用它） */
+  fitTick: number;
   history: History;
   historyTick: number; // 触发订阅重渲（History 本体非响应式）
   dirty: boolean; // 有未保存标注变更
+  /** 预标注传播进行中（目标张数） */
+  propagating: number | null;
+  /** 最近一次传播的摘要（弹 toast 用） */
+  lastPropagate: { applied: number; total: number } | null;
 
   init: () => Promise<void>;
   importPaths: (paths: string[]) => Promise<void>;
@@ -35,6 +41,7 @@ interface UiTagStore {
   select: (index: number | null) => void;
   setDrag: (d: DragState) => void;
   setZoom: (z: number) => void;
+  requestFit: () => void;
 
   commit: (cmd: Cmd) => void;
   undo: () => void;
@@ -42,6 +49,8 @@ interface UiTagStore {
   deleteSelected: () => void;
   relabelBox: (index: number, tag: string) => void;
   previewDragBox: () => AnnoBox | null;
+  /** 把当前图的标注传播到其余所有图片（NCC 模板匹配） */
+  propagateToAll: () => Promise<void>;
 
   flush: () => Promise<void>;
   exportAll: (dest: string) => Promise<string>;
@@ -60,9 +69,12 @@ export const useStore = create<UiTagStore>((set, get) => ({
   selected: null,
   drag: null,
   zoom: 1,
+  fitTick: 0,
   history: new History(),
   historyTick: 0,
   dirty: false,
+  propagating: null,
+  lastPropagate: null,
 
   init: async () => {
     const [tags, state] = await Promise.all([api.loadTags(), api.loadState()]);
@@ -82,13 +94,20 @@ export const useStore = create<UiTagStore>((set, get) => ({
     if (!current && images.length > 0) set({ current: images[0].path });
   },
 
-  setCurrent: (path) => set({ current: path, selected: null, drag: null }),
+  setCurrent: (path) =>
+    set((s) => ({
+      current: path,
+      selected: null,
+      drag: null,
+      fitTick: s.fitTick + 1,
+    })),
   setDim: (path, width, height) =>
     set((s) => ({ dims: { ...s.dims, [path]: { width, height } } })),
   setActiveTag: (name) => set({ activeTag: name }),
   select: (index) => set({ selected: index }),
   setDrag: (d) => set({ drag: d }),
   setZoom: (z) => set({ zoom: z }),
+  requestFit: () => set((s) => ({ fitTick: s.fitTick + 1 })),
 
   commit: (cmd) => {
     const s = get();
@@ -155,6 +174,40 @@ export const useStore = create<UiTagStore>((set, get) => ({
       return { ...d.orig, x: d.orig.x + d.curX, y: d.orig.y + d.curY };
     }
     return null;
+  },
+
+  /** 把当前图的标注传播到其余所有图片（NCC 模板匹配，预标注待人修）。 */
+  propagateToAll: async () => {
+    const s = get();
+    if (s.current == null) return;
+    const boxes = s.annos[s.current] ?? [];
+    if (boxes.length === 0) return;
+    const targets = s.images.map((i) => i.path).filter((p) => p !== s.current);
+    if (targets.length === 0) return;
+
+    set({ propagating: targets.length, lastPropagate: null });
+    try {
+      const results = await api.propagateBoxes({
+        src_path: s.current,
+        boxes,
+        targets,
+        min_confidence: 0.62,
+        allow_rescale: true,
+      });
+      // 逐图覆盖：传播结果是「该图应有什么框」的完整快照（目标图原有标注被替换）
+      const annos = { ...s.annos };
+      let applied = 0;
+      for (const r of results) {
+        if (r.boxes.length > 0) applied++;
+        annos[r.path] = r.boxes.map(({ confidence: _c, ...b }) => b);
+      }
+      // 传播是批量操作，不进撤销栈（73 张 × 4 框的命令回放没有意义）
+      get().history.clear();
+      set({ annos, historyTick: get().historyTick + 1, dirty: true, lastPropagate: { applied, total: results.length } });
+      scheduleSave(get);
+    } finally {
+      set({ propagating: null });
+    }
   },
 
   flush: async () => {
