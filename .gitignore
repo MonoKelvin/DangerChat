@@ -33,3 +33,4 @@ spikes/**/models/
 
 # Projcet files
 resources/training_set/wechat_snapcaptures/
+*.tsbuildinfo
