@@ -55,10 +55,12 @@ const GROUPS: { title: string; items: [React.ReactNode, string][] }[] = [
         '上一张 / 下一张图片',
       ],
       [
-        <>
-          <Kbd>Ctrl</Kbd> + 滚轮
-        </>,
-        '缩放画布',
+        '滚轮',
+        '缩放画布（锚定光标位置）',
+      ],
+      [
+        '中键拖动',
+        '平移视图',
       ],
     ],
   },
@@ -106,10 +108,10 @@ export function ShortcutsHelp() {
               <IconKeyboard className="size-4 text-primary" />
               <h2 className="text-sm font-semibold">快捷键</h2>
             </div>
-            <div className="space-y-4">
+            <div className="space-y-5">
               {GROUPS.map((g) => (
                 <section key={g.title}>
-                  <p className="mb-2 text-[11px] font-medium tracking-widest text-muted-foreground/80 uppercase">
+                  <p className="mb-2.5 text-xs font-semibold tracking-widest text-muted-foreground uppercase">
                     {g.title}
                   </p>
                   <ul className="space-y-1.5">

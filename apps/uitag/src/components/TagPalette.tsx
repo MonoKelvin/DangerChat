@@ -21,7 +21,7 @@ export function TagPalette() {
           <button
             key={t.name}
             onClick={() => setActiveTag(t.name)}
-            title={`${t.label}　快捷键 ${i + 1}`}
+            title={`${t.label}（快捷键 ${i + 1}）`}
             className={cn(
               'flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] transition-all duration-150',
               active
@@ -40,14 +40,6 @@ export function TagPalette() {
             {n > 0 && (
               <span className="rounded bg-foreground/10 px-1 text-[11px] tabular-nums">{n}</span>
             )}
-            <kbd
-              className={cn(
-                'ml-0.5 rounded border px-1 text-[11px] leading-tight',
-                active ? 'border-foreground/20 text-muted-foreground' : 'border-transparent text-muted-foreground/50',
-              )}
-            >
-              {i + 1}
-            </kbd>
           </button>
         );
       })}

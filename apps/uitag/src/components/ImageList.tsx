@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
-import { IconCheck, IconChevronDown, IconChevronUp, IconPhoto } from '@tabler/icons-react';
+import { IconCheck, IconPhoto } from '@tabler/icons-react';
 import { useStore } from '../store';
 import { cn } from '@/lib/utils';
 
@@ -18,12 +18,6 @@ export function ImageList() {
   }, [tags]);
 
   const done = images.filter((i) => (annos[i.path]?.length ?? 0) > 0).length;
-  const idx = images.findIndex((i) => i.path === current);
-
-  const step = (d: number) => {
-    const next = idx + d;
-    if (next >= 0 && next < images.length) setCurrent(images[next].path);
-  };
 
   return (
     <aside className="flex w-64 shrink-0 flex-col border-r border-border/60 bg-sidebar">
@@ -69,7 +63,7 @@ export function ImageList() {
                   className={cn(
                     'flex w-full items-center gap-2.5 rounded-md p-1.5 text-left transition-all',
                     active
-                      ? 'bg-accent shadow-[inset_0_0_0_1px_var(--border)]'
+                      ? 'bg-accent shadow-lg shadow-black/25 ring-[inset_0_0_0_1px_var(--border)]'
                       : 'hover:bg-accent/50',
                   )}
                 >
@@ -121,29 +115,6 @@ export function ImageList() {
               );
             })}
           </div>
-        </div>
-      )}
-
-      {/* 底部：上下张导航 */}
-      {images.length > 0 && (
-        <div className="flex items-center gap-1 border-t border-border/60 p-1.5">
-          <button
-            className="flex h-7 flex-1 items-center justify-center gap-1 rounded-md text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-30"
-            onClick={() => step(-1)}
-            disabled={idx <= 0}
-          >
-            <IconChevronUp className="size-3.5" /> 上一张
-          </button>
-          <span className="text-xs tabular-nums text-muted-foreground/50">
-            {idx + 1}/{images.length}
-          </span>
-          <button
-            className="flex h-7 flex-1 items-center justify-center gap-1 rounded-md text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-30"
-            onClick={() => step(1)}
-            disabled={idx >= images.length - 1}
-          >
-            下一张 <IconChevronDown className="size-3.5" />
-          </button>
         </div>
       )}
     </aside>
