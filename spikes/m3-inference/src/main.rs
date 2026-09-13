@@ -67,7 +67,7 @@ fn main() -> ExitCode {
             let threads: usize = opt(&args, "--threads")
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(2);
-            let dtype = opt(&args, "--dtype").unwrap_or_else(|| "f32".to_string());
+            let seq: usize = opt(&args, "--seq").and_then(|v| v.parse().ok()).unwrap_or(32);
             let shape = parse_shape(&opt(&args, "--shape").unwrap_or_else(|| "1,1,28,28".into()));
             let ep = opt(&args, "--ep").unwrap_or_else(|| "both".to_string());
             let sessions: usize = opt(&args, "--sessions")
@@ -77,19 +77,19 @@ fn main() -> ExitCode {
 
             println!("模型：{model}");
             println!(
-                "输入：shape={shape:?} dtype={dtype}    轮次：{runs}    intra-op 线程：{threads}\n"
+                "图像形状覆盖：{shape:?}    令牌长度：{seq}    轮次：{runs}    intra-op 线程：{threads}\n"
             );
 
             let mut results = Vec::new();
             if ep == "cpu" || ep == "both" {
-                match bench(&model, false, runs, threads, &shape, &dtype, sessions) {
+                match bench(&model, false, runs, threads, &shape, seq, sessions) {
                     Ok(b) => results.push(b),
                     Err(e) => println!("CPU 基准失败：{e}\n"),
                 }
             }
             if ep == "dml" || ep == "both" {
                 if ep_available("directml") {
-                    match bench(&model, true, runs, threads, &shape, &dtype, sessions) {
+                    match bench(&model, true, runs, threads, &shape, seq, sessions) {
                         Ok(b) => results.push(b),
                         Err(e) => println!("DirectML 基准失败（这正是要记录的结论）：{e}\n"),
                     }
@@ -178,7 +178,7 @@ fn bench(
     runs: usize,
     threads: usize,
     shape: &[usize],
-    dtype: &str,
+    seq: usize,
     sessions: usize,
 ) -> Result<Bench, Box<dyn std::error::Error>> {
     let label = if use_dml { "DirectML" } else { "CPU" };
@@ -191,15 +191,26 @@ fn bench(
     }
     let init = *init_series.first().unwrap_or(&Duration::ZERO);
 
+    // 从模型签名推导输入（多输入模型也能跑）
+    let specs = input_specs(&session, seq, shape);
+    let desc: Vec<String> = specs
+        .iter()
+        .map(|(n, s)| match s {
+            InputSpec::Tokens(t) => format!("{n}=[1,{t}]i64"),
+            InputSpec::Image(d) => format!("{n}={d:?}f32"),
+        })
+        .collect();
+    println!("  {label} 输入：{}", desc.join(", "));
+
     // 第一次 run 含 EP 图编译/内存分配，单独计量（§2.3 模型重载 < 500ms 的目标看的是这一项）
     let warmup_start = Instant::now();
-    let checksum = run_once(&mut session, shape, dtype)?;
+    let checksum = run_once(&mut session, &specs)?;
     let warmup = warmup_start.elapsed();
 
     let mut samples = Vec::with_capacity(runs);
     for _ in 0..runs {
         let t0 = Instant::now();
-        let _ = run_once(&mut session, shape, dtype)?;
+        let _ = run_once(&mut session, &specs)?;
         samples.push(t0.elapsed());
     }
     samples.sort_unstable();
@@ -241,21 +252,86 @@ fn create_session(
     Ok(session)
 }
 
+/// 单个输入的构造规格：从模型签名推导，不再依赖 CLI 猜 dtype。
+#[derive(Debug, Clone, PartialEq)]
+enum InputSpec {
+    /// i64 令牌序列（形如 [1, seq]）：BGE 的 input_ids / attention_mask / token_type_ids
+    Tokens(usize),
+    /// f32 图像张量：YOLO / OCR det / OCR rec 的单输入
+    Image(Vec<usize>),
+}
+
+fn input_specs(session: &Session, seq: usize, image_shape: &[usize]) -> Vec<(String, InputSpec)> {
+    use ort::value::{TensorElementType, ValueType};
+    session
+        .inputs()
+        .iter()
+        .map(|outlet| {
+            let dtype = outlet.dtype();
+            let spec = match dtype {
+                ValueType::Tensor { ty, shape, .. } if ty == &TensorElementType::Int64 => {
+                    InputSpec::Tokens(seq)
+                }
+                ValueType::Tensor { shape, .. } => {
+                    // 符号维度（-1 等）是动态维度，不能当静态形状用
+                    // （i64 as usize 会把 -1 变成巨大正数，必须先判符号再取值）
+                    let raw: Vec<i64> = shape.iter().copied().collect();
+                    let all_static = !raw.is_empty() && raw.iter().all(|d| *d > 0);
+                    if all_static {
+                        InputSpec::Image(raw.iter().map(|d| *d as usize).collect())
+                    } else {
+                        InputSpec::Image(image_shape.to_vec())
+                    }
+                }
+                _ => InputSpec::Image(image_shape.to_vec()),
+            };
+            (outlet.name().to_string(), spec)
+        })
+        .collect()
+}
+
 fn run_once(
     session: &mut Session,
-    shape: &[usize],
-    dtype: &str,
+    specs: &[(String, InputSpec)],
 ) -> Result<f64, Box<dyn std::error::Error>> {
-    let len: usize = shape.iter().product();
-    let outputs = if dtype == "i64" {
-        let tensor = Tensor::from_array((shape.to_vec(), vec![0i64; len].into_boxed_slice()))?;
-        session.run(ort::inputs![tensor])?
-    } else {
-        let tensor = Tensor::from_array((shape.to_vec(), vec![0.0f32; len].into_boxed_slice()))?;
-        session.run(ort::inputs![tensor])?
-    };
+    let mut named: Vec<(std::borrow::Cow<'_, str>, ort::session::SessionInputValue<'_>)> =
+        Vec::with_capacity(specs.len());
+    for (name, spec) in specs {
+        match spec {
+            InputSpec::Tokens(seq) => {
+                // 按**语义**构造，而不是一律塞随机数：
+                //  · attention_mask → 全 1（全部有效）
+                //  · token_type_ids → 全 0（只有 2 个词表项，喂随机 id 会越界）
+                //  · input_ids → 固定可复现的伪随机 id（LCG），保证两套 EP / fp32 vs int8 输入一致
+                let mut state = 0x2545_f491u32;
+                let ids: Vec<i64> = if name.contains("mask") {
+                    vec![1i64; *seq]
+                } else if name.contains("token_type") || name.contains("type_ids") {
+                    vec![0i64; *seq]
+                } else {
+                    (0..*seq)
+                        .map(|_| {
+                            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                            (state % 20_000) as i64 + 1
+                        })
+                        .collect()
+                };
+                let value: ort::session::SessionInputValue =
+                    Tensor::from_array((vec![1usize, *seq], ids.into_boxed_slice()))?.into();
+                named.push((name.clone().into(), value));
+            }
+            InputSpec::Image(shape) => {
+                let len: usize = shape.iter().product();
+                let value: ort::session::SessionInputValue =
+                    Tensor::from_array((shape.clone(), vec![0.0f32; len].into_boxed_slice()))?
+                        .into();
+                named.push((name.clone().into(), value));
+            }
+        }
+    }
+    let outputs = session.run(named)?;
 
-    // 用输出总和当指纹：只关心「两套 EP 的数值是否一致」，不解释语义
+    // 用输出总和当指纹：只关心「两套 EP / 两种精度」的数值是否一致，不解释语义
     let (_, data) = outputs[0].try_extract_tensor::<f32>()?;
     Ok(data.iter().map(|v| *v as f64).sum())
 }
@@ -284,7 +360,7 @@ fn usage() -> ExitCode {
     eprintln!(
         "用法：\n  m3-inference info\n  m3-inference sig --model <onnx>\n  \
          m3-inference bench --model <onnx> [--runs 50] [--ep cpu|dml|both] \
-         [--shape 1,1,28,28] [--dtype f32|i64] [--threads 2]"
+         [--shape 1,1,640,640] [--seq 32] [--threads 2]"
     );
     ExitCode::from(2)
 }
