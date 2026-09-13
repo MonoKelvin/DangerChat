@@ -1,0 +1,24 @@
+[package]
+name = "redline_scan"
+description = "危信 CI 红线静态扫描：合规禁止 API 与微信数据路径零引用（AC-04）"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "redline_scan"
+path = "src/main.rs"
+
+[lib]
+name = "redline_scan"
+path = "src/lib.rs"
