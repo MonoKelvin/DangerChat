@@ -1,0 +1,700 @@
+//! `RealSys`：真实桌面的 [`SysApi`] 实现。**全仓库唯一直接调用 Win32 的代码。**
+//!
+//! 结构：
+//!
+//! ```text
+//! 调用线程                       sys-thread（消息泵）
+//! ────────                       ────────────────────
+//! RealSys::capture_region  ──►   BitBlt（无需消息循环，就地调用）
+//! RealSys::install_keyboard_hook ─► SetWindowsHookExW(WH_KEYBOARD_LL)
+//! RealSys::watch_foreground      ─► SetWinEventHook(EVENT_SYSTEM_FOREGROUND)
+//!                                  + EVENT_OBJECT_IME_*（同一线程，IME 状态修正）
+//!                                PeekMessage 泵消息 → 钩子/事件回调在 sys-thread 上执行
+//! ```
+//!
+//! 为什么必须有独立线程：`WH_KEYBOARD_LL` 的回调由系统投递到**安装钩子的那个线程**，
+//! 该线程必须持续泵消息，否则回调不会被调用（并会导致系统输入超时）。sys-thread 用
+//! `PeekMessage` + 自动重置事件唤醒，空闲时不占 CPU。
+
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
+
+use crossbeam_channel::{Receiver, Sender};
+use image::RgbaImage;
+
+use windows::core::{PCWSTR, PWSTR};
+use windows::Win32::Foundation::{
+    CloseHandle, HANDLE, HWND, LPARAM, LRESULT, RECT, SYSTEMTIME, WPARAM,
+};
+use windows::Win32::Graphics::Gdi::{
+    BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetDIBits,
+    ReleaseDC, SelectObject, BITMAPINFO, BI_RGB, DIB_RGB_COLORS, HGDIOBJ, SRCCOPY,
+};
+use windows::Win32::System::SystemInformation::{GetLocalTime, GetSystemTime};
+use windows::Win32::System::Threading::{
+    CreateEventW, OpenProcess, QueryFullProcessImageNameW, SetEvent, PROCESS_NAME_WIN32,
+    PROCESS_QUERY_LIMITED_INFORMATION,
+};
+use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
+use windows::Win32::UI::HiDpi::{
+    GetDpiForWindow, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    GetAsyncKeyState, VK_CONTROL, VK_MENU, VK_SHIFT,
+};
+use windows::Win32::UI::WindowsAndMessaging::{
+    CallNextHookEx, DispatchMessageW, GetForegroundWindow, GetWindowRect, GetWindowThreadProcessId,
+    IsIconic, MsgWaitForMultipleObjectsEx, PeekMessageW, SetWindowsHookExW, TranslateMessage,
+    UnhookWindowsHookEx, EVENT_OBJECT_IME_CHANGE, EVENT_OBJECT_IME_HIDE, EVENT_OBJECT_IME_SHOW,
+    EVENT_SYSTEM_FOREGROUND, KBDLLHOOKSTRUCT, LLKHF_INJECTED, MSG, MWMO_INPUTAVAILABLE, PM_REMOVE,
+    QS_ALLINPUT, WH_KEYBOARD_LL, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WM_KEYDOWN,
+    WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
+};
+
+use crate::api::{
+    dpi_scale_from_dpi, ForegroundCallback, ForegroundInfo, HookAction, HookGuard, Hwnd,
+    KeyCallback, KeyEvent, Rect, SysApi, SysError, WatchGuard, VK_PROCESSKEY,
+};
+
+// ---------------------------------------------------------------------------
+// 共享状态：键盘/前台回调只能经 thread-local 与原子量访问（§3.2 无锁、无重入）
+// ---------------------------------------------------------------------------
+
+thread_local! {
+    static KEY_CB: std::cell::RefCell<Option<KeyCallback>> = const { std::cell::RefCell::new(None) };
+    static FG_CB: std::cell::RefCell<Option<ForegroundCallback>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// IME 组合态：`VK_PROCESSKEY` 为主信号（最近一次消费键的单调毫秒），
+/// `EVENT_OBJECT_IME_SHOW/HIDE` 修正组合开始/结束边界（FR-SRC-09、§5.2）。
+static IME_LAST_PROCESSKEY_MS: AtomicU64 = AtomicU64::new(0);
+static IME_SHOWN: AtomicBool = AtomicBool::new(false);
+
+/// 距离最近一次「被输入法消费的键」多久仍视为组合中。
+const IME_PROCESSKEY_TTL_MS: u64 = 1_000;
+
+fn mono_ms() -> u64 {
+    static BASE: OnceLock<Instant> = OnceLock::new();
+    BASE.get_or_init(Instant::now).elapsed().as_millis() as u64
+}
+
+fn ime_composing_now() -> bool {
+    if IME_SHOWN.load(Ordering::SeqCst) {
+        return true;
+    }
+    let last = IME_LAST_PROCESSKEY_MS.load(Ordering::SeqCst);
+    last != 0 && mono_ms().saturating_sub(last) < IME_PROCESSKEY_TTL_MS
+}
+
+// ---------------------------------------------------------------------------
+// sys-thread：钩子安装与消息泵
+// ---------------------------------------------------------------------------
+
+enum SysReq {
+    InstallKeyboard(KeyCallback, Sender<Result<(), String>>),
+    UninstallKeyboard(Sender<()>),
+    WatchForeground(
+        Box<dyn Fn(ForegroundInfo) + Send>,
+        Sender<Result<(), String>>,
+    ),
+    UnwatchForeground(Sender<()>),
+    WatchIme(Sender<Result<(), String>>),
+    UnwatchIme(Sender<()>),
+    Quit(Sender<()>),
+}
+
+#[derive(Default)]
+struct ThreadState {
+    keyboard: Option<windows::Win32::UI::WindowsAndMessaging::HHOOK>,
+    foreground: Option<HWINEVENTHOOK>,
+    ime: Option<HWINEVENTHOOK>,
+}
+
+impl ThreadState {
+    fn unhook_all(&mut self) {
+        unsafe {
+            if let Some(h) = self.keyboard.take() {
+                let _ = UnhookWindowsHookEx(h);
+            }
+            if let Some(h) = self.foreground.take() {
+                let _ = UnhookWinEvent(h);
+            }
+            if let Some(h) = self.ime.take() {
+                let _ = UnhookWinEvent(h);
+            }
+        }
+    }
+}
+
+struct SysThread {
+    tx: Sender<SysReq>,
+    /// 自动重置事件句柄（以 `isize` 持有：`HANDLE` 不是 `Send`）。
+    event: isize,
+    shutdown: Arc<AtomicBool>,
+    join: Mutex<Option<std::thread::JoinHandle<()>>>,
+}
+
+impl SysThread {
+    fn spawn() -> Result<Arc<Self>, SysError> {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let event = unsafe { CreateEventW(None, false, false, PCWSTR::null()) }
+            .map_err(|e| SysError::HookInstallFailed(format!("CreateEventW: {e}")))?;
+        let event_raw = event.0 as isize;
+
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let shutdown_thread = Arc::clone(&shutdown);
+        let join = std::thread::Builder::new()
+            .name("dc-sys-hook".to_string())
+            .spawn(move || sys_thread_main(rx, event_raw, shutdown_thread))
+            .map_err(|e| SysError::HookInstallFailed(format!("spawn sys thread: {e}")))?;
+
+        Ok(Arc::new(Self {
+            tx,
+            event: event_raw,
+            shutdown,
+            join: Mutex::new(Some(join)),
+        }))
+    }
+
+    /// 投递请求并唤醒 sys-thread（事件为自动重置，仅用于唤醒，请求本体走 channel）。
+    fn request(&self, req: SysReq) {
+        if self.tx.send(req).is_err() {
+            tracing::warn!("sys thread 已退出，请求被丢弃");
+            return;
+        }
+        unsafe {
+            let _ = SetEvent(HANDLE(self.event as *mut core::ffi::c_void));
+        }
+    }
+}
+
+impl Drop for SysThread {
+    fn drop(&mut self) {
+        self.shutdown.store(true, Ordering::SeqCst);
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        self.request(SysReq::Quit(tx));
+        let _ = rx.recv_timeout(Duration::from_secs(2));
+        if let Some(join) = self.join.lock().expect("sys join poisoned").take() {
+            let _ = join.join();
+        }
+        unsafe {
+            let _ = CloseHandle(HANDLE(self.event as *mut core::ffi::c_void));
+        }
+    }
+}
+
+fn sys_thread_main(ctrl: Receiver<SysReq>, event: isize, shutdown: Arc<AtomicBool>) {
+    let mut state = ThreadState::default();
+    let mut msg = MSG::default();
+
+    while !shutdown.load(Ordering::SeqCst) {
+        // 1) 处理安装/卸载请求
+        while let Ok(req) = ctrl.try_recv() {
+            handle_request(req, &mut state);
+        }
+        // 2) 泵消息：低级键盘钩子回调与 WinEvent 回调都在这里被触发
+        unsafe {
+            while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+            // 3) 阻塞等待（输入到达即返回；事件用于安装/退出请求唤醒）
+            MsgWaitForMultipleObjectsEx(
+                Some(&[HANDLE(event as *mut core::ffi::c_void)]),
+                200,
+                QS_ALLINPUT,
+                MWMO_INPUTAVAILABLE,
+            );
+        }
+    }
+    state.unhook_all();
+}
+
+fn handle_request(req: SysReq, state: &mut ThreadState) {
+    match req {
+        SysReq::InstallKeyboard(cb, reply) => {
+            let result = install_keyboard(cb);
+            match result {
+                Ok(hook) => {
+                    state.keyboard = Some(hook);
+                    let _ = reply.send(Ok(()));
+                }
+                Err(e) => {
+                    let _ = reply.send(Err(e));
+                }
+            }
+        }
+        SysReq::UninstallKeyboard(reply) => {
+            if let Some(h) = state.keyboard.take() {
+                unsafe {
+                    let _ = UnhookWindowsHookEx(h);
+                }
+            }
+            let _ = reply.send(());
+        }
+        SysReq::WatchForeground(cb, reply) => {
+            FG_CB.with(|c| *c.borrow_mut() = Some(cb));
+            match install_win_event(
+                EVENT_SYSTEM_FOREGROUND,
+                EVENT_SYSTEM_FOREGROUND,
+                Some(foreground_proc),
+            ) {
+                Ok(hook) => {
+                    state.foreground = Some(hook);
+                    let _ = reply.send(Ok(()));
+                }
+                Err(e) => {
+                    let _ = reply.send(Err(e));
+                }
+            }
+        }
+        SysReq::UnwatchForeground(reply) => {
+            if let Some(h) = state.foreground.take() {
+                unsafe {
+                    let _ = UnhookWinEvent(h);
+                }
+            }
+            FG_CB.with(|c| *c.borrow_mut() = None);
+            let _ = reply.send(());
+        }
+        SysReq::WatchIme(reply) => {
+            // EVENT_OBJECT_IME_SHOW..CHANGE 是连续区间，一次订阅即可
+            match install_win_event(
+                EVENT_OBJECT_IME_SHOW,
+                EVENT_OBJECT_IME_CHANGE,
+                Some(ime_proc),
+            ) {
+                Ok(hook) => {
+                    state.ime = Some(hook);
+                    let _ = reply.send(Ok(()));
+                }
+                Err(e) => {
+                    let _ = reply.send(Err(e));
+                }
+            }
+        }
+        SysReq::UnwatchIme(reply) => {
+            if let Some(h) = state.ime.take() {
+                unsafe {
+                    let _ = UnhookWinEvent(h);
+                }
+            }
+            let _ = reply.send(());
+        }
+        SysReq::Quit(reply) => {
+            let _ = reply.send(());
+        }
+    }
+}
+
+fn install_keyboard(
+    cb: KeyCallback,
+) -> Result<windows::Win32::UI::WindowsAndMessaging::HHOOK, String> {
+    KEY_CB.with(|c| *c.borrow_mut() = Some(cb));
+    unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), None, 0) }
+        .map_err(|e| format!("SetWindowsHookExW(WH_KEYBOARD_LL): {e}"))
+}
+
+fn install_win_event(
+    event_min: u32,
+    event_max: u32,
+    proc: windows::Win32::UI::Accessibility::WINEVENTPROC,
+) -> Result<HWINEVENTHOOK, String> {
+    let hook = unsafe {
+        SetWinEventHook(
+            event_min,
+            event_max,
+            None,
+            proc,
+            0,
+            0,
+            WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
+        )
+    };
+    if hook.is_invalid() {
+        Err(format!("SetWinEventHook({event_min:#06X}) 失败"))
+    } else {
+        Ok(hook)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 钩子回调
+// ---------------------------------------------------------------------------
+
+unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if code < 0 {
+        return unsafe { CallNextHookEx(None, code, wparam, lparam) };
+    }
+    let msg = wparam.0 as u32;
+    let is_key_down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
+    let is_key_up = msg == WM_KEYUP || msg == WM_SYSKEYUP;
+    if !is_key_down && !is_key_up {
+        return unsafe { CallNextHookEx(None, code, wparam, lparam) };
+    }
+
+    let kb = unsafe { &*(lparam.0 as *const KBDLLHOOKSTRUCT) };
+    let vk = kb.vkCode as u16;
+
+    if vk == VK_PROCESSKEY && is_key_down {
+        // 输入法正在组合：主信号（§5.2）
+        IME_LAST_PROCESSKEY_MS.store(mono_ms(), Ordering::SeqCst);
+    }
+
+    let ev = KeyEvent {
+        vk,
+        scan_code: kb.scanCode,
+        is_key_down,
+        is_injected: kb.flags.contains(LLKHF_INJECTED),
+        ctrl: key_pressed(VK_CONTROL.0),
+        alt: key_pressed(VK_MENU.0),
+        shift: key_pressed(VK_SHIFT.0),
+    };
+
+    let action = KEY_CB.with(|c| match c.borrow().as_ref() {
+        Some(cb) => cb(&ev),
+        None => HookAction::Pass,
+    });
+
+    match action {
+        HookAction::Swallow => LRESULT(1),
+        HookAction::Pass => unsafe { CallNextHookEx(None, code, wparam, lparam) },
+    }
+}
+
+fn key_pressed(vk: u16) -> bool {
+    (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0
+}
+
+unsafe extern "system" fn foreground_proc(
+    _hook: HWINEVENTHOOK,
+    event: u32,
+    hwnd: HWND,
+    _id_object: i32,
+    _id_child: i32,
+    _thread: u32,
+    _time: u32,
+) {
+    if event != EVENT_SYSTEM_FOREGROUND {
+        return;
+    }
+    let target = Hwnd(hwnd.0 as isize);
+    let Some(info) = foreground_info(target) else {
+        return;
+    };
+    FG_CB.with(|c| {
+        if let Some(cb) = c.borrow().as_ref() {
+            cb(info);
+        }
+    });
+}
+
+unsafe extern "system" fn ime_proc(
+    _hook: HWINEVENTHOOK,
+    event: u32,
+    _hwnd: HWND,
+    _id_object: i32,
+    _id_child: i32,
+    _thread: u32,
+    _time: u32,
+) {
+    match event {
+        EVENT_OBJECT_IME_SHOW | EVENT_OBJECT_IME_CHANGE => {
+            IME_SHOWN.store(true, Ordering::SeqCst);
+        }
+        EVENT_OBJECT_IME_HIDE => {
+            IME_SHOWN.store(false, Ordering::SeqCst);
+        }
+        _ => {}
+    }
+}
+
+fn foreground_info(hwnd: Hwnd) -> Option<ForegroundInfo> {
+    if hwnd.is_null() {
+        return None;
+    }
+    let mut pid = 0u32;
+    unsafe {
+        GetWindowThreadProcessId(HWND(hwnd.0 as *mut core::ffi::c_void), Some(&mut pid));
+    }
+    if pid == 0 {
+        return None;
+    }
+    Some(ForegroundInfo {
+        hwnd,
+        pid,
+        process_name: process_name_of(pid).unwrap_or_default(),
+    })
+}
+
+fn process_name_of(pid: u32) -> Option<String> {
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+        let mut buf = [0u16; 512];
+        let mut len = buf.len() as u32;
+        let ok = QueryFullProcessImageNameW(
+            handle,
+            PROCESS_NAME_WIN32,
+            PWSTR(buf.as_mut_ptr()),
+            &mut len,
+        )
+        .is_ok();
+        let _ = CloseHandle(handle);
+        if !ok || len == 0 {
+            return None;
+        }
+        let full = String::from_utf16_lossy(&buf[..len as usize]);
+        Some(
+            Path::new(&full)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(&full)
+                .to_string(),
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RealSys
+// ---------------------------------------------------------------------------
+
+/// 真实平台实现。进程内单实例使用（内部持有 sys-thread 与位图复用缓冲）。
+pub struct RealSys {
+    thread: Mutex<Option<Arc<SysThread>>>,
+    /// 截图 DIB 缓冲，按窗口矩形尺寸分配后复用（§5.4，替代全屏双缓冲）
+    scratch: Mutex<Vec<u8>>,
+    dpi_aware: bool,
+}
+
+impl RealSys {
+    pub fn new() -> Self {
+        // 进程级 per-monitor DPI 感知：GetWindowRect 与屏幕 DC 从此同处物理像素坐标系，
+        // 避免 DPI 缩放下截图与矩形错位（FR-CAP-04）。
+        let dpi_aware = unsafe {
+            SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2).is_ok()
+        };
+        if !dpi_aware {
+            tracing::warn!("SetProcessDpiAwarenessContext 失败，DPI 缩放下截图坐标可能偏移");
+        }
+        Self {
+            thread: Mutex::new(None),
+            scratch: Mutex::new(Vec::new()),
+            dpi_aware,
+        }
+    }
+
+    /// 进程是否成功切换为 per-monitor DPI 感知。
+    pub fn is_dpi_aware(&self) -> bool {
+        self.dpi_aware
+    }
+
+    fn sys_thread(&self) -> Result<Arc<SysThread>, SysError> {
+        let mut guard = self.thread.lock().expect("real sys poisoned");
+        if let Some(t) = guard.as_ref() {
+            return Ok(Arc::clone(t));
+        }
+        let spawned = SysThread::spawn()?;
+        *guard = Some(Arc::clone(&spawned));
+        Ok(spawned)
+    }
+
+    /// 请求 + 等待回执（安装/卸载是低频动作，可同步等待；失败返回错误由上层降级）。
+    fn call(
+        &self,
+        build: impl FnOnce(Sender<Result<(), String>>) -> SysReq,
+    ) -> Result<(), SysError> {
+        let thread = self.sys_thread()?;
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        thread.request(build(tx));
+        match rx.recv_timeout(Duration::from_secs(3)) {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(msg)) => Err(SysError::HookInstallFailed(msg)),
+            Err(_) => Err(SysError::ThreadDown),
+        }
+    }
+
+    fn call_void(&self, build: impl FnOnce(Sender<()>) -> SysReq) {
+        let Ok(thread) = self.sys_thread() else {
+            return;
+        };
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        thread.request(build(tx));
+        let _ = rx.recv_timeout(Duration::from_secs(3));
+    }
+}
+
+impl Default for RealSys {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SysApi for RealSys {
+    fn foreground(&self) -> Option<ForegroundInfo> {
+        let hwnd = Hwnd(unsafe { GetForegroundWindow() }.0 as isize);
+        foreground_info(hwnd)
+    }
+
+    fn watch_foreground(&self, cb: ForegroundCallback) -> Result<WatchGuard, SysError> {
+        self.call(|reply| SysReq::WatchForeground(cb, reply))?;
+        let this = self as *const RealSys as usize;
+        Ok(WatchGuard::new(move || {
+            // 安全：RealSys 生命周期长于守卫（进程级单实例），且 call_void 只做线程通信
+            if let Some(sys) = unsafe { (this as *const RealSys).as_ref() } {
+                sys.call_void(SysReq::UnwatchForeground);
+            }
+        }))
+    }
+
+    fn window_rect(&self, hwnd: Hwnd) -> Result<(Rect, f32), SysError> {
+        if hwnd.is_null() {
+            return Err(SysError::WindowUnavailable);
+        }
+        let mut raw = RECT::default();
+        unsafe { GetWindowRect(HWND(hwnd.0 as *mut core::ffi::c_void), &mut raw) }
+            .map_err(|e| SysError::Win32(format!("GetWindowRect: {e}")))?;
+        let w = (raw.right - raw.left).max(0) as u32;
+        let h = (raw.bottom - raw.top).max(0) as u32;
+        let dpi = unsafe { GetDpiForWindow(HWND(hwnd.0 as *mut core::ffi::c_void)) };
+        // 进程已是 per-monitor DPI 感知，GetWindowRect 给出的就是物理像素，
+        // 此处不再做二次换算（§5.4 明确禁止二次缩放）。
+        Ok((Rect::new(raw.left, raw.top, w, h), dpi_scale_from_dpi(dpi)))
+    }
+
+    fn is_window_minimized(&self, hwnd: Hwnd) -> bool {
+        if hwnd.is_null() {
+            return true;
+        }
+        unsafe { IsIconic(HWND(hwnd.0 as *mut core::ffi::c_void)).as_bool() }
+    }
+
+    fn capture_region(&self, rect: Rect) -> Result<RgbaImage, SysError> {
+        if rect.is_empty() {
+            return Err(SysError::WindowUnavailable);
+        }
+        let w = rect.w as i32;
+        let h = rect.h as i32;
+        let len = (rect.w as usize) * (rect.h as usize) * 4;
+
+        let mut scratch = self.scratch.lock().expect("scratch poisoned");
+        if scratch.len() < len {
+            scratch.resize(len, 0);
+        }
+        scratch[..len].fill(0);
+
+        unsafe {
+            let screen_dc = GetDC(None);
+            if screen_dc.is_invalid() {
+                return Err(SysError::CaptureFailed("GetDC(NULL) 失败".into()));
+            }
+            let mem_dc = CreateCompatibleDC(Some(screen_dc));
+            if mem_dc.is_invalid() {
+                let _ = ReleaseDC(None, screen_dc);
+                return Err(SysError::CaptureFailed("CreateCompatibleDC 失败".into()));
+            }
+            let bitmap = CreateCompatibleBitmap(screen_dc, w, h);
+            if bitmap.is_invalid() {
+                let _ = DeleteDC(mem_dc);
+                let _ = ReleaseDC(None, screen_dc);
+                return Err(SysError::CaptureFailed(
+                    "CreateCompatibleBitmap 失败".into(),
+                ));
+            }
+            let old = SelectObject(mem_dc, HGDIOBJ(bitmap.0));
+
+            // 仅拷贝目标窗口矩形（ADR-12）：屏幕 DC 作为源，不分配全屏缓冲
+            let blit = BitBlt(mem_dc, 0, 0, w, h, Some(screen_dc), rect.x, rect.y, SRCCOPY);
+
+            let mut wrote = 0i32;
+            if blit.is_ok() {
+                let mut bmi = BITMAPINFO::default();
+                bmi.bmiHeader.biSize =
+                    std::mem::size_of::<windows::Win32::Graphics::Gdi::BITMAPINFOHEADER>() as u32;
+                bmi.bmiHeader.biWidth = w;
+                // 负高度 = top-down，行序与图像一致，省一次翻转
+                bmi.bmiHeader.biHeight = -h;
+                bmi.bmiHeader.biPlanes = 1;
+                bmi.bmiHeader.biBitCount = 32;
+                bmi.bmiHeader.biCompression = BI_RGB.0;
+                wrote = GetDIBits(
+                    mem_dc,
+                    bitmap,
+                    0,
+                    h as u32,
+                    Some(scratch.as_mut_ptr() as *mut core::ffi::c_void),
+                    &mut bmi,
+                    DIB_RGB_COLORS,
+                );
+            }
+
+            SelectObject(mem_dc, old);
+            let _ = DeleteObject(HGDIOBJ(bitmap.0));
+            let _ = DeleteDC(mem_dc);
+            let _ = ReleaseDC(None, screen_dc);
+
+            if blit.is_err() {
+                return Err(SysError::CaptureFailed(format!("BitBlt: {:?}", blit.err())));
+            }
+            if wrote == 0 {
+                return Err(SysError::CaptureFailed("GetDIBits 未写入任何行".into()));
+            }
+        }
+
+        // BGRA(DIB, 内存小端) → RGBA
+        let mut out = RgbaImage::new(rect.w, rect.h);
+        for y in 0..rect.h {
+            for x in 0..rect.w {
+                let i = ((y as usize) * (rect.w as usize) + x as usize) * 4;
+                out.put_pixel(
+                    x,
+                    y,
+                    image::Rgba([scratch[i + 2], scratch[i + 1], scratch[i], 255]),
+                );
+            }
+        }
+        Ok(out)
+    }
+
+    fn install_keyboard_hook(&self, cb: KeyCallback) -> Result<HookGuard, SysError> {
+        self.call(|reply| SysReq::InstallKeyboard(cb, reply))?;
+        let this = self as *const RealSys as usize;
+        Ok(HookGuard::new(move || {
+            if let Some(sys) = unsafe { (this as *const RealSys).as_ref() } {
+                sys.call_void(SysReq::UninstallKeyboard);
+            }
+        }))
+    }
+
+    fn ime_composing(&self) -> bool {
+        ime_composing_now()
+    }
+}
+
+impl RealSys {
+    /// 订阅 IME 组合态事件（`EVENT_OBJECT_IME_*`）。安装键盘钩子时一并调用。
+    pub fn watch_ime(&self) -> Result<(), SysError> {
+        self.call(SysReq::WatchIme)
+    }
+
+    pub fn unwatch_ime(&self) -> Result<(), SysError> {
+        self.call_void(SysReq::UnwatchIme);
+        Ok(())
+    }
+}
+
+/// 本地时区相对 UTC 的偏移（分钟，东为正）。
+///
+/// 用「本地时间 − UTC 时间」相减得到，避免依赖 `GetTimeZoneInformation` 的偏差语义；
+/// 跨 DST 切换瞬间可能有 60 分钟误差，仅用于日志文件按本地日期滚动，可接受。
+pub fn local_utc_offset_minutes() -> i32 {
+    let (utc, local) = unsafe { (GetSystemTime(), GetLocalTime()) };
+    let to_min = |s: &SYSTEMTIME| -> i64 {
+        dc_core::time::days_from_civil(s.wYear as i64, s.wMonth as u32, s.wDay as u32) * 1440
+            + s.wHour as i64 * 60
+            + s.wMinute as i64
+    };
+    (to_min(&local) - to_min(&utc)) as i32
+}
