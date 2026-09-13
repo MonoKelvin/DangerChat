@@ -343,10 +343,19 @@ impl Intercept {
             return HookAction::Pass;
         }
 
-        // 2) 输入法组合中：绝不吞键；回车=选字确认 → 纪元 +1（FR-SRC-09）
+        // 2) 输入法组合中：绝不吞键（FR-SRC-09）
+        //
+        // 组合期间草稿**同样在变**（候选词正在输入框里成形），因此必须与普通打字同等对待：
+        //   · 被输入法消费的键（`VK_PROCESSKEY`）→ 视为草稿变化：纪元 +1 并触发快环；
+        //   · 回车 = 选字确认 → 纪元 +1 并触发快环。
+        // 若组合期间不推进纪元，组合结束后那个「纪元仍然匹配」的旧判定就会对已经变了的草稿下手。
+        //
+        // 注意：组合态优先于 Cooldown 分支，因此组合期间数字键 1/2/3 会被输入法吃掉、
+        // 不会路由为弹窗动作——此时用鼠标点弹窗按钮即可（弹窗本身不夺焦点）。
         if self.sys.ime_composing() {
-            if ev.is_key_down && is_send_key(ev, self.config.send_key) {
+            if ev.is_key_down && (is_send_key(ev, self.config.send_key) || ev.is_ime_consumed()) {
                 self.tracker.bump();
+                let _ = self.triggers.offer_fast();
             }
             return HookAction::Pass;
         }

@@ -340,7 +340,7 @@ fn ut_int_06_hook_callback_latency() {
     assert!(p50 < 100_000, "p50 应远低于 1ms：{p50}ns");
 }
 
-/// UT-INT-07 IME 组合中：发送键放行且纪元 +1；非发送键放行
+/// UT-INT-07 IME 组合中：发送键放行且纪元 +1；组合中的输入同样推进纪元；非发送键放行
 #[test]
 fn ut_int_07_ime_composing_passes_and_bumps() {
     let h = Harness::new();
@@ -351,17 +351,39 @@ fn ut_int_07_ime_composing_passes_and_bumps() {
 
     h.sys.set_ime_composing(true);
 
-    // 组合中的字母（实际是 VK_PROCESSKEY，这里用普通键验证「绝不吞键」）
+    // 组合中的字母（真实键盘下输入法会把它变成 VK_PROCESSKEY）
     assert_eq!(h.press(0x49), HookAction::Pass);
     assert_eq!(
         h.intercept.tracker().epoch(),
         epoch,
-        "组合中普通键不推进纪元"
+        "既非发送键也非输入法消费键 → 不推进纪元"
     );
 
-    // 回车 = 选字确认 → 放行 + 纪元 +1（FR-SRC-09）
-    assert_eq!(h.enter(), HookAction::Pass, "组合中回车绝不吞键");
+    // 被输入法消费的键（VK_PROCESSKEY）：草稿正在变，必须推进纪元并触发快环
+    let offered_before = h.intercept.triggers().offered();
+    let consumed = dc_sys::KeyEvent {
+        vk: dc_sys::VK_PROCESSKEY,
+        scan_code: 0,
+        is_key_down: true,
+        is_injected: false,
+        ctrl: false,
+        alt: false,
+        shift: false,
+    };
+    assert_eq!(
+        h.intercept.on_key(&consumed),
+        HookAction::Pass,
+        "组合中绝不吞键"
+    );
     assert_eq!(h.intercept.tracker().epoch(), epoch + 1);
+    assert!(
+        h.intercept.triggers().offered() > offered_before,
+        "组合中的输入应触发快环重判"
+    );
+
+    // 回车 = 选字确认 → 放行 + 纪元再 +1（FR-SRC-09）
+    assert_eq!(h.enter(), HookAction::Pass, "组合中回车绝不吞键");
+    assert_eq!(h.intercept.tracker().epoch(), epoch + 2);
     assert_eq!(h.intercept.alerts().shown(), 0, "组合中不得弹窗");
 
     // 组合结束：判定纪元已落后 → 仍然 fail-open
