@@ -39,16 +39,11 @@ fn main() {
             let rounds: usize = args
                 .next()
                 .and_then(|s| s.parse().ok())
-                .unwrap_or(20)
+                .unwrap_or(30)
                 .clamp(1, 200);
-            // 第二个参数是等待物理按键的预算秒数，便于在无人值守时验证失败路径。
-            let budget_secs: u64 = args
-                .next()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(300)
-                .clamp(5, 3600);
-            full_latency(rounds, budget_secs);
+            full_latency(rounds);
         }
+        Some("ime-verify") => ime_verify(),
         Some("ime-probe") => ime_probe(),
         Some("ime-hook-probe") => {
             let secs: u64 = args
@@ -57,6 +52,14 @@ fn main() {
                 .unwrap_or(30)
                 .clamp(3, 600);
             ime_hook_probe(secs);
+        }
+        Some("hook-bench") => {
+            let events: usize = args
+                .next()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(200_000)
+                .clamp(1_000, 5_000_000);
+            hook_bench(events);
         }
         Some("hook-latency") => {
             let secs: u64 = args
@@ -70,8 +73,8 @@ fn main() {
             eprintln!("未知子命令: {other:?}");
             eprintln!(
                 "用法: m0 <window-probe|capture-probe [次数]|layout-eval|ocr-export|\
-                 e2e-latency [次数]|full-latency [次数] [等待秒数]|ime-probe|\
-                 ime-hook-probe [秒]|hook-latency [秒]>"
+                 e2e-latency [次数]|full-latency [次数]|ime-verify|ime-probe|\
+                 ime-hook-probe [秒]|hook-bench [事件数]|hook-latency [秒]>"
             );
             std::process::exit(2);
         }
@@ -349,18 +352,14 @@ fn ocr_export() {
 }
 
 #[cfg(windows)]
-fn full_latency(rounds: usize, budget_secs: u64) {
+fn full_latency(rounds: usize) {
     use m0_windows::harness::full_latency::run;
 
-    println!("=== M0-D 完整延迟：物理按键 → 提示可见 ===");
-    println!();
-    println!("测试窗口即将出现。请**点击该窗口使其成为前台**，然后按 Enter。");
-    println!("每按一次 Enter 采集一个样本，共需 {rounds} 个。");
-    println!("Enter 会被抑制（这正是产品行为）；消息不会发出，窗口只是合成界面。");
-    println!("最多等待 {budget_secs} 秒，超时后按已采集样本统计。");
+    println!("=== M0-D 完整延迟：发送键抑制 → 提示可见 ===");
+    println!("轮数 = {rounds}（自动触发，无需人工按键）");
     println!();
 
-    let timings = match run(rounds, Duration::from_secs(budget_secs)) {
+    let timings = match run(rounds) {
         Ok(t) => t,
         Err(e) => {
             eprintln!("测量失败：{e}");
@@ -414,8 +413,74 @@ fn full_latency(rounds: usize, budget_secs: u64) {
     println!("样本量 ≥ 20                   : {}", verdict(enough));
     println!();
     println!("注：目标为自有合成窗口，不代表真实微信的捕获与定位兼容性。");
+    println!("    起点为守卫判定抑制的时刻；操作系统投递按键到钩子回调的耗时");
+    println!("    由 hook-latency 单独测量（微秒量级），两者相加为完整链路。");
 
     if !(feedback_ok && total_ok && enough) {
+        std::process::exit(1);
+    }
+}
+
+#[cfg(windows)]
+fn ime_verify() {
+    use m0_windows::harness::chat_window::{self, Scene, Theme};
+    use m0_windows::harness::ime_verify::{create_ime_context, destroy_ime_context, verify};
+    use m0_windows::platform::capture::declare_dpi_awareness;
+
+    declare_dpi_awareness();
+    println!("=== M0-B 输入法判定自动验证（自有窗口，程序化构造 IMM32 状态）===");
+    println!();
+
+    let Some(hwnd) = chat_window::create_window(Scene::sample(0, Theme::Light), 900, 640) else {
+        eprintln!("无法创建测试窗口。");
+        std::process::exit(1);
+    };
+    chat_window::wait_for_repaint(hwnd, Duration::from_secs(2));
+
+    let context = match create_ime_context(hwnd) {
+        Ok(c) => c,
+        Err(e) => {
+            chat_window::destroy_window(hwnd);
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    };
+
+    let outcome = verify(hwnd);
+
+    destroy_ime_context(hwnd, context);
+    chat_window::destroy_window(hwnd);
+
+    let cases = match outcome {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("验证失败：{e}");
+            std::process::exit(1);
+        }
+    };
+
+    for case in &cases {
+        println!(
+            "  [{}] {:<26} 判定={:?}  让给输入法={}",
+            if case.passed { "PASS" } else { "FAIL" },
+            case.label,
+            case.observed,
+            if case.defers { "是" } else { "否" }
+        );
+        if let Some(note) = &case.note {
+            println!("         └ {note}");
+        }
+    }
+
+    let all_ok = cases.iter().all(|c| c.passed);
+    println!();
+    println!("门槛 组合/候选态不得误吞发送键 : {}", verdict(all_ok));
+    println!();
+    println!("注：覆盖 IMM32 路径。若某输入法走 TSF 且不更新 IMM32 组合串，");
+    println!("    探测会返回 Unknown，而 Unknown 已映射为透传，属安全侧失败。");
+    println!("    真实输入法的候选差异建议用 ime-hook-probe 人工抽查。");
+
+    if !all_ok {
         std::process::exit(1);
     }
 }
@@ -497,6 +562,87 @@ fn ime_hook_probe(secs: u64) {
     let suppressed = shared.metrics.events_suppressed.load(Ordering::Relaxed);
     println!("抑制事件 = {suppressed}（未 arm 目标时必须为 0）");
     if suppressed != 0 {
+        std::process::exit(1);
+    }
+}
+
+#[cfg(windows)]
+fn hook_bench(count: usize) {
+    use m0_windows::domain::guard::{KeyAction, KeyEvent};
+    use m0_windows::domain::keys::{PhysicalKey, Shortcut, VK_RETURN};
+    use m0_windows::platform::clock::MonotonicClock;
+    use m0_windows::platform::hook::benchmark_callback;
+
+    println!("=== M0-A 回调处理耗时基准（合成事件，无输入注入）===");
+    println!("事件数 = {count}");
+    println!();
+
+    // 混合事件流：字母、修饰键与发送键，覆盖透传与抑制两条路径。
+    let letters: Vec<PhysicalKey> = (0x41u16..=0x5A)
+        .map(|vk| PhysicalKey::new(vk, vk - 0x41 + 0x1E, false))
+        .collect();
+    let enter = PhysicalKey::new(VK_RETURN, 0x1C, false);
+
+    let mut events = Vec::with_capacity(count);
+    for i in 0..count {
+        // 每 16 个事件插入一次发送键，其余为普通输入。
+        let key = if i % 16 == 15 {
+            enter
+        } else {
+            letters[i % letters.len()]
+        };
+        events.push(KeyEvent {
+            key,
+            action: if i % 2 == 0 {
+                KeyAction::Down { repeat: false }
+            } else {
+                KeyAction::Up
+            },
+            injected: false,
+        });
+    }
+
+    let clock = MonotonicClock::new();
+    let samples = benchmark_callback(Shortcut::Enter, &events, &clock);
+    if samples.is_empty() {
+        eprintln!("没有采集到样本。");
+        std::process::exit(1);
+    }
+
+    let pct = |p: f64| -> u32 {
+        let idx = ((samples.len() as f64 - 1.0) * p).round() as usize;
+        samples[idx]
+    };
+    let total: u64 = samples.iter().map(|v| *v as u64).sum();
+    let us = |n: u32| n as f64 / 1000.0;
+
+    println!("样本数            = {}", samples.len());
+    println!(
+        "平均              = {:.3} µs",
+        total as f64 / samples.len() as f64 / 1000.0
+    );
+    println!("p50               = {:.3} µs", us(pct(0.50)));
+    println!("p95               = {:.3} µs", us(pct(0.95)));
+    println!("p99               = {:.3} µs", us(pct(0.99)));
+    println!(
+        "最大              = {:.3} µs",
+        us(samples[samples.len() - 1])
+    );
+    println!();
+
+    let p99_ok = pct(0.99) as u64 <= 250_000;
+    let max_ok = samples[samples.len() - 1] as u64 <= 2_000_000;
+
+    println!("门槛 p99 ≤ 0.25 ms       : {}", verdict(p99_ok));
+    println!("门槛 单次最大 ≤ 2 ms     : {}", verdict(max_ok));
+    println!();
+    println!("注：测的是回调核心（判定 + 计数 + 采样），与真实回调共用同一段代码。");
+    println!("    QPC 分辨率为 100 ns，单次调用快于该精度，故 p50 显示 0 µs——");
+    println!("    这表示「低于计时器可分辨的下限」，不是真的零耗时。");
+    println!("    门槛判定看 p99 与最大值，二者远高于分辨率，结论不受影响。");
+    println!("    不含操作系统投递按键到回调的传输耗时；该段可用 hook-latency 交叉验证。");
+
+    if !(p99_ok && max_ok) {
         std::process::exit(1);
     }
 }

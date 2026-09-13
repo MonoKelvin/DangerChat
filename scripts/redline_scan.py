@@ -34,6 +34,13 @@ SPIKE_ROOTS = ["spikes"]
 
 SOURCE_SUFFIXES = {".rs", ".py", ".ts", ".tsx", ".js", ".jsx", ".toml", ".json"}
 
+# 扫描器自身的测试必须包含违规样本才能验证「能捕获违规」，
+# 因此排除该文件。排除项按精确相对路径列出，不使用通配，
+# 避免无意中把真实源码排除在合规检查之外。
+EXCLUDED_PATHS = {
+    Path("python/dc_worker/tests/test_redline_scan.py"),
+}
+
 SKIP_DIRS = {
     "target",
     "node_modules",
@@ -69,17 +76,29 @@ RULES: list[tuple[str, str, str]] = [
 # `PostThreadMessage` 只面向本进程自己的线程，不是外部窗口，明确允许。
 ALLOWED_SELF_DIRECTED = re.compile(r"\bPostThreadMessage[AW]?\b")
 
-COMMENT_PREFIXES = ("//", "#", "///", "//!", "*")
+# 整行注释前缀。只在行首出现才算注释，行内出现不跳过整行。
+# 不含 `*`：Rust 的解引用与裸指针类型（`*mut T`）同样以 `*` 开头，
+# 把它当注释会让 `*mut SendInput_fn` 这类真实代码逃过扫描。
+COMMENT_PREFIXES = ("///", "//!", "//", "#")
+
+# 块注释续行（` * ...`）必须与解引用区分：注释续行的 `*` 后面是空格或行尾。
+BLOCK_COMMENT_CONTINUATION = re.compile(r"^\*(\s|$)")
 
 
 def is_reference_only(line: str) -> bool:
-    """注释、文档字符串与扫描规则自身不算违规。"""
+    """是否为整行注释。
+
+    只跳过确定不含可执行代码的行。此前的实现把任何含 `\"\"\"` 的行、
+    以 `r\"` 开头的行以及所有 `*` 开头的行都视为注释，
+    导致 `s = \"\"\"doc\"\"\"; SendInput(evt)` 这类写法可以绕过扫描。
+    合规扫描宁可多报也不能漏报，因此这里只认行首注释标记。
+    """
     stripped = line.strip()
+    if not stripped:
+        return True
     if stripped.startswith(COMMENT_PREFIXES):
         return True
-    if '"""' in stripped or stripped.startswith('r"'):
-        return True
-    return False
+    return bool(BLOCK_COMMENT_CONTINUATION.match(stripped))
 
 
 def iter_sources(roots: list[str]):
@@ -91,6 +110,8 @@ def iter_sources(roots: list[str]):
             if not path.is_file() or path.suffix not in SOURCE_SUFFIXES:
                 continue
             if any(part in SKIP_DIRS for part in path.parts):
+                continue
+            if path.relative_to(REPO_ROOT) in EXCLUDED_PATHS:
                 continue
             yield path
 
