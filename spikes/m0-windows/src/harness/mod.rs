@@ -3,6 +3,7 @@
 pub mod chat_window;
 pub mod e2e_latency;
 pub mod full_latency;
+pub mod ime_verify;
 pub mod layout_eval;
 pub mod notice_window;
 pub mod ocr_export;

@@ -87,11 +87,6 @@ pub struct HookShared {
     pub metrics: HookMetrics,
     pub thread_id: AtomicU32,
     pub installed: AtomicBool,
-    /// 最近一次事务开始时，回调观测到的 QPC 纳秒时间戳。
-    ///
-    /// 这是 M0-D「物理按键到提示可见」的 t0。回调内只做一次原子写，
-    /// 不分配、不加锁，符合快路径约束。
-    pub last_transaction_nanos: AtomicU64,
     commands: Mutex<Vec<GuardCommand>>,
     /// 钩子线程向协调侧回传的最近一次请求。
     last_request: Mutex<Option<GuardRequest>>,
@@ -105,7 +100,6 @@ impl HookShared {
             metrics: HookMetrics::default(),
             thread_id: AtomicU32::new(0),
             installed: AtomicBool::new(false),
-            last_transaction_nanos: AtomicU64::new(0),
             commands: Mutex::new(Vec::with_capacity(64)),
             last_request: Mutex::new(None),
             latency: Mutex::new(Vec::with_capacity(LATENCY_SAMPLES)),
@@ -276,6 +270,87 @@ fn apply_command(guard: &mut GuardCore, command: GuardCommand, now: u64) {
     }
 }
 
+/// 回调的可测量核心：判定 + 计数 + 延迟采样。
+///
+/// 抽成独立函数是为了让基准测试驱动与真实回调执行**同一段代码**，
+/// 而不是另写一份近似实现去测一个不存在的路径。
+fn process_event(state: &mut HookThreadState, event: KeyEvent, started: u64) -> bool {
+    let decision = state.guard.on_keyboard_event(event, started);
+
+    let metrics = &state.shared.metrics;
+    metrics.events_seen.fetch_add(1, Ordering::Relaxed);
+    match decision {
+        Decision::Pass => {
+            metrics.events_passed.fetch_add(1, Ordering::Relaxed);
+        }
+        Decision::Suppress => {
+            metrics.events_suppressed.fetch_add(1, Ordering::Relaxed);
+        }
+        Decision::ConsumePermit => {
+            metrics.events_passed.fetch_add(1, Ordering::Relaxed);
+            metrics.permits_consumed.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    if let Some(request) = state.guard.take_request() {
+        match request {
+            GuardRequest::StartTransaction { .. } => {
+                metrics.transactions_started.fetch_add(1, Ordering::Relaxed);
+            }
+            GuardRequest::RecheckRequired { .. } => {
+                metrics.rechecks_required.fetch_add(1, Ordering::Relaxed);
+            }
+            _ => {}
+        }
+        if let Ok(mut slot) = state.shared.last_request.try_lock() {
+            *slot = Some(request);
+        }
+    }
+
+    let elapsed = state.clock.now_nanos().saturating_sub(started);
+    metrics.record_callback(elapsed);
+    if state.latency.len() < state.latency.capacity() {
+        state.latency.push(elapsed.min(u32::MAX as u64) as u32);
+    }
+
+    matches!(decision, Decision::Suppress)
+}
+
+/// 在不安装系统钩子的前提下，测量回调核心的处理耗时。
+///
+/// 用途：`docs/01` §15 的 p99 ≤ 0.25 ms 与单次最大 ≤ 2 ms 两项门槛。
+/// 这里不调用 `SendInput` 等任何输入合成 API——事件直接构造后送入
+/// 与真实回调相同的 `process_event`，因此源码中不存在输入注入接口。
+///
+/// 未计入的部分：操作系统把按键投递到回调的传输耗时，以及
+/// 读取 `KBDLLHOOKSTRUCT` 的几条字段访问。前者不属于本进程可控范围，
+/// 后者是常量时间的结构体字段读取。报告中据实标注。
+pub fn benchmark_callback(
+    shortcut: Shortcut,
+    events: &[KeyEvent],
+    clock: &MonotonicClock,
+) -> Vec<u32> {
+    let mut latency = Vec::new();
+    latency.reserve_exact(events.len());
+
+    let shared = HookShared::new();
+    let mut state = HookThreadState {
+        guard: GuardCore::new(shortcut, 1),
+        clock: *clock,
+        shared,
+        latency,
+    };
+
+    for event in events {
+        let started = state.clock.now_nanos();
+        process_event(&mut state, *event, started);
+    }
+
+    let mut samples = state.latency;
+    samples.sort_unstable();
+    samples
+}
+
 /// 低级键盘钩子回调。必须常量时间返回。
 unsafe extern "system" fn low_level_keyboard_proc(
     ncode: i32,
@@ -317,50 +392,7 @@ unsafe extern "system" fn low_level_keyboard_proc(
             injected: info.flags.0 & LLKHF_INJECTED.0 != 0,
         };
 
-        let decision = state.guard.on_keyboard_event(event, started);
-
-        let metrics = &state.shared.metrics;
-        metrics.events_seen.fetch_add(1, Ordering::Relaxed);
-        match decision {
-            Decision::Pass => {
-                metrics.events_passed.fetch_add(1, Ordering::Relaxed);
-            }
-            Decision::Suppress => {
-                metrics.events_suppressed.fetch_add(1, Ordering::Relaxed);
-            }
-            Decision::ConsumePermit => {
-                metrics.events_passed.fetch_add(1, Ordering::Relaxed);
-                metrics.permits_consumed.fetch_add(1, Ordering::Relaxed);
-            }
-        }
-
-        if let Some(request) = state.guard.take_request() {
-            match request {
-                GuardRequest::StartTransaction { .. } => {
-                    metrics.transactions_started.fetch_add(1, Ordering::Relaxed);
-                    // 记录物理按键时刻：M0-D 完整延迟以此为 t0。
-                    state
-                        .shared
-                        .last_transaction_nanos
-                        .store(started, Ordering::Release);
-                }
-                GuardRequest::RecheckRequired { .. } => {
-                    metrics.rechecks_required.fetch_add(1, Ordering::Relaxed);
-                }
-                _ => {}
-            }
-            if let Ok(mut slot) = state.shared.last_request.try_lock() {
-                *slot = Some(request);
-            }
-        }
-
-        let elapsed = state.clock.now_nanos().saturating_sub(started);
-        metrics.record_callback(elapsed);
-        if state.latency.len() < state.latency.capacity() {
-            state.latency.push(elapsed.min(u32::MAX as u64) as u32);
-        }
-
-        matches!(decision, Decision::Suppress)
+        process_event(state, event, started)
     });
 
     if suppress {
