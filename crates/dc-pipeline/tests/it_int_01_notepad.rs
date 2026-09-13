@@ -27,13 +27,16 @@
 //!
 //! ## 人工检查清单（mode=block，请逐项核对）
 //!
-//! | 操作 | 期望 |
-//! |---|---|
-//! | 聚焦记事本，敲几个字后按**回车** | `[tick]` 行「吞掉」+1；**记事本里不换行** |
-//! | 弹窗存续期按 **1** | 出现 `[弹窗动作] Allow`；随后按回车 → 记事本**换行**（allow-once 放行一次） |
-//! | 按 **2 / 3 / 0** | 分别打印 `Cancel / Edit / Snooze`；数字**不会**进入记事本 |
-//! | 切到浏览器/IDE 后按回车 | 一律放行（`state=suspended`） |
-//! | 输入法（拼音）打字后按回车选字 | **绝不吞键**（吞掉计数不增加） |
+//! | # | 操作 | 期望 |
+//! |---|---|---|
+//! | 1 | 聚焦记事本，敲几个字后按**回车** | `[tick]`「吞掉」+1；**记事本里不换行** |
+//! | 2 | 弹窗存续期按 **1** | 出现 `[弹窗动作] Allow`；随后按回车 → 记事本**换行**（allow-once 放行一次） |
+//! | 3 | 弹窗存续期按 **2** / **3** / **0** | 分别打印 `Cancel / Edit / Snooze`；数字**不会**进入记事本 |
+//! | 4 | 切到浏览器/IDE 后按回车，再切回记事本 | `state=suspended` 期间一律放行；切回即时 `active` |
+//! | 5 | 用拼音打字（`输入法键` 持续增长），组合中按回车选字 | `吞掉` **不增加**；`输入法键` 增长；记事本正常出字 |
+//! | 6 | 打字后静置 > 2s（判定 TTL）再按回车 | `吞掉` 不增加（判定过期 → fail-open 放行） |
+//!
+//! 第 6 项对应 §2.1 原则 2「宁漏勿阻」：判定过时宁可放行，也不吞一个可能安全的按键。
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -69,9 +72,15 @@ fn it_int_01_notepad_interception() {
 
     // 观察者注册在 intercept **之后**：只有被放行的键才会到达这里（见文件头「观测原理」）
     let observed = Arc::new(AtomicU64::new(0));
+    let ime_keys = Arc::new(AtomicU64::new(0));
     let counter = Arc::clone(&observed);
+    let ime_counter = Arc::clone(&ime_keys);
     let observer: KeyCallback = Box::new(move |ev: &dc_sys::KeyEvent| {
         counter.fetch_add(1, Ordering::SeqCst);
+        if ev.vk == dc_sys::VK_PROCESSKEY && ev.is_key_down {
+            // 被输入法消费的键：能到达观察者，说明组合期间确实没有被吞（FR-SRC-09）
+            ime_counter.fetch_add(1, Ordering::SeqCst);
+        }
         if trace {
             println!("    [放行] vk={:#04X} down={}", ev.vk, ev.is_key_down);
         }
@@ -154,10 +163,11 @@ fn it_int_01_notepad_interception() {
             let total = intercept.metrics().invocations;
             let passed = observed.load(Ordering::SeqCst);
             println!(
-                "  [tick] state={:?} epoch={} 按键={total} 放行={passed} 吞掉={} ime_composing={}",
+                "  [tick] state={:?} epoch={} 按键={total} 放行={passed} 吞掉={} 输入法键={} ime_composing={}",
                 state,
                 intercept.tracker().epoch(),
                 total.saturating_sub(passed),
+                ime_keys.load(Ordering::SeqCst),
                 sys.ime_composing()
             );
         }
