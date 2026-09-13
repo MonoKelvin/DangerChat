@@ -31,6 +31,11 @@ impl ImeState {
     pub fn should_defer_to_ime(self) -> bool {
         !matches!(self, ImeState::NotComposing)
     }
+
+    /// 发布给 Hook 领域状态的保守布尔快照。
+    pub fn hook_composing(self) -> bool {
+        self.should_defer_to_ime()
+    }
 }
 
 /// 探测当前前台窗口的输入法组合状态。
@@ -95,5 +100,12 @@ mod tests {
     #[test]
     fn not_composing_allows_send_key_handling() {
         assert!(!ImeState::NotComposing.should_defer_to_ime());
+    }
+
+    #[test]
+    fn hook_snapshot_is_conservative() {
+        assert!(!ImeState::NotComposing.hook_composing());
+        assert!(ImeState::Composing.hook_composing());
+        assert!(ImeState::Unknown.hook_composing());
     }
 }

@@ -16,7 +16,7 @@ use crate::harness::chat_window::{self, Scene, Theme};
 use crate::platform::capture::{capture_window_region, declare_dpi_awareness};
 use crate::platform::clock::MonotonicClock;
 use crate::platform::layout::{self, LayoutResult};
-use crate::platform::window::foreground_snapshot;
+use crate::platform::window::snapshot_window;
 
 /// 单个场景的评测结果。
 #[derive(Debug, Clone)]
@@ -51,6 +51,8 @@ impl CaseResult {
 pub enum EvalError {
     WindowCreation,
     NotForeground,
+    /// 超时未观察到目标场景的绘制完成，本次捕获无效。
+    NotRendered,
     Capture(String),
     Layout(String),
 }
@@ -95,11 +97,14 @@ fn evaluate_window(
     theme: Theme,
     clock: &MonotonicClock,
 ) -> Result<CaseResult, EvalError> {
-    pump_messages(Duration::from_millis(220));
+    // 必须确认场景已真正绘制并呈现，否则屏幕级捕获会读到半成品帧。
+    if !chat_window::wait_for_repaint(hwnd, Duration::from_secs(2)) {
+        return Err(EvalError::NotRendered);
+    }
 
-    let snapshot = foreground_snapshot().ok_or(EvalError::NotForeground)?;
-    if snapshot.instance.root_hwnd != hwnd.0 as u64 {
-        return Err(EvalError::NotForeground);
+    let snapshot = snapshot_window(hwnd).ok_or(EvalError::WindowCreation)?;
+    if snapshot.instance.root_hwnd != hwnd.0 as u64 || !snapshot.visible || snapshot.minimized {
+        return Err(EvalError::WindowCreation);
     }
 
     let frame = capture_window_region(snapshot.instance.root_hwnd, snapshot.client, clock)
@@ -163,8 +168,8 @@ pub fn run_matrix() -> Vec<Result<CaseResult, EvalError>> {
                 results.push(Err(EvalError::WindowCreation));
                 continue;
             };
-            // 让窗口完成首次绘制并成为前台。
-            pump_messages(Duration::from_millis(320));
+            // 等待窗口映射到屏幕；实际绘制完成由 evaluate_window 显式确认。
+            pump_messages(Duration::from_millis(120));
             results.push(evaluate_window(hwnd, &label, theme, &clock));
             chat_window::destroy_window(hwnd);
             pump_messages(Duration::from_millis(120));

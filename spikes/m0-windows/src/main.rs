@@ -36,6 +36,14 @@ fn main() {
             e2e_latency(rounds);
         }
         Some("ime-probe") => ime_probe(),
+        Some("ime-hook-probe") => {
+            let secs: u64 = args
+                .next()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(30)
+                .clamp(3, 600);
+            ime_hook_probe(secs);
+        }
         Some("hook-latency") => {
             let secs: u64 = args
                 .next()
@@ -47,7 +55,8 @@ fn main() {
         other => {
             eprintln!("未知子命令: {other:?}");
             eprintln!(
-                "用法: m0 <window-probe|capture-probe [次数]|layout-eval|ime-probe|hook-latency [秒]>"
+                "用法: m0 <window-probe|capture-probe [次数]|layout-eval|ocr-export|\
+                 e2e-latency [次数]|ime-probe|ime-hook-probe [秒]|hook-latency [秒]>"
             );
             std::process::exit(2);
         }
@@ -256,7 +265,7 @@ fn layout_eval() {
 fn e2e_latency(rounds: usize) {
     use m0_windows::harness::e2e_latency::run;
 
-    println!("=== M0-D 端到端延迟（自有测试窗口 + 保活 OCR 子进程）===");
+    println!("=== M0-D 合成分析链延迟（自有测试窗口 + 保活 OCR 子进程）===");
     println!("轮数 = {rounds}（前 5 轮为预热，不计入统计）");
     println!();
 
@@ -289,13 +298,16 @@ fn e2e_latency(rounds: usize) {
     println!("p50           = {:.1} ms", pct(0.50) as f64 / 1e6);
     println!("p95           = {:.1} ms", pct(0.95) as f64 / 1e6);
     println!("p99           = {:.1} ms", pct(0.99) as f64 / 1e6);
-    println!("最大          = {:.1} ms", sorted[sorted.len() - 1] as f64 / 1e6);
+    println!(
+        "最大          = {:.1} ms",
+        sorted[sorted.len() - 1] as f64 / 1e6
+    );
     println!();
 
     let p95_ok = pct(0.95) <= 800_000_000;
     println!("门槛 分析链 p95 ≤ 800 ms : {}", verdict(p95_ok));
-    println!("注：不含 UI 提示渲染（尖峰阶段无 UI，M1 接入后复核）；");
-    println!("    按键抑制回调耗时由 M0-A 单独测量（微秒级）。");
+    println!("注：不含物理按键、协调排队与 UI 渲染，不能据此判定 M0-D 通过。");
+    println!("    物理按键到提示可见及 100 ms 反馈仍须在 M0 阶段实测。");
     if !p95_ok {
         std::process::exit(1);
     }
@@ -353,6 +365,56 @@ fn ime_probe() {
 }
 
 #[cfg(windows)]
+fn ime_hook_probe(secs: u64) {
+    use m0_windows::domain::keys::Shortcut;
+    use m0_windows::platform::hook::{run_hook_thread, GuardCommand, HookShared};
+    use m0_windows::platform::ime::{probe_foreground, ImeState};
+
+    let shared = HookShared::new();
+    let worker = {
+        let shared = Arc::clone(&shared);
+        std::thread::Builder::new()
+            .name("dc-hook".into())
+            .spawn(move || run_hook_thread(shared, Shortcut::CtrlEnter, 1))
+            .expect("无法创建钩子线程")
+    };
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !shared.installed.load(Ordering::Acquire) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    if !shared.installed.load(Ordering::Acquire) {
+        eprintln!("钩子安装失败。");
+        std::process::exit(1);
+    }
+
+    println!("=== M0-B IME → Hook 状态发布观察（{secs} 秒）===");
+    println!("协调线程每 100 ms 查询前台 IME；Hook 回调只读取已发布的布尔状态。");
+    println!("本命令不 arm 目标，所有按键都应透传。请切换输入法并观察状态迁移。");
+
+    let until = Instant::now() + Duration::from_secs(secs);
+    let mut previous: Option<ImeState> = None;
+    while Instant::now() < until {
+        let state = probe_foreground();
+        if previous != Some(state) {
+            let composing = state.hook_composing();
+            shared.send(GuardCommand::SetImeComposing(composing));
+            println!("  {state:?} → hook ime_composing={composing}");
+            previous = Some(state);
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    shared.request_stop();
+    let _ = worker.join();
+    let suppressed = shared.metrics.events_suppressed.load(Ordering::Relaxed);
+    println!("抑制事件 = {suppressed}（未 arm 目标时必须为 0）");
+    if suppressed != 0 {
+        std::process::exit(1);
+    }
+}
+
+#[cfg(windows)]
 fn hook_latency(secs: u64) {
     use m0_windows::domain::keys::Shortcut;
     use m0_windows::platform::hook::{run_hook_thread, HookShared};
@@ -397,8 +459,8 @@ fn hook_latency(secs: u64) {
     println!("抑制              = {suppressed}  (未 arm 目标时必须为 0)");
 
     if samples.is_empty() {
-        println!("没有采集到延迟样本。");
-        return;
+        eprintln!("没有采集到延迟样本，M0-A 门槛未验证。");
+        std::process::exit(1);
     }
 
     let pct = |p: f64| -> u32 {

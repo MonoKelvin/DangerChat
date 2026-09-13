@@ -41,12 +41,22 @@ impl ForegroundSnapshot {
 
 /// 读取当前前台窗口快照。没有前台窗口时返回 `None`。
 pub fn foreground_snapshot() -> Option<ForegroundSnapshot> {
-    // SAFETY: 以下全部是只读窗口管理调用，参数为我们自己的栈变量或系统返回的 HWND。
+    // SAFETY: GetForegroundWindow 无参数、只读。
+    let hwnd = unsafe { GetForegroundWindow() };
+    snapshot_window(hwnd)
+}
+
+/// 读取指定窗口的快照。
+///
+/// 该函数只查询操作系统窗口元数据。测试设施用它绑定自己创建的窗口，避免终端或
+/// 测试运行器抢占前台焦点后误捕获其他窗口。
+pub fn snapshot_window(hwnd: HWND) -> Option<ForegroundSnapshot> {
+    if hwnd.is_invalid() {
+        return None;
+    }
+
+    // SAFETY: 以下全部是只读窗口管理调用，参数为调用方提供的 HWND 与本地栈变量。
     unsafe {
-        let hwnd = GetForegroundWindow();
-        if hwnd.is_invalid() {
-            return None;
-        }
         let root = GetAncestor(hwnd, GA_ROOTOWNER);
         let root = if root.is_invalid() { hwnd } else { root };
 
