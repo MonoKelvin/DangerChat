@@ -6,6 +6,7 @@ members = [
     "crates/dc-pipeline",
     "spikes/m3-inference",
     "tools/redline_scan",
+    "apps/uitag/src-tauri",
 ]
 
 [workspace.package]
