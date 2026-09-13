@@ -224,6 +224,9 @@ function App() {
           <ToolButton icon={<IconZoomIn className="size-3.5" />} label="放大" onClick={() => setZoom(Math.min(5, zoom * 1.2))} />
           <ToolButton icon={<IconMaximize className="size-3.5" />} label="适应窗口" onClick={requestFit} />
 
+          <Separator orientation="vertical" className="mx-1.5 !h-5" />
+          <ShortcutsHelp />
+
           <div className="flex-1" />
 
           {dirty && (
@@ -265,9 +268,6 @@ function App() {
             <IconFileZip className="size-3.5" />
             导出
           </Button>
-
-          <div className="mx-1 h-5 w-px bg-border" />
-          <ShortcutsHelp />
 
           {/* 窗口控制：最小化 / 最大化 / 关闭（紧贴右上角） */}
           <WindowControls />

@@ -82,6 +82,12 @@ def main() -> int:
     ap.add_argument("--epochs", type=int, default=EPOCHS)
     args = ap.parse_args()
 
+    import torch
+
+    # Windows + torch CPU：默认 8 线程在本机（11800H）多 epoch 训练时段错误
+    # （crash 点随机在 batch 边界，非代码路径问题）；限 2 线程训练更稳且小数据集无速度损失
+    torch.set_num_threads(2)
+
     from ultralytics import YOLO
 
     work = Path(tempfile.mkdtemp(prefix="uitag-train-"))
@@ -95,6 +101,9 @@ def main() -> int:
         patience=PATIENCE,
         imgsz=640,
         seed=42,
+        # batch=4：默认 auto(16) 在低提交内存机器上训练段错误（实测 11800H/16GB
+        # + 页面文件 12G 时 batch 边界随机崩溃）；4 对 59 张小数据集足够稳定
+        batch=4,
         # —— 增广禁用（UI 截图语义）——
         hsv_h=0.0, hsv_s=0.0, hsv_v=0.0,
         degrees=0.0, translate=0.05, scale=0.1, shear=0.0,

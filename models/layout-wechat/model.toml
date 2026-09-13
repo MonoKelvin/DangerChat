@@ -1,0 +1,6 @@
+kind = "layout"
+file = "layout-wechat.onnx"
+version = "yolo11n-wechat-34"
+input_size = 640
+classes = ["chat_list", "chat_window", "chat_target", "msg_input"]
+note = "34/73 张标注训练（OOM 前 mAP50≈0.80）；增广禁用；batch=4"

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { IconLoader2, IconPhotoOff, IconSquareDashed } from '@tabler/icons-react';
 import { useStore, type Handle } from '../store';
@@ -253,12 +253,76 @@ export function AnnoCanvas() {
     return () => window.removeEventListener('keydown', onKey);
   }, [store]);
 
-  const onWheel = useCallback((e: React.WheelEvent) => {
-    if (!e.ctrlKey) return;
-    const s = useStore.getState();
-    const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
-    s.setZoom(Math.min(5, Math.max(0.1, s.zoom * factor)));
+  // 滚轮缩放：锚定光标下的图像点；中键拖动平移。React onWheel 是 passive，
+  // 必须手动挂 non-passive 监听才能 preventDefault。
+  const zoomAnchor = useRef<{ clientX: number; clientY: number; imgX: number; imgY: number } | null>(null);
+  const pan = useRef<{ lastX: number; lastY: number } | null>(null);
+
+  useEffect(() => {
+    const vp = viewportRef.current;
+    if (!vp) return;
+
+    const onWheel = (e: WheelEvent) => {
+      const svg = svgRef.current;
+      if (!svg) return;
+      e.preventDefault();
+      const s = useStore.getState();
+      const factor = Math.min(1.3, Math.max(1 / 1.3, Math.exp(-e.deltaY * 0.0016)));
+      const next = Math.min(5, Math.max(0.1, s.zoom * factor));
+      if (next === s.zoom) return;
+      const r = svg.getBoundingClientRect();
+      zoomAnchor.current = {
+        clientX: e.clientX,
+        clientY: e.clientY,
+        imgX: (e.clientX - r.left) / s.zoom,
+        imgY: (e.clientY - r.top) / s.zoom,
+      };
+      s.setZoom(next);
+    };
+
+    const onAuxClick = (e: MouseEvent) => {
+      if (e.button === 1) e.preventDefault(); // 阻止中键自动滚动
+    };
+
+    vp.addEventListener('wheel', onWheel, { passive: false });
+    vp.addEventListener('auxclick', onAuxClick);
+    return () => {
+      vp.removeEventListener('wheel', onWheel);
+      vp.removeEventListener('auxclick', onAuxClick);
+    };
   }, []);
+
+  // 缩放后校正滚动，让光标下的图像点保持在原地
+  useLayoutEffect(() => {
+    const a = zoomAnchor.current;
+    const svg = svgRef.current;
+    const vp = viewportRef.current;
+    if (!a || !svg || !vp) return;
+    zoomAnchor.current = null;
+    const r = svg.getBoundingClientRect();
+    const k = useStore.getState().zoom;
+    vp.scrollLeft += r.left + a.imgX * k - a.clientX;
+    vp.scrollTop += r.top + a.imgY * k - a.clientY;
+  }, [zoom]);
+
+  const onViewportPointerDown = (e: React.PointerEvent) => {
+    if (e.button !== 1) return;
+    e.preventDefault();
+    pan.current = { lastX: e.clientX, lastY: e.clientY };
+    (e.currentTarget as Element).setPointerCapture(e.pointerId);
+  };
+
+  const onViewportPointerMove = (e: React.PointerEvent) => {
+    if (!pan.current || !viewportRef.current) return;
+    const vp = viewportRef.current;
+    vp.scrollLeft -= e.clientX - pan.current.lastX;
+    vp.scrollTop -= e.clientY - pan.current.lastY;
+    pan.current = { lastX: e.clientX, lastY: e.clientY };
+  };
+
+  const onViewportPointerUp = () => {
+    pan.current = null;
+  };
 
   const empty = (icon: React.ReactNode, title: string, hint?: string) => (
     <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
@@ -284,7 +348,10 @@ export function AnnoCanvas() {
           'linear-gradient(var(--canvas-grid) 1px, transparent 1px), linear-gradient(90deg, var(--canvas-grid) 1px, transparent 1px)',
         backgroundSize: '24px 24px',
       }}
-      onWheel={onWheel}
+      onPointerDown={onViewportPointerDown}
+      onPointerMove={onViewportPointerMove}
+      onPointerUp={onViewportPointerUp}
+      onPointerCancel={onViewportPointerUp}
     >
       {!current && empty(<IconSquareDashed className="size-6" />, '未选择图片', '从左侧列表选择一张截图开始标注')}
       {current && load === 'loading' && empty(<IconLoader2 className="size-6 animate-spin" />, '正在加载图片…')}

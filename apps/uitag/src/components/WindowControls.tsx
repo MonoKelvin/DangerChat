@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { IconCopy, IconWindowMaximize, IconWindowMinimize, IconX } from '@tabler/icons-react';
+import { IconCopy, IconMinus, IconSquare, IconX } from '@tabler/icons-react';
 import { useStore } from '../store';
 import { cn } from '@/lib/utils';
 
@@ -43,7 +43,7 @@ export function WindowControls() {
         title="最小化"
         onClick={() => void win.minimize()}
       >
-        <IconWindowMinimize className="size-3.5" strokeWidth={1.75} />
+        <IconMinus className="size-3.5" strokeWidth={1.75} />
       </button>
       <button
         className={cn(btn, 'hover:bg-foreground/10 hover:text-foreground')}
@@ -53,7 +53,7 @@ export function WindowControls() {
         {maximized ? (
           <IconCopy className="size-3" strokeWidth={1.75} />
         ) : (
-          <IconWindowMaximize className="size-3" strokeWidth={1.75} />
+          <IconSquare className="size-3" strokeWidth={1.75} />
         )}
       </button>
       <button

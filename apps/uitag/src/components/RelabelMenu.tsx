@@ -68,7 +68,12 @@ export function RelabelMenu() {
         >
           <span className="size-2.5 rounded-full" style={{ backgroundColor: t.color }} />
           <span className="flex-1">{t.label}</span>
-          {box?.tag === t.name && <span className="text-muted-foreground">·</span>}
+          {box?.tag === t.name && (
+            <span
+              className="size-2 rounded-full"
+              style={{ backgroundColor: t.color, boxShadow: `0 0 0 2px ${t.color}40` }}
+            />
+          )}
         </button>
       ))}
       <div className="my-1 h-px bg-border" />
