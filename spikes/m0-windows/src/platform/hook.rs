@@ -87,6 +87,11 @@ pub struct HookShared {
     pub metrics: HookMetrics,
     pub thread_id: AtomicU32,
     pub installed: AtomicBool,
+    /// 最近一次事务开始时，回调观测到的 QPC 纳秒时间戳。
+    ///
+    /// 这是 M0-D「物理按键到提示可见」的 t0。回调内只做一次原子写，
+    /// 不分配、不加锁，符合快路径约束。
+    pub last_transaction_nanos: AtomicU64,
     commands: Mutex<Vec<GuardCommand>>,
     /// 钩子线程向协调侧回传的最近一次请求。
     last_request: Mutex<Option<GuardRequest>>,
@@ -100,6 +105,7 @@ impl HookShared {
             metrics: HookMetrics::default(),
             thread_id: AtomicU32::new(0),
             installed: AtomicBool::new(false),
+            last_transaction_nanos: AtomicU64::new(0),
             commands: Mutex::new(Vec::with_capacity(64)),
             last_request: Mutex::new(None),
             latency: Mutex::new(Vec::with_capacity(LATENCY_SAMPLES)),
@@ -332,6 +338,11 @@ unsafe extern "system" fn low_level_keyboard_proc(
             match request {
                 GuardRequest::StartTransaction { .. } => {
                     metrics.transactions_started.fetch_add(1, Ordering::Relaxed);
+                    // 记录物理按键时刻：M0-D 完整延迟以此为 t0。
+                    state
+                        .shared
+                        .last_transaction_nanos
+                        .store(started, Ordering::Release);
                 }
                 GuardRequest::RecheckRequired { .. } => {
                     metrics.rechecks_required.fetch_add(1, Ordering::Relaxed);

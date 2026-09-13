@@ -35,6 +35,20 @@ fn main() {
                 .clamp(5, 500);
             e2e_latency(rounds);
         }
+        Some("full-latency") => {
+            let rounds: usize = args
+                .next()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(20)
+                .clamp(1, 200);
+            // 第二个参数是等待物理按键的预算秒数，便于在无人值守时验证失败路径。
+            let budget_secs: u64 = args
+                .next()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(300)
+                .clamp(5, 3600);
+            full_latency(rounds, budget_secs);
+        }
         Some("ime-probe") => ime_probe(),
         Some("ime-hook-probe") => {
             let secs: u64 = args
@@ -56,7 +70,8 @@ fn main() {
             eprintln!("未知子命令: {other:?}");
             eprintln!(
                 "用法: m0 <window-probe|capture-probe [次数]|layout-eval|ocr-export|\
-                 e2e-latency [次数]|ime-probe|ime-hook-probe [秒]|hook-latency [秒]>"
+                 e2e-latency [次数]|full-latency [次数] [等待秒数]|ime-probe|\
+                 ime-hook-probe [秒]|hook-latency [秒]>"
             );
             std::process::exit(2);
         }
@@ -330,6 +345,78 @@ fn ocr_export() {
             eprintln!("导出失败：{e}");
             std::process::exit(1);
         }
+    }
+}
+
+#[cfg(windows)]
+fn full_latency(rounds: usize, budget_secs: u64) {
+    use m0_windows::harness::full_latency::run;
+
+    println!("=== M0-D 完整延迟：物理按键 → 提示可见 ===");
+    println!();
+    println!("测试窗口即将出现。请**点击该窗口使其成为前台**，然后按 Enter。");
+    println!("每按一次 Enter 采集一个样本，共需 {rounds} 个。");
+    println!("Enter 会被抑制（这正是产品行为）；消息不会发出，窗口只是合成界面。");
+    println!("最多等待 {budget_secs} 秒，超时后按已采集样本统计。");
+    println!();
+
+    let timings = match run(rounds, Duration::from_secs(budget_secs)) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("测量失败：{e}");
+            std::process::exit(1);
+        }
+    };
+
+    let mut feedback: Vec<u64> = timings.iter().map(|t| t.feedback_nanos).collect();
+    let mut total: Vec<u64> = timings.iter().map(|t| t.total_nanos).collect();
+    let mut analysis: Vec<u64> = timings.iter().map(|t| t.analysis_nanos).collect();
+    feedback.sort_unstable();
+    total.sort_unstable();
+    analysis.sort_unstable();
+
+    let pct = |v: &[u64], p: f64| -> u64 {
+        let idx = ((v.len() as f64 - 1.0) * p).round() as usize;
+        v[idx]
+    };
+    let ms = |n: u64| n as f64 / 1e6;
+
+    println!();
+    println!("样本数                = {}", timings.len());
+    println!();
+    println!("--- 按键 → 「正在检查」可见 ---");
+    println!("p50                   = {:.1} ms", ms(pct(&feedback, 0.50)));
+    println!("p95                   = {:.1} ms", ms(pct(&feedback, 0.95)));
+    println!(
+        "最大                  = {:.1} ms",
+        ms(feedback[feedback.len() - 1])
+    );
+    println!();
+    println!("--- 按键 → 结果提示可见 ---");
+    println!("p50                   = {:.1} ms", ms(pct(&total, 0.50)));
+    println!("p95                   = {:.1} ms", ms(pct(&total, 0.95)));
+    println!("p99                   = {:.1} ms", ms(pct(&total, 0.99)));
+    println!(
+        "最大                  = {:.1} ms",
+        ms(total[total.len() - 1])
+    );
+    println!();
+    println!("其中分析耗时 p50      = {:.1} ms", ms(pct(&analysis, 0.50)));
+    println!();
+
+    // 100 ms 反馈是对每次事务的承诺，取最大值判定而非分位数。
+    let feedback_ok = feedback[feedback.len() - 1] <= 100_000_000;
+    let total_ok = pct(&total, 0.95) <= 800_000_000;
+    let enough = timings.len() >= 20;
+
+    println!("门槛 反馈 ≤ 100 ms（全部样本）: {}", verdict(feedback_ok));
+    println!("门槛 提示可见 p95 ≤ 800 ms    : {}", verdict(total_ok));
+    println!("样本量 ≥ 20                   : {}", verdict(enough));
+    println!();
+    println!("注：目标为自有合成窗口，不代表真实微信的捕获与定位兼容性。");
+
+    if !(feedback_ok && total_ok && enough) {
+        std::process::exit(1);
     }
 }
 
