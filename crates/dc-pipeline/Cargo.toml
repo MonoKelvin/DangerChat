@@ -1,0 +1,24 @@
+[package]
+name = "dc-pipeline"
+description = "危信流水线：guard 编排 / intercept 消息源 / capture 截图 / layout / ocr / sem"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+dc-core.workspace = true
+dc-sys.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+crossbeam-channel.workspace = true
+arc-swap.workspace = true
+image.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
