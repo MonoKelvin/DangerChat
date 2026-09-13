@@ -96,13 +96,8 @@ fn ime_composing_now() -> bool {
 enum SysReq {
     InstallKeyboard(KeyCallback, Sender<Result<(), String>>),
     UninstallKeyboard(Sender<()>),
-    WatchForeground(
-        Box<dyn Fn(ForegroundInfo) + Send>,
-        Sender<Result<(), String>>,
-    ),
+    WatchForeground(ForegroundCallback, Sender<Result<(), String>>),
     UnwatchForeground(Sender<()>),
-    WatchIme(Sender<Result<(), String>>),
-    UnwatchIme(Sender<()>),
     Quit(Sender<()>),
 }
 
@@ -215,22 +210,36 @@ fn sys_thread_main(ctrl: Receiver<SysReq>, event: isize, shutdown: Arc<AtomicBoo
 
 fn handle_request(req: SysReq, state: &mut ThreadState) {
     match req {
-        SysReq::InstallKeyboard(cb, reply) => {
-            let result = install_keyboard(cb);
-            match result {
-                Ok(hook) => {
-                    state.keyboard = Some(hook);
-                    let _ = reply.send(Ok(()));
+        SysReq::InstallKeyboard(cb, reply) => match install_keyboard(cb) {
+            Ok(hook) => {
+                state.keyboard = Some(hook);
+                // IME 组合态边界修正（EVENT_OBJECT_IME_SHOW..CHANGE，连续区间一次订阅）。
+                // 失败不致命：主信号 VK_PROCESSKEY 仍在低级钩子里生效（§5.2）。
+                match install_win_event(
+                    EVENT_OBJECT_IME_SHOW,
+                    EVENT_OBJECT_IME_CHANGE,
+                    Some(ime_proc),
+                ) {
+                    Ok(ime) => state.ime = Some(ime),
+                    Err(e) => {
+                        tracing::warn!(error = %e, "IME 事件订阅失败，退化为仅 VK_PROCESSKEY 判定")
+                    }
                 }
-                Err(e) => {
-                    let _ = reply.send(Err(e));
-                }
+                let _ = reply.send(Ok(()));
             }
-        }
+            Err(e) => {
+                let _ = reply.send(Err(e));
+            }
+        },
         SysReq::UninstallKeyboard(reply) => {
             if let Some(h) = state.keyboard.take() {
                 unsafe {
                     let _ = UnhookWindowsHookEx(h);
+                }
+            }
+            if let Some(h) = state.ime.take() {
+                unsafe {
+                    let _ = UnhookWinEvent(h);
                 }
             }
             let _ = reply.send(());
@@ -258,30 +267,6 @@ fn handle_request(req: SysReq, state: &mut ThreadState) {
                 }
             }
             FG_CB.with(|c| *c.borrow_mut() = None);
-            let _ = reply.send(());
-        }
-        SysReq::WatchIme(reply) => {
-            // EVENT_OBJECT_IME_SHOW..CHANGE 是连续区间，一次订阅即可
-            match install_win_event(
-                EVENT_OBJECT_IME_SHOW,
-                EVENT_OBJECT_IME_CHANGE,
-                Some(ime_proc),
-            ) {
-                Ok(hook) => {
-                    state.ime = Some(hook);
-                    let _ = reply.send(Ok(()));
-                }
-                Err(e) => {
-                    let _ = reply.send(Err(e));
-                }
-            }
-        }
-        SysReq::UnwatchIme(reply) => {
-            if let Some(h) = state.ime.take() {
-                unsafe {
-                    let _ = UnhookWinEvent(h);
-                }
-            }
             let _ = reply.send(());
         }
         SysReq::Quit(reply) => {
@@ -670,18 +655,6 @@ impl SysApi for RealSys {
 
     fn ime_composing(&self) -> bool {
         ime_composing_now()
-    }
-}
-
-impl RealSys {
-    /// 订阅 IME 组合态事件（`EVENT_OBJECT_IME_*`）。安装键盘钩子时一并调用。
-    pub fn watch_ime(&self) -> Result<(), SysError> {
-        self.call(SysReq::WatchIme)
-    }
-
-    pub fn unwatch_ime(&self) -> Result<(), SysError> {
-        self.call_void(SysReq::UnwatchIme);
-        Ok(())
     }
 }
 

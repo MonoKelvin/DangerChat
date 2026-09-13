@@ -1,6 +1,11 @@
 [workspace]
 resolver = "2"
-members = ["crates/dc-core", "crates/dc-sys", "tools/redline_scan"]
+members = [
+    "crates/dc-core",
+    "crates/dc-sys",
+    "crates/dc-pipeline",
+    "tools/redline_scan",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -22,6 +27,8 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 
 # 并发（ADR-09：std::thread + crossbeam，不引入 tokio）
 crossbeam-channel = "0.5"
+# 判定槽位无锁交换（§2.2 verdict_slot）
+arc-swap = "1"
 
 # 图像（截图缓冲 / 图片日志）
 image = { version = "0.25", default-features = false, features = ["png"] }
@@ -29,6 +36,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 # 内部 crate
 dc-core = { path = "crates/dc-core" }
 dc-sys = { path = "crates/dc-sys" }
+dc-pipeline = { path = "crates/dc-pipeline" }
 
 # 测试
 tempfile = "3"
