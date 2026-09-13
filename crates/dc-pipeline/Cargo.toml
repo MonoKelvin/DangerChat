@@ -16,9 +16,12 @@ tracing.workspace = true
 crossbeam-channel.workspace = true
 arc-swap.workspace = true
 image.workspace = true
+ort.workspace = true
+rapidocr-core.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

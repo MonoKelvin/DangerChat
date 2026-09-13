@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
-import { Check, ChevronDown, ChevronUp, Images } from 'lucide-react';
+import { IconCheck, IconChevronDown, IconChevronUp, IconPhoto } from '@tabler/icons-react';
 import { useStore } from '../store';
 import { cn } from '@/lib/utils';
 
@@ -29,14 +29,14 @@ export function ImageList() {
     <aside className="flex w-64 shrink-0 flex-col border-r border-border/60 bg-sidebar">
       {/* 头部：计数 + 进度环 */}
       <div className="flex items-center justify-between px-3 py-2.5">
-        <span className="text-[11px] font-medium tracking-widest text-muted-foreground uppercase">
+        <span className="text-xs font-medium tracking-widest text-muted-foreground uppercase">
           数据集
         </span>
         <span className="flex items-center gap-1.5 text-xs tabular-nums text-muted-foreground">
           {done}/{images.length}
           <div className="h-1 w-12 overflow-hidden rounded-full bg-border/60">
             <div
-              className="h-full rounded-full bg-emerald-500 transition-all"
+              className="h-full rounded-full bg-emerald-500 transition-all duration-300"
               style={{ width: images.length ? `${(done / images.length) * 100}%` : 0 }}
             />
           </div>
@@ -47,7 +47,7 @@ export function ImageList() {
       {images.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2.5 px-6 text-center">
           <div className="flex size-11 items-center justify-center rounded-xl bg-accent/60">
-            <Images className="size-5 text-muted-foreground" />
+            <IconPhoto className="size-5 text-muted-foreground" />
           </div>
           <p className="text-xs leading-relaxed text-muted-foreground">
             尚未导入图片
@@ -75,8 +75,8 @@ export function ImageList() {
                 >
                   <div
                     className={cn(
-                      'relative size-10 shrink-0 overflow-hidden rounded-[5px] bg-muted',
-                      active ? 'ring-1 ring-ring/40' : 'ring-1 ring-transparent',
+                      'relative size-10 shrink-0 overflow-hidden rounded-[5px] bg-muted transition-shadow',
+                      active ? 'ring-1 ring-ring/40 shadow-sm' : 'ring-1 ring-transparent',
                     )}
                   >
                     <img
@@ -88,14 +88,14 @@ export function ImageList() {
                     />
                     {boxes.length > 0 && (
                       <span className="absolute right-0 bottom-0 flex size-3.5 items-center justify-center rounded-tl-[4px] bg-emerald-500 text-white">
-                        <Check className="size-2.5" strokeWidth={3.5} />
+                        <IconCheck className="size-2.5" strokeWidth={3.5} />
                       </span>
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
                     <p
                       className={cn(
-                        'truncate text-[11px] leading-4',
+                        'truncate text-xs leading-4',
                         active
                           ? 'font-medium text-sidebar-foreground'
                           : 'text-muted-foreground',
@@ -113,7 +113,7 @@ export function ImageList() {
                         />
                       ))}
                       {used.length === 0 && (
-                        <span className="text-[10px] text-muted-foreground/40">未标注</span>
+                        <span className="text-[11px] text-muted-foreground/40">未标注</span>
                       )}
                     </div>
                   </div>
@@ -128,21 +128,21 @@ export function ImageList() {
       {images.length > 0 && (
         <div className="flex items-center gap-1 border-t border-border/60 p-1.5">
           <button
-            className="flex h-7 flex-1 items-center justify-center gap-1 rounded-md text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-30"
+            className="flex h-7 flex-1 items-center justify-center gap-1 rounded-md text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-30"
             onClick={() => step(-1)}
             disabled={idx <= 0}
           >
-            <ChevronUp className="size-3.5" /> 上一张
+            <IconChevronUp className="size-3.5" /> 上一张
           </button>
-          <span className="text-[11px] tabular-nums text-muted-foreground/50">
+          <span className="text-xs tabular-nums text-muted-foreground/50">
             {idx + 1}/{images.length}
           </span>
           <button
-            className="flex h-7 flex-1 items-center justify-center gap-1 rounded-md text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-30"
+            className="flex h-7 flex-1 items-center justify-center gap-1 rounded-md text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-30"
             onClick={() => step(1)}
             disabled={idx >= images.length - 1}
           >
-            下一张 <ChevronDown className="size-3.5" />
+            下一张 <IconChevronDown className="size-3.5" />
           </button>
         </div>
       )}

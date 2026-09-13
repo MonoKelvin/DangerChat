@@ -1,11 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
-import { ImageOff, Loader2, MousePointerSquareDashed } from 'lucide-react';
+import { IconLoader2, IconPhotoOff, IconSquareDashed } from '@tabler/icons-react';
 import { useStore, type Handle } from '../store';
 import type { AnnoBox } from '../lib/types';
+import { cn } from '@/lib/utils';
 
 const HANDLES: Handle[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
 const MIN_BOX = 4;
+
+/** 把 hex 颜色压暗到 f 比例（锚点芯色：与框同色系的深色，不用白色）。 */
+function darken(hex: string, f: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const r = Math.round(((n >> 16) & 255) * f);
+  const g = Math.round(((n >> 8) & 255) * f);
+  const b = Math.round((n & 255) * f);
+  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
+}
 
 const CURSOR: Record<Handle, string> = {
   nw: 'nwse-resize', n: 'ns-resize', ne: 'nesw-resize', e: 'ew-resize',
@@ -64,6 +74,7 @@ export function AnnoCanvas() {
   const annos = useStore((s) => s.annos);
   const tags = useStore((s) => s.tags.tags);
   const activeTag = useStore((s) => s.activeTag);
+  const tool = useStore((s) => s.tool);
   const selected = useStore((s) => s.selected);
   const drag = useStore((s) => s.drag);
   const zoom = useStore((s) => s.zoom);
@@ -130,11 +141,15 @@ export function AnnoCanvas() {
     const hit = hitTest(boxes, x, y);
     const s = store.getState();
     if (hit != null) {
+      // 命中已有框：无论什么工具态都是选中 + 拖动
       s.select(hit);
       s.setDrag({ kind: 'move', index: hit, grabX: x, grabY: y, curX: 0, curY: 0, orig: boxes[hit] });
-    } else {
+    } else if (tool === 'draw') {
       s.select(null);
       s.setDrag({ kind: 'draw', startX: x, startY: y, curX: x, curY: y });
+    } else {
+      s.select(null);
+      return; // 选择模式下点空白：仅取消选中，不捕获指针
     }
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
   };
@@ -173,7 +188,10 @@ export function AnnoCanvas() {
             h,
           },
         });
-        s.select((s.annos[path]?.length ?? 1) - 1);
+        // 绘制完成后不选中新框：不出现锚点，可直接继续画下一个
+      } else {
+        // 绘制模式下点了一下空白：退出绘制，回到常规选择光标
+        s.setTool('select');
       }
     } else if (d.kind === 'move') {
       if (d.curX !== 0 || d.curY !== 0) {
@@ -212,7 +230,7 @@ export function AnnoCanvas() {
     drag && drag.kind !== 'draw' && drag.index === i ? (preview ?? b) : b,
   );
 
-  // Delete 删除 / Esc 取消选中 / 数字键切标签
+  // Delete 删除 / Esc 取消绘制或退出绘制模式 / 数字键切标签
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (document.activeElement !== document.body) return;
@@ -223,6 +241,8 @@ export function AnnoCanvas() {
           s.deleteSelected();
         }
       } else if (e.key === 'Escape') {
+        if (s.drag) s.setDrag(null); // 先取消进行中的拖拽/绘制
+        else s.setTool('select'); // 再退出绘制模式（已在选择模式则无副作用）
         s.select(null);
       } else if (/^[1-9]$/.test(e.key)) {
         const t = s.tags.tags[Number(e.key) - 1];
@@ -266,10 +286,10 @@ export function AnnoCanvas() {
       }}
       onWheel={onWheel}
     >
-      {!current && empty(<MousePointerSquareDashed className="size-6" />, '未选择图片', '从左侧列表选择一张截图开始标注')}
-      {current && load === 'loading' && empty(<Loader2 className="size-6 animate-spin" />, '正在加载图片…')}
+      {!current && empty(<IconSquareDashed className="size-6" />, '未选择图片', '从左侧列表选择一张截图开始标注')}
+      {current && load === 'loading' && empty(<IconLoader2 className="size-6 animate-spin" />, '正在加载图片…')}
       {current && load === 'error' &&
-        empty(<ImageOff className="size-6" />, '图片无法加载', '文件可能已被移动或删除')}
+        empty(<IconPhotoOff className="size-6" />, '图片无法加载', '文件可能已被移动或删除')}
 
       {current && load === 'ready' && dim && (
         <div className="flex min-h-full min-w-full items-center justify-center p-6">
@@ -278,7 +298,10 @@ export function AnnoCanvas() {
             width={dim.width * zoom}
             height={dim.height * zoom}
             viewBox={`0 0 ${dim.width} ${dim.height}`}
-            className="block shrink-0 cursor-crosshair rounded-sm ring-1 ring-white/10"
+            className={cn(
+              'block shrink-0 rounded-sm ring-1 ring-white/10 transition-shadow',
+              tool === 'draw' ? 'cursor-crosshair' : 'cursor-default',
+            )}
             style={{ touchAction: 'none', boxShadow: '0 8px 40px rgb(0 0 0 / 0.5)' }}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
@@ -294,6 +317,7 @@ export function AnnoCanvas() {
               return (
                 <g
                   key={i}
+                  style={{ cursor: 'move' }}
                   onContextMenu={(e) => {
                     e.preventDefault();
                     store.getState().select(i);
@@ -310,7 +334,7 @@ export function AnnoCanvas() {
                     width={b.w}
                     height={b.h}
                     fill={color}
-                    fillOpacity={isSel ? 0.18 : 0.1}
+                    fillOpacity={isSel ? 0.12 : 0.06}
                     stroke={color}
                     strokeWidth={isSel ? sw * 2 : sw}
                   />
@@ -318,16 +342,16 @@ export function AnnoCanvas() {
                   <g transform={`translate(${b.x}, ${b.y})`}>
                     <rect
                       x={0}
-                      y={-18 / zoom}
-                      width={(label.length * 6.2 + 10) / zoom}
-                      height={16 / zoom}
-                      rx={3 / zoom}
+                      y={-21 / zoom}
+                      width={(label.length * 6.8 + 12) / zoom}
+                      height={18 / zoom}
+                      rx={3.5 / zoom}
                       fill={color}
                     />
                     <text
-                      x={5 / zoom}
-                      y={-6 / zoom}
-                      fontSize={10 / zoom}
+                      x={6 / zoom}
+                      y={-7 / zoom}
+                      fontSize={11 / zoom}
                       fill="#fff"
                       className="pointer-events-none select-none font-medium"
                     >
@@ -344,7 +368,7 @@ export function AnnoCanvas() {
                           y={p.y - hs}
                           width={hs * 2}
                           height={hs * 2}
-                          fill="#fff"
+                          fill={darken(color, 0.45)}
                           stroke={color}
                           strokeWidth={sw}
                           style={{ cursor: CURSOR[h] }}
@@ -377,7 +401,7 @@ export function AnnoCanvas() {
                 width={preview.w}
                 height={preview.h}
                 fill={colorOf(preview.tag)}
-                fillOpacity={0.1}
+                fillOpacity={0.08}
                 stroke={colorOf(preview.tag)}
                 strokeDasharray={`${5 / zoom} ${3 / zoom}`}
                 strokeWidth={sw}

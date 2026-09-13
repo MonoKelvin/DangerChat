@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { save } from '@tauri-apps/plugin-dialog';
-import { CheckCircle2, FileArchive, Loader2 } from 'lucide-react';
+import { IconCircleCheck, IconFileZip, IconLoader2 } from '@tabler/icons-react';
 import { useStore } from '../store';
 import { Button } from './ui/button';
 import {
@@ -58,12 +58,12 @@ export function ExportDialog({
 
   return (
     <Dialog open={open} onOpenChange={reset}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="border-border/70 bg-background/95 shadow-2xl backdrop-blur-xl sm:max-w-md">
         {result ? (
           <>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
-                <CheckCircle2 className="size-4 text-emerald-500" />
+                <IconCircleCheck className="size-4 text-emerald-500" />
                 导出完成
               </DialogTitle>
               <DialogDescription>数据集已写入下列位置。</DialogDescription>
@@ -79,7 +79,7 @@ export function ExportDialog({
           <>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
-                <FileArchive className="size-4" />
+                <IconFileZip className="size-4" />
                 导出训练集
               </DialogTitle>
               <DialogDescription>
@@ -93,9 +93,9 @@ export function ExportDialog({
                 ['已标注', labeled],
                 ['标注框', boxCount],
               ].map(([k, v]) => (
-                <div key={k as string} className="rounded-lg border bg-muted/30 py-2.5">
+                <div key={k as string} className="rounded-lg border bg-muted/30 py-2.5 transition-colors hover:bg-muted/50">
                   <dd className="text-lg font-semibold tabular-nums">{v}</dd>
-                  <dt className="text-[11px] text-muted-foreground">{k}</dt>
+                  <dt className="text-xs text-muted-foreground">{k}</dt>
                 </div>
               ))}
             </dl>
@@ -120,7 +120,7 @@ export function ExportDialog({
                 取消
               </Button>
               <Button disabled={busy || images.length === 0} onClick={run}>
-                {busy && <Loader2 className="size-3.5 animate-spin" />}
+                {busy && <IconLoader2 className="size-3.5 animate-spin" />}
                 {busy ? '导出中…' : '选择位置并导出'}
               </Button>
             </DialogFooter>

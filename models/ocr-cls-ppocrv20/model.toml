@@ -1,0 +1,4 @@
+kind = "ocr"
+file = "ch_ppocr_mobile_v2.0_cls_mobile.onnx"
+version = "PP-OCRv2.0 mobile"
+note = "文本行方向分类（0/180）。来源 RapidAI/RapidOCR modelscope v3.9.0 onnx/PP-OCRv4/cls"

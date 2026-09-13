@@ -2,24 +2,25 @@ import { useEffect, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
-  CheckCircle2,
-  FileArchive,
-  FileImage,
-  FolderOpen,
-  Maximize2,
-  Redo2,
-  Sparkles,
-  Undo2,
-  X,
-  ZoomIn,
-  ZoomOut,
-} from 'lucide-react';
+  IconArrowBackUp,
+  IconArrowForwardUp,
+  IconCircleCheck,
+  IconFileZip,
+  IconFolderOpen,
+  IconMaximize,
+  IconPhoto,
+  IconSparkles,
+  IconX,
+  IconZoomIn,
+  IconZoomOut,
+} from '@tabler/icons-react';
 import { useStore } from './store';
 import { ImageList } from './components/ImageList';
 import { TagPalette } from './components/TagPalette';
 import { AnnoCanvas } from './components/AnnoCanvas';
 import { RelabelMenu } from './components/RelabelMenu';
 import { ExportDialog } from './components/ExportDialog';
+import { ShortcutsHelp } from './components/ShortcutsHelp';
 import { WindowControls } from './components/WindowControls';
 import { Button } from './components/ui/button';
 import { Separator } from './components/ui/separator';
@@ -63,17 +64,17 @@ function PropagateToast() {
 
   if (!shown) return null;
   return (
-    <div className="animate-in fade-in slide-in-from-bottom-4 fixed bottom-11 left-1/2 z-40 flex -translate-x-1/2 items-center gap-2.5 rounded-lg border bg-popover px-4 py-2.5 text-xs shadow-xl">
-      <CheckCircle2 className="size-4 text-emerald-500" />
+    <div className="animate-in fade-in slide-in-from-bottom-4 fixed bottom-11 left-1/2 z-40 flex -translate-x-1/2 items-center gap-2.5 rounded-lg border border-border/70 bg-popover/80 px-4 py-2.5 text-[13px] shadow-2xl backdrop-blur-xl">
+      <IconCircleCheck className="size-4 text-emerald-500" />
       <span className="text-popover-foreground">
         预标注完成：<b className="tabular-nums">{shown.applied}</b>/{shown.total} 张图片获得标注，
         请逐张检查修正（低置信度区域已自动跳过）
       </span>
       <button
-        className="ml-1 rounded p-0.5 text-muted-foreground hover:text-foreground"
+        className="ml-1 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
         onClick={() => setShown(null)}
       >
-        <X className="size-3.5" />
+        <IconX className="size-3.5" />
       </button>
     </div>
   );
@@ -98,6 +99,7 @@ function App() {
   const propagating = useStore((s) => s.propagating);
   const propagateToAll = useStore((s) => s.propagateToAll);
   const setCurrent = useStore((s) => s.setCurrent);
+  const tool = useStore((s) => s.tool);
   useStore((s) => s.historyTick);
 
   const [showExport, setShowExport] = useState(false);
@@ -187,7 +189,7 @@ function App() {
             </div>
             <div className="flex flex-col leading-none" data-tauri-drag-region>
               <span className="text-[13px] font-semibold tracking-tight">dc_uitag</span>
-              <span className="mt-0.5 text-[9px] tracking-widest text-muted-foreground/70 uppercase">
+              <span className="mt-0.5 text-[10px] tracking-widest text-muted-foreground/70 uppercase">
                 annotator
               </span>
             </div>
@@ -195,37 +197,37 @@ function App() {
 
           <Separator orientation="vertical" className="mx-1.5 !h-5" />
 
-          <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-xs" onClick={importFiles}>
-            <FileImage className="size-3.5" />
+          <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-[13px]" onClick={importFiles}>
+            <IconPhoto className="size-3.5" />
             图片
           </Button>
-          <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-xs" onClick={importDir}>
-            <FolderOpen className="size-3.5" />
+          <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-[13px]" onClick={importDir}>
+            <IconFolderOpen className="size-3.5" />
             目录
           </Button>
 
           <Separator orientation="vertical" className="mx-1.5 !h-5" />
 
-          <ToolButton icon={<Undo2 className="size-3.5" />} label="撤销 (Ctrl+Z)" onClick={undo} disabled={!history.canUndo} />
-          <ToolButton icon={<Redo2 className="size-3.5" />} label="重做 (Ctrl+Shift+Z)" onClick={redo} disabled={!history.canRedo} />
+          <ToolButton icon={<IconArrowBackUp className="size-3.5" />} label="撤销 (Ctrl+Z)" onClick={undo} disabled={!history.canUndo} />
+          <ToolButton icon={<IconArrowForwardUp className="size-3.5" />} label="重做 (Ctrl+Shift+Z)" onClick={redo} disabled={!history.canRedo} />
 
           <Separator orientation="vertical" className="mx-1.5 !h-5" />
 
-          <ToolButton icon={<ZoomOut className="size-3.5" />} label="缩小" onClick={() => setZoom(Math.max(0.1, zoom / 1.2))} />
+          <ToolButton icon={<IconZoomOut className="size-3.5" />} label="缩小" onClick={() => setZoom(Math.max(0.1, zoom / 1.2))} />
           <button
-            className="h-8 min-w-12 rounded-md px-1 text-xs tabular-nums text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            className="h-8 min-w-12 rounded-md px-1 text-[13px] tabular-nums text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             onClick={() => setZoom(1)}
             title="重置为 100%"
           >
             {Math.round(zoom * 100)}%
           </button>
-          <ToolButton icon={<ZoomIn className="size-3.5" />} label="放大" onClick={() => setZoom(Math.min(5, zoom * 1.2))} />
-          <ToolButton icon={<Maximize2 className="size-3.5" />} label="适应窗口" onClick={requestFit} />
+          <ToolButton icon={<IconZoomIn className="size-3.5" />} label="放大" onClick={() => setZoom(Math.min(5, zoom * 1.2))} />
+          <ToolButton icon={<IconMaximize className="size-3.5" />} label="适应窗口" onClick={requestFit} />
 
           <div className="flex-1" />
 
           {dirty && (
-            <span className="mr-1 flex items-center gap-1.5 text-[11px] text-muted-foreground/80">
+            <span className="mr-1 flex items-center gap-1.5 text-xs text-muted-foreground/80">
               <span className="size-1.5 animate-pulse rounded-full bg-amber-500" />
               保存中
             </span>
@@ -237,14 +239,14 @@ function App() {
               <Button
                 variant="secondary"
                 size="sm"
-                className="h-8 gap-1.5 text-xs"
+                className="h-8 gap-1.5 text-[13px] shadow-sm transition-shadow hover:shadow-md"
                 disabled={!current || boxes.length === 0 || propagating != null || images.length < 2}
                 onClick={() => void propagateToAll()}
               >
                 {propagating != null ? (
                   <span className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
                 ) : (
-                  <Sparkles className="size-3.5 text-primary" />
+                  <IconSparkles className="size-3.5 text-primary" />
                 )}
                 {propagating != null ? `匹配中 ${propagating} 张…` : '自动预标注'}
               </Button>
@@ -255,10 +257,17 @@ function App() {
             </TooltipContent>
           </Tooltip>
 
-          <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setShowExport(true)}>
-            <FileArchive className="size-3.5" />
+          <Button
+            size="sm"
+            className="h-8 gap-1.5 text-[13px] shadow-sm transition-shadow hover:shadow-md"
+            onClick={() => setShowExport(true)}
+          >
+            <IconFileZip className="size-3.5" />
             导出
           </Button>
+
+          <div className="mx-1 h-5 w-px bg-border" />
+          <ShortcutsHelp />
 
           {/* 窗口控制：最小化 / 最大化 / 关闭（紧贴右上角） */}
           <WindowControls />
@@ -271,9 +280,24 @@ function App() {
             <TagPalette />
             <AnnoCanvas />
             {/* ── 状态栏 ── */}
-            <footer className="flex h-7 shrink-0 items-center gap-3 border-t border-border/60 bg-card px-3 text-[11px] text-muted-foreground">
+            <footer className="flex h-7 shrink-0 items-center gap-3 border-t border-border/60 bg-card px-3 text-xs text-muted-foreground">
               {current ? (
                 <>
+                  <span
+                    className={
+                      'flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[11px] font-medium transition-colors ' +
+                      (tool === 'draw'
+                        ? 'bg-primary/15 text-primary'
+                        : 'bg-foreground/5 text-muted-foreground')
+                    }
+                  >
+                    <span
+                      className={
+                        'size-1.5 rounded-full ' + (tool === 'draw' ? 'bg-primary' : 'bg-muted-foreground/60')
+                      }
+                    />
+                    {tool === 'draw' ? '绘制' : '选择'}
+                  </span>
                   <span className="tabular-nums">
                     {idx + 1}/{images.length}
                   </span>
@@ -304,7 +328,6 @@ function App() {
                 <span>就绪</span>
               )}
               <div className="flex-1" />
-              <span className="text-muted-foreground/50">↑↓ 切换 · Ctrl+滚轮 缩放 · 1-4 选标签</span>
             </footer>
           </main>
         </div>

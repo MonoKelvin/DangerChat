@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { Minus, Square, X } from 'lucide-react';
+import { IconCopy, IconWindowMaximize, IconWindowMinimize, IconX } from '@tabler/icons-react';
 import { useStore } from '../store';
 import { cn } from '@/lib/utils';
 
@@ -43,21 +43,25 @@ export function WindowControls() {
         title="最小化"
         onClick={() => void win.minimize()}
       >
-        <Minus className="size-3.5" strokeWidth={1.75} />
+        <IconWindowMinimize className="size-3.5" strokeWidth={1.75} />
       </button>
       <button
         className={cn(btn, 'hover:bg-foreground/10 hover:text-foreground')}
         title={maximized ? '还原' : '最大化'}
         onClick={() => void win.toggleMaximize()}
       >
-        <Square className="size-3" strokeWidth={1.75} />
+        {maximized ? (
+          <IconCopy className="size-3" strokeWidth={1.75} />
+        ) : (
+          <IconWindowMaximize className="size-3" strokeWidth={1.75} />
+        )}
       </button>
       <button
         className={cn(btn, 'hover:bg-[#c42b1c] hover:text-white')}
         title="关闭"
         onClick={() => void close()}
       >
-        <X className="size-4" strokeWidth={1.75} />
+        <IconX className="size-4" strokeWidth={1.75} />
       </button>
     </div>
   );

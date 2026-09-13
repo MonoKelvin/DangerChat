@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Trash2 } from 'lucide-react';
+import { IconTrash } from '@tabler/icons-react';
 import { useStore } from '../store';
 
 interface MenuState {
@@ -50,17 +50,17 @@ export function RelabelMenu() {
   return (
     <div
       ref={ref}
-      className="fixed z-50 min-w-40 overflow-hidden rounded-lg border bg-popover p-1 text-popover-foreground shadow-lg"
+      className="animate-in fade-in-0 zoom-in-95 fixed z-50 min-w-44 overflow-hidden rounded-lg border border-border/70 bg-popover/85 p-1 text-popover-foreground shadow-2xl backdrop-blur-xl"
       style={{ left: menu.x, top: menu.y }}
       onPointerDown={(e) => e.stopPropagation()}
     >
-      <p className="px-2 py-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+      <p className="px-2 py-1.5 text-xs font-medium tracking-wide text-muted-foreground uppercase">
         改为标签
       </p>
       {tags.map((t) => (
         <button
           key={t.name}
-          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent"
+          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors hover:bg-accent"
           onClick={() => {
             relabelBox(menu.index, t.name);
             setMenu(null);
@@ -73,13 +73,13 @@ export function RelabelMenu() {
       ))}
       <div className="my-1 h-px bg-border" />
       <button
-        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-destructive transition-colors hover:bg-destructive/10"
+        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-destructive transition-colors hover:bg-destructive/10"
         onClick={() => {
           deleteSelected();
           setMenu(null);
         }}
       >
-        <Trash2 className="size-3.5" />
+        <IconTrash className="size-3.5" />
         删除此框
       </button>
     </div>
