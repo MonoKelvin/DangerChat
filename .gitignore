@@ -38,3 +38,4 @@ resources/training_set/wechat_snapcaptures/
 # ONNX 模型权重与字典（models/README.md 记下载源）
 models/**/*.onnx
 models/**/ppocr_keys_v1.txt
+yolo11n.pt
