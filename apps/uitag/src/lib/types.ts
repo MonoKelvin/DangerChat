@@ -39,3 +39,20 @@ export interface ExportRequest {
   tags: TagsConfig;
   dest: string;
 }
+
+export interface PropagateRequest {
+  src_path: string;
+  boxes: AnnoBox[];
+  targets: string[];
+  min_confidence: number;
+  allow_rescale: boolean;
+}
+
+export interface PropagatedBox extends AnnoBox {
+  confidence: number;
+}
+
+export interface PropagateResult {
+  path: string;
+  boxes: PropagatedBox[];
+}

@@ -13,10 +13,12 @@
     "windows": [
       {
         "title": "dc_uitag 截图打标",
-        "width": 1440,
-        "height": 900,
-        "minWidth": 1024,
-        "minHeight": 640
+        "width": 1180,
+        "height": 760,
+        "minWidth": 900,
+        "minHeight": 600,
+        "center": true,
+        "decorations": false
       }
     ],
     "security": {

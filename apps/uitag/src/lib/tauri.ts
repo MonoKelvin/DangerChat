@@ -3,6 +3,8 @@ import type {
   Autosave,
   ExportRequest,
   ImageEntry,
+  PropagateRequest,
+  PropagateResult,
   TagsConfig,
 } from './types';
 
@@ -24,4 +26,8 @@ export async function loadState(): Promise<Autosave | null> {
 
 export async function exportZip(req: ExportRequest): Promise<string> {
   return invoke<string>('export_zip', { req });
+}
+
+export async function propagateBoxes(req: PropagateRequest): Promise<PropagateResult[]> {
+  return invoke<PropagateResult[]>('propagate_boxes', { req });
 }

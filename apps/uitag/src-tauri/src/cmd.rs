@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::import::{collect_images, ImageEntry};
+use crate::propagate::{propagate, PropagateRequest, PropagateResult};
 use crate::state::{load, save, state_path, AnnoBox, Autosave};
 use crate::tags::TagsConfig;
 
@@ -76,4 +77,9 @@ pub fn export_zip(req: ExportRequest) -> CmdResult<String> {
     let path = crate::export::write_dataset_zip(&req, std::path::Path::new(&req.dest))
         .map_err(UiTagError::State)?;
     Ok(path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+pub fn propagate_boxes(req: PropagateRequest) -> CmdResult<Vec<PropagateResult>> {
+    propagate(&req).map_err(UiTagError::State)
 }

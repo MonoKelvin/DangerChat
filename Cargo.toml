@@ -58,3 +58,8 @@ lto = "thin"
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# tauri dev（debug profile）下 imageproc 的 NCC 慢 10~50×，
+# 预标注传播会卡死——依赖包按 release 优化编译（自编译代码保持快速增量）
+[profile.dev.package."*"]
+opt-level = 3
