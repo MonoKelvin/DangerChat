@@ -662,3 +662,47 @@ fn key_classification_edges() {
         );
     }
 }
+
+/// 观察者模式：注册在裁决者**之后**的回调只能看到被放行的按键
+/// （IT-INT-01 的观测原理；回归：dc-sys 曾用单槽回调存钩子，导致观察者永远收不到事件）
+#[test]
+fn observer_after_decider_sees_only_passed_keys() {
+    use std::sync::atomic::AtomicU64;
+
+    let h = Harness::new();
+    h.target_foreground();
+    h.publish(Verdict::block("命中"));
+
+    let seen = std::sync::Arc::new(AtomicU64::new(0));
+    let counter = std::sync::Arc::clone(&seen);
+    let _observer = h
+        .sys
+        .install_keyboard_hook(Box::new(move |_ev: &KeyEvent| {
+            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            HookAction::Pass
+        }))
+        .expect("观察者注册");
+
+    // 经 dc-sys 全链路投递：吞掉的键不会到达观察者
+    let enter = h.key_event(VK_ENTER, false);
+    assert_eq!(h.sys.feed_key(enter), HookAction::Swallow, "危险判定吞键");
+    assert_eq!(
+        seen.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "吞掉的按键不得分发到后续回调"
+    );
+
+    // 放行的键会到达观察者
+    let letter = h.key_event(VK_A, false);
+    assert_eq!(h.sys.feed_key(letter), HookAction::Pass);
+    assert_eq!(seen.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(
+        h.intercept.metrics().invocations,
+        2,
+        "intercept 两个键都看到了"
+    );
+    assert!(
+        h.intercept.metrics().avg_duration_ns() > 0,
+        "指标应为纳秒精度"
+    );
+}

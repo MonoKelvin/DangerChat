@@ -169,6 +169,112 @@ fn hook_and_watch_guards_teardown_on_drop() {
     assert_eq!(mock.feed_key(enter_event()), HookAction::Pass);
 }
 
+/// 多回调语义：按注册顺序分发、任一 Swallow 即终止；各自卸载互不影响
+///
+/// 回归用例：曾用单槽 thread-local 存回调，导致装第二个钩子时**静默顶替**第一个回调，
+/// 观察者永远收不到事件（实测表现为「放行按键 = 0、按键总数翻倍」）。
+#[test]
+fn multiple_keyboard_callbacks_chain_and_short_circuit() {
+    let mock = MockSys::new();
+    let seen_a = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen_b = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+
+    let a = std::sync::Arc::clone(&seen_a);
+    let guard_a = mock
+        .install_keyboard_hook(Box::new(move |ev: &KeyEvent| {
+            a.lock().unwrap().push(ev.vk);
+            if ev.vk == 0x0D {
+                HookAction::Swallow
+            } else {
+                HookAction::Pass
+            }
+        }))
+        .expect("注册 A");
+    let b = std::sync::Arc::clone(&seen_b);
+    let guard_b = mock
+        .install_keyboard_hook(Box::new(move |ev: &KeyEvent| {
+            b.lock().unwrap().push(ev.vk);
+            HookAction::Pass
+        }))
+        .expect("注册 B");
+
+    assert_eq!(mock.key_callback_count(), 2, "两者都应被登记，不得互相顶替");
+
+    let letter = |vk: u16| KeyEvent {
+        vk,
+        scan_code: 0,
+        is_key_down: true,
+        is_injected: false,
+        ctrl: false,
+        alt: false,
+        shift: false,
+    };
+
+    // 放行键：两个回调都收到
+    assert_eq!(mock.feed_key(letter(0x41)), HookAction::Pass);
+    assert_eq!(*seen_a.lock().unwrap(), vec![0x41]);
+    assert_eq!(*seen_b.lock().unwrap(), vec![0x41]);
+
+    // 吞掉的键：分发在 A 处终止，B 收不到
+    assert_eq!(mock.feed_key(enter_event()), HookAction::Swallow);
+    assert_eq!(*seen_a.lock().unwrap(), vec![0x41, 0x0D]);
+    assert_eq!(*seen_b.lock().unwrap(), vec![0x41], "吞键后不得继续分发");
+
+    // A 卸载后钩子仍在（B 还在），且回车改为放行
+    drop(guard_a);
+    assert_eq!(mock.key_callback_count(), 1);
+    assert!(mock.is_hooked());
+    assert_eq!(mock.feed_key(enter_event()), HookAction::Pass);
+    assert_eq!(*seen_b.lock().unwrap(), vec![0x41, 0x0D]);
+
+    // 最后一个回调卸载后钩子才真正卸载
+    drop(guard_b);
+    assert_eq!(mock.key_callback_count(), 0);
+    assert!(!mock.is_hooked());
+}
+
+/// 前台监听同样支持多消费者，且各自卸载互不影响
+#[test]
+fn multiple_foreground_watchers() {
+    let mock = MockSys::new();
+    let hits = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let first = std::sync::Arc::clone(&hits);
+    let g1 = mock
+        .watch_foreground(Box::new(move |_| {
+            first.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }))
+        .unwrap();
+    let second = std::sync::Arc::clone(&hits);
+    let g2 = mock
+        .watch_foreground(Box::new(move |_| {
+            second.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }))
+        .unwrap();
+    assert_eq!(mock.foreground_callback_count(), 2);
+
+    mock.emit_foreground(ForegroundInfo {
+        hwnd: hwnd(1),
+        pid: 2,
+        process_name: "notepad.exe".to_string(),
+    });
+    assert_eq!(
+        hits.load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "两个监听都该收到"
+    );
+
+    drop(g1);
+    assert_eq!(mock.foreground_callback_count(), 1);
+    mock.emit_foreground(ForegroundInfo {
+        hwnd: hwnd(1),
+        pid: 2,
+        process_name: "notepad.exe".to_string(),
+    });
+    assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 3);
+    drop(g2);
+    assert!(!mock.watch_installed());
+}
+
 /// 前台事件投递：回调拿到完整信息，且不影响 `foreground()` 查询
 #[test]
 fn foreground_watch_dispatches_events() {

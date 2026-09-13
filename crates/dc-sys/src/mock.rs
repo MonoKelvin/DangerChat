@@ -41,9 +41,18 @@ struct State {
     screen: Option<RgbaImage>,
     windows: HashMap<Hwnd, MockWindow>,
     foreground: Option<ForegroundInfo>,
-    foreground_cb: Option<ForegroundCallback>,
-    key_cb: Option<KeyCallback>,
-    hooked: bool,
+    /// 前台回调表：`(token, callback)`，全部调用（无「吞掉」语义）。
+    foreground_cbs: Vec<(u64, ForegroundCallback)>,
+    /// 键盘回调表：按注册顺序调用，任一 `Swallow` 即终止分发——与 RealSys 语义一致。
+    key_cbs: Vec<(u64, KeyCallback)>,
+    next_token: u64,
+}
+
+impl State {
+    fn token(&mut self) -> u64 {
+        self.next_token += 1;
+        self.next_token
+    }
 }
 
 struct Inner {
@@ -113,42 +122,52 @@ impl MockSys {
         self.inner.state().foreground = info;
     }
 
-    /// 模拟前台切换：更新状态并投递到已注册的 watch 回调。
+    /// 模拟前台切换：更新状态并投递给全部已注册回调。
     pub fn emit_foreground(&self, info: ForegroundInfo) {
-        {
+        let cbs = {
             let mut st = self.inner.state();
             st.foreground = Some(info.clone());
-        }
+            std::mem::take(&mut st.foreground_cbs)
+        };
         // 回调在锁外调用，避免回调内再访问 MockSys 造成死锁
-        let cb = self.inner.state().foreground_cb.take();
-        if let Some(cb) = cb {
-            cb(info);
-            let mut st = self.inner.state();
-            st.foreground_cb = Some(cb);
-            self.inner.foreground_events.fetch_add(1, Ordering::SeqCst);
+        for (_, cb) in &cbs {
+            cb(info.clone());
         }
+        let mut st = self.inner.state();
+        st.foreground_cbs = cbs;
+        self.inner.foreground_events.fetch_add(1, Ordering::SeqCst);
     }
 
-    /// 投递一次按键到已注册的钩子回调；未安装钩子时返回 `Pass`。
+    /// 投递一次按键：按注册顺序调用回调，任一 `Swallow` 即终止（与 RealSys 一致）。
     pub fn feed_key(&self, ev: KeyEvent) -> HookAction {
-        let cb = self.inner.state().key_cb.take();
-        match cb {
-            Some(cb) => {
-                let action = cb(&ev);
-                self.inner.state().key_cb = Some(cb);
-                action
+        let cbs = std::mem::take(&mut self.inner.state().key_cbs);
+        let mut action = HookAction::Pass;
+        for (_, cb) in &cbs {
+            if cb(&ev) == HookAction::Swallow {
+                action = HookAction::Swallow;
+                break;
             }
-            None => HookAction::Pass,
         }
+        self.inner.state().key_cbs = cbs;
+        action
     }
 
     /// 钩子当前是否处于已安装状态（断言 `HookGuard::drop` 生效）。
     pub fn is_hooked(&self) -> bool {
-        self.inner.state().hooked
+        !self.inner.state().key_cbs.is_empty()
     }
 
     pub fn watch_installed(&self) -> bool {
-        self.inner.state().foreground_cb.is_some()
+        !self.inner.state().foreground_cbs.is_empty()
+    }
+
+    /// 已注册的键盘回调数量（多消费者场景的断言依据）。
+    pub fn key_callback_count(&self) -> usize {
+        self.inner.state().key_cbs.len()
+    }
+
+    pub fn foreground_callback_count(&self) -> usize {
+        self.inner.state().foreground_cbs.len()
     }
 
     pub fn foreground_event_count(&self) -> u64 {
@@ -180,11 +199,16 @@ impl SysApi for MockSys {
     }
 
     fn watch_foreground(&self, cb: ForegroundCallback) -> Result<WatchGuard, SysError> {
-        self.inner.state().foreground_cb = Some(cb);
+        let token = {
+            let mut st = self.inner.state();
+            let token = st.token();
+            st.foreground_cbs.push((token, cb));
+            token
+        };
         let inner = Arc::clone(&self.inner);
         Ok(WatchGuard::new(move || {
             if let Ok(mut st) = inner.state.lock() {
-                st.foreground_cb = None;
+                st.foreground_cbs.retain(|(t, _)| *t != token);
             }
         }))
     }
@@ -242,16 +266,16 @@ impl SysApi for MockSys {
     }
 
     fn install_keyboard_hook(&self, cb: KeyCallback) -> Result<HookGuard, SysError> {
-        {
+        let token = {
             let mut st = self.inner.state();
-            st.key_cb = Some(cb);
-            st.hooked = true;
-        }
+            let token = st.token();
+            st.key_cbs.push((token, cb));
+            token
+        };
         let inner = Arc::clone(&self.inner);
         Ok(HookGuard::new(move || {
             if let Ok(mut st) = inner.state.lock() {
-                st.key_cb = None;
-                st.hooked = false;
+                st.key_cbs.retain(|(t, _)| *t != token);
             }
         }))
     }
