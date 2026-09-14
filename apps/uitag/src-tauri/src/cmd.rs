@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use crate::import::{collect_images, ImageEntry};
+use crate::import::ImageEntry;
 use crate::propagate::{propagate, PropagateRequest, PropagateResult};
-use crate::state::{load, save, state_path, AnnoBox, Autosave};
+use crate::state::{self, AnnoBox, Autosave};
 use crate::tags::TagsConfig;
 
 #[derive(Debug, thiserror::Error, Serialize)]
@@ -29,11 +29,6 @@ impl From<crate::state::StateError> for UiTagError {
 pub type CmdResult<T> = Result<T, UiTagError>;
 
 #[tauri::command]
-pub fn list_images(paths: Vec<String>) -> CmdResult<Vec<ImageEntry>> {
-    Ok(collect_images(&paths))
-}
-
-#[tauri::command]
 pub fn load_tags(path: Option<String>) -> CmdResult<TagsConfig> {
     match path {
         Some(p) => {
@@ -45,14 +40,23 @@ pub fn load_tags(path: Option<String>) -> CmdResult<TagsConfig> {
     }
 }
 
+/// 打开工作目录：图片清单 + 目录下 annotations.json 的标注（无则创建空文件）。
 #[tauri::command]
-pub fn save_state(autosave: Autosave) -> CmdResult<()> {
-    save(&autosave, &state_path()).map_err(Into::into)
+pub fn open_workspace(dir: String) -> CmdResult<Workspace> {
+    let (images, autosave) = state::open_workspace(std::path::Path::new(&dir))
+        .map_err(UiTagError::from)?;
+    Ok(Workspace { images, autosave })
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Workspace {
+    pub images: Vec<ImageEntry>,
+    pub autosave: Autosave,
 }
 
 #[tauri::command]
-pub fn load_state() -> CmdResult<Option<Autosave>> {
-    load(&state_path()).map_err(Into::into)
+pub fn save_state(dir: String, autosave: Autosave) -> CmdResult<()> {
+    state::save_workspace(&autosave, std::path::Path::new(&dir)).map_err(Into::into)
 }
 
 /// 导出请求（P4 实现 zip 写出，DTO 先定下来供前端对齐）。
@@ -82,4 +86,30 @@ pub fn export_zip(req: ExportRequest) -> CmdResult<String> {
 #[tauri::command]
 pub fn propagate_boxes(req: PropagateRequest) -> CmdResult<Vec<PropagateResult>> {
     propagate(&req).map_err(UiTagError::State)
+}
+
+/// 在系统文件管理器中定位该文件（Windows 资源管理器选中态）。
+#[tauri::command]
+pub fn reveal_path(path: String) -> CmdResult<()> {    #[cfg(target_os = "windows")]
+    let result = std::process::Command::new("explorer")
+        .arg(format!("/select,{path}"))
+        .spawn()
+        .map(|_| ());
+    #[cfg(target_os = "macos")]
+    let result = std::process::Command::new("open").args(["-R", &path]).spawn().map(|_| ());
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    let result = std::process::Command::new("xdg-open")
+        .arg(std::path::Path::new(&path).parent().unwrap_or(std::path::Path::new(".")))
+        .spawn()
+        .map(|_| ());
+    result.map_err(|e| UiTagError::State(format!("打开文件管理器失败：{e}")))
+}
+
+/// 识别当前图片的分割线（后台线程，结果缓存）。
+#[tauri::command]
+pub async fn detect_lines(path: String, min_run: u32) -> CmdResult<Vec<crate::detect::SnapLine>> {
+    tauri::async_runtime::spawn_blocking(move || crate::detect::detect(&path, min_run))
+        .await
+        .map_err(|e| UiTagError::State(format!("识别任务失败：{e}")))?
+        .map_err(UiTagError::State)
 }

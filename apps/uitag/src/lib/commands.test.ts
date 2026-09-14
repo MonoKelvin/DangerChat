@@ -49,6 +49,15 @@ describe('applyCmd', () => {
     applyCmd(a, cmd, 'do');
     expect(a[P]).toHaveLength(1);
   });
+
+  it('clear 的 do/undo 互逆（整图清空可还原）', () => {
+    const a = { [P]: [box('a'), box('b')] };
+    const cmd = { kind: 'clear' as const, path: P, boxes: a[P] };
+    const cleared = applyCmd(a, cmd, 'do');
+    expect(cleared[P]).toHaveLength(0);
+    const restored = applyCmd(cleared, cmd, 'undo');
+    expect(restored[P]).toEqual([box('a'), box('b')]);
+  });
 });
 
 /// UT-TAG-04：命令模式栈——撤销/重做序列与 push 清空 redo 语义。

@@ -9,7 +9,8 @@ export type Cmd =
   | { kind: 'add'; path: string; box: AnnoBox }
   | { kind: 'delete'; path: string; index: number; box: AnnoBox }
   | { kind: 'transform'; path: string; index: number; before: AnnoBox; after: AnnoBox }
-  | { kind: 'relabel'; path: string; index: number; before: string; after: string };
+  | { kind: 'relabel'; path: string; index: number; before: string; after: string }
+  | { kind: 'clear'; path: string; boxes: AnnoBox[] };
 
 export type Direction = 'do' | 'undo';
 
@@ -38,6 +39,10 @@ export function applyCmd(
       break;
     case 'relabel':
       next[cmd.index] = { ...next[cmd.index], tag: dir === 'do' ? cmd.after : cmd.before };
+      break;
+    case 'clear':
+      if (dir === 'do') next.length = 0;
+      else next.splice(0, next.length, ...cmd.boxes);
       break;
   }
   return { ...annos, [cmd.path]: next };
