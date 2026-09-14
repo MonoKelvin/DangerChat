@@ -1,0 +1,54 @@
+/** 契约类型（与 crates/dc-bridge/src/dto.rs 对齐；fixtures 双侧断言防漂移） */
+
+export type GuardLevel = 'safe' | 'warn' | 'block';
+
+/** alert://blocked 载荷 */
+export interface AlertPayload {
+  level: GuardLevel;
+  score: number;
+  reasons: string[];
+  chat_target: string | null;
+  draft_text: string;
+  draft_fingerprint: number;
+  draft_epoch: number;
+  countdown_secs: number;
+}
+
+/** guard://status 载荷 */
+export interface StatusPayload {
+  state: 'active' | 'suspended' | 'paused' | 'cooldown';
+  target_process: string;
+  target_found: boolean;
+}
+
+/** guard://stats 载荷（无消息原文） */
+export interface StatsPayload {
+  today_blocked: number;
+  alert_failed: number;
+  last_capture_ms: number | null;
+  last_layout_ms: number | null;
+  last_ocr_ms: number | null;
+  last_sem_ms: number | null;
+}
+
+/** 配置项（get_config_schema 返回） */
+export interface ConfigFieldDto {
+  key: string;
+  ty: 'bool' | 'int' | 'float' | 'text' | 'enum' | 'strlist' | 'path';
+  default: unknown;
+  label: string;
+  help: string;
+  group: string;
+}
+
+export interface ContactDto {
+  name: string;
+  profile: string;
+}
+
+export interface RuleDto {
+  pattern: string;
+  match: string;
+  severity: string;
+  applies_to: string[];
+}

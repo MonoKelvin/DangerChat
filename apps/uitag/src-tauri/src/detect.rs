@@ -76,7 +76,7 @@ fn best_run(len: usize, min_run: u32, diff_fn: impl Fn(usize) -> bool) -> Option
     let mut last_diff = 0usize; // 最近一个差异像素位置
     let mut gap = 0u32;
     let mut in_run = false;
-    let mut update_best = |best: &mut Option<(u32, usize, usize)>, c: u32, s: usize, e: usize| {
+    let update_best = |best: &mut Option<(u32, usize, usize)>, c: u32, s: usize, e: usize| {
         if c >= min_run && best.map_or(true, |b| c > b.0) {
             *best = Some((c, s, e));
         }

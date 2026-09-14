@@ -283,4 +283,19 @@ impl SysApi for MockSys {
     fn ime_composing(&self) -> bool {
         self.inner.ime_composing.load(Ordering::SeqCst)
     }
+
+    /// 模拟发现：前台进程名匹配即返回前台 hwnd（Mock 场景「目标窗口」总是
+    /// 通过 `set_foreground` 注册的那一个；发现语义与前台判定天然一致）。
+    /// 窗口必须存在（`set_window` 注册过）且未最小化。
+    fn find_window_by_process(&self, process_name: &str) -> Option<Hwnd> {
+        let st = self.inner.state();
+        let fg = st.foreground.as_ref()?;
+        if !fg.process_name.eq_ignore_ascii_case(process_name) {
+            return None;
+        }
+        match st.windows.get(&fg.hwnd) {
+            Some(w) if !w.minimized => Some(fg.hwnd),
+            _ => None,
+        }
+    }
 }

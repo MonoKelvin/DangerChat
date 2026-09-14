@@ -278,7 +278,7 @@ export const useStore = create<UiTagStore>((set, get) => ({
     s.commit({ kind: 'relabel', path: s.current, index, before: box.tag, after: tag });
   },
 
-  /** 把当前图的标注传播到其余图片（NCC 模板匹配，预标注待人修）。
+  /** 把当前图的标注传播到其余图片（几何传播：窗口锚点检测 + 按结构映射）。
    *  overwrite=false 时只处理未标注的图片；逐张调用后端以推进进度。
    *  返回 (获得标注张数, 处理总张数)。 */
   propagateToAll: async (overwrite) => {

@@ -251,6 +251,13 @@ pub trait SysApi: Send + Sync {
     /// [`HookGuard`] 释放时只摘除**自己的**回调；最后一个回调被摘除后才真正卸载系统钩子。
     fn install_keyboard_hook(&self, cb: KeyCallback) -> Result<HookGuard, SysError>;
 
+    /// 按可执行进程名找主窗口（如 `"WeChat.exe"`）。同一进程多窗口时返回
+    /// 第一个可见顶层窗口（EnumWindows 顺序）；不存在返回 `None`。
+    ///
+    /// 用途：guard 装配期的目标窗口发现（§5.8）；过滤不可见/最小化/工具窗口。
+    /// 进程名比较不区分大小写。
+    fn find_window_by_process(&self, process_name: &str) -> Option<Hwnd>;
+
     /// 输入法是否处于组合态（`VK_PROCESSKEY` + `EVENT_OBJECT_IME_*`，FR-SRC-09）。
     fn ime_composing(&self) -> bool;
 }

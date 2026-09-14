@@ -33,6 +33,7 @@ pub struct Guard {
     cancel: crate::contract::CancellationToken,
     core: Arc<GuardCore<crate::capture::CaptureStage, LayoutStage, OcrStage, SemStage>>,
     stages: StagesHandle,
+    target_hwnd: Hwnd,
 }
 
 #[allow(dead_code)] // capture/sem 为生命周期持有（guard 存活即 Stage 存活）
@@ -128,6 +129,7 @@ impl Guard {
                 sem,
                 mctx_factory: Arc::new(mctx_factory),
             },
+            target_hwnd,
         })
     }
 
@@ -135,6 +137,11 @@ impl Guard {
         &self,
     ) -> &Arc<GuardCore<crate::capture::CaptureStage, LayoutStage, OcrStage, SemStage>> {
         &self.core
+    }
+
+    /// 装配时的目标窗口（泵定位弹窗用）。
+    pub fn target_hwnd(&self) -> Hwnd {
+        self.target_hwnd
     }
 
     /// 模型重载（§5.8 生命周期：唤醒/导入新模型后调用；重载完成前触发走 fail-open）。
