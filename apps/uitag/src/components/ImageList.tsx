@@ -4,14 +4,21 @@ import { IconCheck, IconPhoto } from '@tabler/icons-react';
 import { useStore } from '../store';
 import { cn } from '@/lib/utils';
 
-/** 左侧图片列表：缩略图 + 已标注角标 + 上下张导航（键盘 ↑↓）。 */
+/** 左侧图片列表：缩略图 + 已标注角标 + 上下张导航（键盘 ↑↓）。
+ *  支持多选：Ctrl 点选增减、Shift 范围选、Ctrl+Shift 范围叠加。 */
 export function ImageList() {
   const images = useStore((s) => s.images);
   const current = useStore((s) => s.current);
   const setCurrent = useStore((s) => s.setCurrent);
+  const selection = useStore((s) => s.selection);
+  const applySelection = useStore((s) => s.applySelection);
   const annos = useStore((s) => s.annos);
   const tags = useStore((s) => s.tags.tags);
   const listRef = useRef<HTMLDivElement>(null);
+  const anchorRef = useRef(0); // Shift 范围选锚点（上次点击项）
+
+  /** 生效选择集：空数组退化为 [current]（单选） */
+  const sel = selection.length > 0 ? selection : current ? [current] : [];
 
   // 当前图片变化（含启动时恢复上次选中）时滚动到可视区
   useEffect(() => {
@@ -19,6 +26,22 @@ export function ImageList() {
     const el = listRef.current.querySelector(`[data-path="${CSS.escape(current)}"]`);
     el?.scrollIntoView({ block: 'nearest' });
   }, [current, images]);
+
+  const onItemClick = (e: React.MouseEvent, path: string, index: number) => {
+    if (e.shiftKey) {
+      const [a, b] = anchorRef.current <= index ? [anchorRef.current, index] : [index, anchorRef.current];
+      const range = images.slice(a, b + 1).map((i) => i.path);
+      const base = e.ctrlKey || e.metaKey ? sel : [];
+      applySelection([...new Set([...base, ...range])]);
+    } else if (e.ctrlKey || e.metaKey) {
+      anchorRef.current = index;
+      const next = sel.includes(path) ? sel.filter((p) => p !== path) : [...sel, path];
+      applySelection(next.length ? next : [path]);
+    } else {
+      anchorRef.current = index;
+      setCurrent(path);
+    }
+  };
 
   const colorOf = useMemo(() => {
     const m = new Map(tags.map((t) => [t.name, t.color]));
@@ -60,20 +83,23 @@ export function ImageList() {
       ) : (
         <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2 pb-2">
           <div className="space-y-0.5">
-            {images.map((img) => {
+            {images.map((img, index) => {
               const boxes = annos[img.path] ?? [];
               const used = [...new Set(boxes.map((b) => b.tag))];
               const active = current === img.path;
+              const inSel = !active && sel.includes(img.path);
               return (
                 <button
                   key={img.path}
                   data-path={img.path}
-                  onClick={() => setCurrent(img.path)}
+                  onClick={(e) => onItemClick(e, img.path, index)}
                   className={cn(
                     'flex w-full items-center gap-2.5 rounded-md p-1.5 text-left transition-all',
                     active
-                      ? 'relative z-10 bg-accent shadow-[0_6px_18px_rgb(0_0_0/0.6)] ring-[inset_0_0_0_1px_var(--border)]'
-                      : 'relative hover:bg-accent/50',
+                      ? 'relative z-10 bg-white shadow-[0_2px_8px_rgb(0_0_0/0.1)] ring-[inset_0_0_0_1px_var(--border)] dark:bg-accent dark:shadow-[0_6px_18px_rgb(0_0_0/0.6)]'
+                      : inSel
+                        ? 'relative bg-primary/15 ring-[inset_0_0_0_1px_var(--color-primary)/40]'
+                        : 'relative hover:bg-accent/50',
                   )}
                 >
                   <div

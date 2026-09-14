@@ -4,6 +4,16 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>dc_uitag 截图打标</title>
+    <script>
+      // 首帧防闪：CSS 加载前先按持久化主题挂好 .dark 类（与 lib/theme.ts 同逻辑）
+      try {
+        var t = localStorage.getItem('uitag:theme') || 'dark';
+        var dark =
+          t === 'dark' ||
+          (t === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+        if (dark) document.documentElement.classList.add('dark');
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

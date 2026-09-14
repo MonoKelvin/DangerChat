@@ -31,11 +31,11 @@ const ctrl = (e: KeyboardEvent) => e.ctrlKey || e.metaKey;
 
 export const SHORTCUTS: ShortcutItem[] = [
   // ── 绘制标注 ──
-  { id: 'draw-drag', group: 'draw', desc: '按当前标签绘制标注框', keys: <span>拖拽</span> },
+  { id: 'draw-drag', group: 'draw', desc: '绘制标注框', keys: <span>拖拽</span> },
   {
     id: 'tag-num',
     group: 'draw',
-    desc: '按数字快速切换标签（选中即进入绘制）',
+    desc: '切换标签',
     keys: (
       <span>
         <Kbd>1</Kbd>…<Kbd>9</Kbd>
@@ -50,7 +50,7 @@ export const SHORTCUTS: ShortcutItem[] = [
   {
     id: 'esc',
     group: 'draw',
-    desc: '取消绘制或退出绘制模式',
+    desc: '取消 / 退出绘制',
     keys: (
       <span>
         <Kbd>Esc</Kbd> / 点击空白
@@ -60,19 +60,42 @@ export const SHORTCUTS: ShortcutItem[] = [
     run: () => {
       const s = useStore.getState();
       if (s.drag) s.setDrag(null); // 先取消进行中的拖拽/绘制
-      s.exitDraw(); // 退出绘制模式 + 取消标签选中
+      else if (s.selection.length > 1) {
+        // 多选状态：退回单选（当前图）
+        s.applySelection([s.current ?? s.selection[s.selection.length - 1]]);
+        s.select(null);
+        return;
+      } else s.exitDraw(); // 退出绘制模式 + 取消标签选中
       s.select(null);
     },
   },
-  { id: 'box-context', group: 'draw', desc: '修改标签 / 删除', keys: <span>右键标注框</span> },
+  { id: 'box-context', group: 'draw', desc: '改标签 / 删除', keys: <span>右键标注框</span> },
+  {
+    id: 'box-lock',
+    group: 'draw',
+    desc: '锁定 / 解锁',
+    keys: <span>双击标注框</span>,
+  },
+  {
+    id: 'snap-all',
+    group: 'draw',
+    desc: '显示全部吸附线',
+    keys: <Kbd>Alt</Kbd>,
+  },
+  {
+    id: 'snap-off',
+    group: 'draw',
+    desc: '拖拽时不吸附',
+    keys: <Kbd>Ctrl</Kbd>,
+  },
 
   // ── 编辑标注 ──
-  { id: 'box-move', group: 'edit', desc: '移动标注框', keys: <span>拖动框体</span> },
+  { id: 'box-move', group: 'edit', desc: '移动', keys: <span>拖动框体</span> },
   { id: 'box-resize', group: 'edit', desc: '调整大小', keys: <span>拖动锚点</span> },
   {
     id: 'box-delete',
     group: 'edit',
-    desc: '删除选中框',
+    desc: '删除',
     keys: (
       <span>
         <Kbd>Del</Kbd> / <Kbd>Backspace</Kbd>
@@ -102,7 +125,7 @@ export const SHORTCUTS: ShortcutItem[] = [
   {
     id: 'nav-prev-next',
     group: 'nav',
-    desc: '上一张 / 下一张图片',
+    desc: '上一张 / 下一张',
     keys: (
       <span>
         <Kbd>↑</Kbd> · <Kbd>↓</Kbd>
@@ -116,8 +139,9 @@ export const SHORTCUTS: ShortcutItem[] = [
       if (next >= 0 && next < s.images.length) s.setCurrent(s.images[next].path);
     },
   },
-  { id: 'zoom', group: 'nav', desc: '缩放画布（锚定光标位置）', keys: <span>滚轮</span> },
-  { id: 'pan', group: 'nav', desc: '平移视图', keys: <span>中键拖动</span> },
+  { id: 'zoom', group: 'nav', desc: '缩放', keys: <span>滚轮</span> },
+  { id: 'zoom-100', group: 'nav', desc: '缩放到 100%', keys: <span>单击中键</span> },
+  { id: 'pan', group: 'nav', desc: '平移', keys: <span>中键拖动</span> },
 ];
 
 export const SHORTCUT_GROUPS: { id: GroupId; title: string }[] = [
