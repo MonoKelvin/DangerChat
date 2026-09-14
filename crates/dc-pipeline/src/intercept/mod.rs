@@ -231,9 +231,9 @@ pub struct Intercept {
     config: InterceptConfig,
     state: AtomicU8,
     foreground: ForegroundTracker,
-    tracker: DraftTracker,
+    tracker: Arc<DraftTracker>,
     slot: Arc<VerdictSlot>,
-    triggers: TriggerBus,
+    triggers: Arc<TriggerBus>,
     alerts: AlertBus,
     metrics: MetricsRecorder,
     log_dir: std::path::PathBuf,
@@ -260,9 +260,9 @@ impl Intercept {
             config,
             state: AtomicU8::new(GuardState::Suspended.to_u8()),
             foreground,
-            tracker,
+            tracker: Arc::new(tracker),
             slot: Arc::new(VerdictSlot::new()),
-            triggers: TriggerBus::new(trigger_capacity),
+            triggers: Arc::new(TriggerBus::new(trigger_capacity)),
             alerts: AlertBus::new(alert_capacity),
             metrics: MetricsRecorder::default(),
             log_dir: std::path::PathBuf::new(),
@@ -280,6 +280,18 @@ impl Intercept {
 
     pub fn log_dir(&self) -> &std::path::Path {
         &self.log_dir
+    }
+
+    pub fn slot_arc(&self) -> Arc<VerdictSlot> {
+        Arc::clone(&self.slot)
+    }
+
+    pub fn triggers_arc(&self) -> Arc<TriggerBus> {
+        Arc::clone(&self.triggers)
+    }
+
+    pub fn tracker_arc(&self) -> Arc<DraftTracker> {
+        Arc::clone(&self.tracker)
     }
 
     pub fn slot(&self) -> Arc<VerdictSlot> {

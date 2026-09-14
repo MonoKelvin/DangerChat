@@ -41,6 +41,13 @@ ort = { version = "2.0.0-rc.13", features = ["directml"] }
 # OCR 三件套流水线（M3 选型 §5.3：det→cls→rec 全封装 + 协作取消）
 rapidocr-core = { version = "0.2.2", default-features = false }
 
+# 语义模型分词（BGE tokenizer.json；regex 走 fancy-regex 纯 Rust，不引 onig C 绑定）
+tokenizers = { version = "0.21", default-features = false, features = ["fancy-regex"] }
+
+# L1 规则引擎多字面量匹配 + 正则
+aho-corasick = "1"
+regex = "1"
+
 # 内部 crate
 dc-core = { path = "crates/dc-core" }
 dc-sys = { path = "crates/dc-sys" }

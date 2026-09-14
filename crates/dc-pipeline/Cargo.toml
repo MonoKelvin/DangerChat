@@ -11,6 +11,7 @@ publish.workspace = true
 dc-core.workspace = true
 dc-sys.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 crossbeam-channel.workspace = true
@@ -18,10 +19,13 @@ arc-swap.workspace = true
 image.workspace = true
 ort.workspace = true
 rapidocr-core.workspace = true
+tokenizers.workspace = true
+aho-corasick.workspace = true
+regex.workspace = true
+toml.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-serde_json.workspace = true
 
 [lints]
 workspace = true

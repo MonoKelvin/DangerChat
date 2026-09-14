@@ -185,3 +185,108 @@ impl Harness {
 pub fn dangerous_verdict(reason: &str) -> Verdict {
     Verdict::block(reason)
 }
+
+// ---------------------------------------------------------------------------
+// MockStage（M5 guard 测试）：可脚本化的 Stage 替身
+// ---------------------------------------------------------------------------
+
+use crate::contract::{Module, PipelineContext, Stage, StageError};
+use dc_core::{MetricsRecorder, ModuleContext, ModuleError, ModuleMetrics};
+use std::sync::Mutex as StdMutex;
+
+/// 可脚本化的 Stage 替身：预设输出队列按序消费；失败注入（Recoverable/Fatal）；
+/// 调用计数（含 init/shutdown 次数，验证模型生命周期）。
+pub struct MockStage<I, O> {
+    pub id: &'static str,
+    /// 输出队列（消费到空后：重复最后一个输出，简化测试）。
+    pub outputs: StdMutex<VecDeque<Result<O, StageError>>>,
+    pub calls: std::sync::atomic::AtomicUsize,
+    pub init_calls: std::sync::atomic::AtomicUsize,
+    pub shutdown_calls: std::sync::atomic::AtomicUsize,
+    /// process 收到的输入快照（断言用）。
+    pub inputs: StdMutex<Vec<String>>,
+    _marker: std::marker::PhantomData<fn(I) -> I>,
+}
+
+impl<I, O> MockStage<I, O>
+where
+    I: Clone + Send + Sync + 'static + std::fmt::Debug,
+    O: Clone + Send + Sync + 'static,
+{
+    pub fn new(id: &'static str, outputs: Vec<Result<O, StageError>>) -> Self {
+        Self {
+            id,
+            outputs: StdMutex::new(outputs.into()),
+            calls: std::sync::atomic::AtomicUsize::new(0),
+            init_calls: std::sync::atomic::AtomicUsize::new(0),
+            shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
+            inputs: StdMutex::new(Vec::new()),
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    pub fn call_count(&self) -> usize {
+        self.calls.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+use std::collections::VecDeque;
+
+impl<I, O> Module for MockStage<I, O>
+where
+    I: Clone + Send + Sync + 'static + std::fmt::Debug,
+    O: Clone + Send + Sync + 'static,
+{
+    fn id(&self) -> &'static str {
+        self.id
+    }
+    fn config_schema(&self) -> Vec<dc_core::ConfigField> {
+        Vec::new()
+    }
+    fn init(&mut self, _ctx: &ModuleContext) -> Result<(), ModuleError> {
+        self.init_calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Ok(())
+    }
+    fn shutdown(&mut self) -> Result<(), ModuleError> {
+        self.shutdown_calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Ok(())
+    }
+    fn metrics(&self) -> ModuleMetrics {
+        MetricsRecorder::default().snapshot()
+    }
+}
+
+impl<I, O> Stage for MockStage<I, O>
+where
+    I: Clone + Send + Sync + 'static + std::fmt::Debug,
+    O: Clone + Send + Sync + 'static,
+{
+    type Input = I;
+    type Output = O;
+
+    fn process(&self, input: Self::Input, _ctx: &PipelineContext) -> Result<Self::Output, StageError> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.inputs
+            .lock()
+            .map(|mut v| v.push(format!("{input:?}")))
+            .ok();
+        let mut q = self.outputs.lock().map_err(|_| StageError::Recoverable("mock 锁中毒".into()))?;
+        if q.is_empty() {
+            return Err(StageError::Recoverable(format!("{} 无预置输出", self.id)));
+        }
+        if q.len() == 1 {
+            // 只剩一个：按其种类重复消费（简化长序列测试；StageError 不 Clone）
+            match &q[0] {
+                Ok(v) => Ok(v.clone()),
+                Err(StageError::Recoverable(m)) => Err(StageError::Recoverable(m.clone())),
+                Err(StageError::Fatal(m)) => Err(StageError::Fatal(m.clone())),
+                Err(StageError::Cancelled) => Err(StageError::Cancelled),
+            }
+        } else {
+            match q.pop_front() {
+                Some(r) => r,
+                None => unreachable!("len>1 已保证"),
+            }
+        }
+    }
+}

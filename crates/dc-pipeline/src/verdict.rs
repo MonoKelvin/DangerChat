@@ -79,6 +79,27 @@ impl Verdict {
         Self::new(VerdictLevel::Warn, 0.5, vec![reason.into()])
     }
 
+    /// L1 规则命中（§5.7）：severity 直接决定级别，score 给 1.0/0.5 的名义值。
+    pub fn from_rule(pattern: &str, severity: VerdictLevel) -> Self {
+        let reason = format!("命中违禁词「{pattern}」(severity={})", severity.as_str());
+        let score = if severity == VerdictLevel::Block { 1.0 } else { 0.5 };
+        Self::new(severity, score, vec![reason])
+    }
+
+    /// L2 危险分（§5.7 阈值规则）：score 越过阈值 +0.15 区间升 Block，区间内 Warn。
+    /// 恰好等于阈值即视为越线（≥，与文档「越过」的保守取向一致——正式场景宁严勿松）。
+    /// 比较带 1e-6 容差：0.55+0.15 的 f32 是 0.70000001，不给容差会把整数分值随机降级。
+    pub fn from_score(score: f32, threshold: f32) -> Self {
+        const EPS: f32 = 1e-6;
+        if score >= threshold + 0.15 - EPS {
+            Self::new(VerdictLevel::Block, score, vec![])
+        } else if score >= threshold - EPS {
+            Self::new(VerdictLevel::Warn, score, vec![])
+        } else {
+            Self::new(VerdictLevel::Safe, score, vec![])
+        }
+    }
+
     pub fn with_epoch(mut self, epoch: u64) -> Self {
         self.draft_epoch = epoch;
         self
