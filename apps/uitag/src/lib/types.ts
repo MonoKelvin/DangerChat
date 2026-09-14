@@ -56,3 +56,12 @@ export interface PropagateResult {
   path: string;
   boxes: PropagatedBox[];
 }
+
+/** 识别出的吸附线：h = 水平线（pos 为 y），v = 垂直线（pos 为 x），单位图像像素 */
+export interface SnapLine {
+  orient: 'h' | 'v';
+  pos: number;
+  start: number;
+  end: number;
+  strength: number;
+}

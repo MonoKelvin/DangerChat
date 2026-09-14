@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { save } from '@tauri-apps/plugin-dialog';
 import { IconCircleCheck, IconFileZip, IconLoader2 } from '@tabler/icons-react';
 import { useStore } from '../store';
@@ -11,6 +11,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from './ui/dialog';
+
+/** Tauri invoke 的错误是 {kind, message} 对象，直接 String() 会变成 [object Object]。 */
+function fmtError(e: unknown): string {
+  if (typeof e === 'string') return e;
+  if (e && typeof e === 'object' && 'message' in e) return String((e as { message: unknown }).message);
+  try {
+    return JSON.stringify(e);
+  } catch {
+    return String(e);
+  }
+}
 
 /** 导出对话框：选目标路径 → export_zip → 展示结果。 */
 export function ExportDialog({
@@ -27,6 +38,16 @@ export function ExportDialog({
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // 重新打开时在渲染期同步复位（不在关闭时清——退场动画期间会闪现回表单页）
+  const wasOpen = useRef(false);
+  if (open && !wasOpen.current) {
+    wasOpen.current = true;
+    setBusy(false);
+    setResult(null);
+    setError(null);
+  }
+  if (!open) wasOpen.current = false;
+
   const labeled = images.filter((i) => (annos[i.path]?.length ?? 0) > 0).length;
   const boxCount = Object.values(annos).reduce((n, b) => n + b.length, 0);
 
@@ -42,23 +63,19 @@ export function ExportDialog({
       if (!dest) return;
       setResult(await exportAll(dest));
     } catch (e) {
-      setError(String(e));
+      setError(fmtError(e));
     } finally {
       setBusy(false);
     }
   };
 
   const reset = (v: boolean) => {
-    if (!v) {
-      setResult(null);
-      setError(null);
-    }
     onOpenChange(v);
   };
 
   return (
     <Dialog open={open} onOpenChange={reset}>
-      <DialogContent className="border-border/70 bg-background/95 shadow-2xl backdrop-blur-xl sm:max-w-md">
+      <DialogContent className="shadow-2xl">
         {result ? (
           <>
             <DialogHeader>

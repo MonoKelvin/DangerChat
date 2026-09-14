@@ -125,3 +125,49 @@
     background-clip: content-box;
   }
 }
+
+/* ---- 锁定图标：弹簧抖动进出动画 ---- */
+@keyframes lock-spring-in {
+  0% {
+    transform: scale(0) rotate(-24deg);
+    opacity: 0;
+  }
+  55% {
+    transform: scale(1.22) rotate(5deg);
+    opacity: 1;
+  }
+  75% {
+    transform: scale(0.92) rotate(-2deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+@keyframes lock-spring-out {
+  0% {
+    transform: scale(1) rotate(0deg);
+    opacity: 1;
+  }
+  30% {
+    transform: scale(1.18) rotate(4deg);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0) rotate(-18deg);
+    opacity: 0;
+  }
+}
+
+.lock-spring {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.lock-spring-in {
+  animation: lock-spring-in 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.lock-spring-out {
+  animation: lock-spring-out 0.3s cubic-bezier(0.5, 0, 0.75, 0) both;
+}

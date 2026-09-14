@@ -54,6 +54,14 @@ pub fn write_dataset_zip(req: &ExportRequest, dest: &Path) -> Result<std::path::
         let stem = stem_of(&img.src)?;
         let bytes = std::fs::read(&img.src).map_err(|e| format!("读取图片失败 {}: {e}", img.src))?;
 
+        // 前端只对浏览过的图片有尺寸缓存；缺失时从图片文件头实测（避免 0 尺寸导致导出失败）
+        let (iw, ih) = if img.width > 0 && img.height > 0 {
+            (img.width, img.height)
+        } else {
+            image::image_dimensions(&img.src)
+                .map_err(|e| format!("读取图片尺寸失败 {}: {e}", img.src))?
+        };
+
         let img_name = format!("images/{stem}.{}", ext_of(&img.src)?);
         zip.start_file(&img_name, opts).map_err(zip_err)?;
         zip.write_all(&bytes).map_err(|e| format!("zip 写入失败：{e}"))?;
@@ -66,7 +74,7 @@ pub fn write_dataset_zip(req: &ExportRequest, dest: &Path) -> Result<std::path::
             let Some(class) = class_ids.get(b.tag.as_str()) else {
                 return Err(format!("标注 tag「{}」不在 tags 表中", b.tag));
             };
-            let Some(line) = to_yolo_line(b, img.width, img.height, *class) else {
+            let Some(line) = to_yolo_line(b, iw, ih, *class) else {
                 return Err(format!("图片尺寸非法：{stem}"));
             };
             zip.write_all(line.as_bytes()).map_err(|e| format!("zip 写入失败：{e}"))?;
@@ -216,6 +224,29 @@ mod tests {
         let out = tmp.path().join("d.zip");
         let err = write_dataset_zip(&req, &out).unwrap_err();
         assert!(err.contains("no_such_tag"), "{err}");
+    }
+
+    /// 前端尺寸缓存缺失（width/height = 0，未浏览过的图片）时，
+    /// 从图片文件头实测尺寸，不再导出失败。
+    #[test]
+    fn zero_dims_fall_back_to_image_header() {
+        let (tmp, mut req) = fixture();
+        let path = tmp.path().join("shot3.png");
+        image::RgbImage::from_pixel(4, 6, image::Rgb([10, 20, 30]))
+            .save(&path)
+            .unwrap();
+        for img in req.images.iter_mut() {
+            if img.src.ends_with("shot3.png") {
+                img.width = 0;
+                img.height = 0;
+            }
+        }
+        req.annos.insert(
+            "shot3".to_string(),
+            vec![AnnoBox { tag: "msg_input".into(), x: 1.0, y: 1.0, w: 2.0, h: 2.0 }],
+        );
+        let out = tmp.path().join("d.zip");
+        write_dataset_zip(&req, &out).unwrap();
     }
 
     fn read_entry(zip: &mut ZipArchive<std::fs::File>, name: &str) -> String {

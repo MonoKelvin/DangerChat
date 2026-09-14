@@ -1,16 +1,15 @@
 import { useEffect, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import * as api from './lib/tauri';
+import { installShortcuts } from './lib/shortcuts';
 import {
   IconArrowBackUp,
   IconArrowForwardUp,
-  IconCircleCheck,
   IconFileZip,
   IconFolderOpen,
+  IconMagnet,
   IconMaximize,
-  IconPhoto,
-  IconSparkles,
-  IconX,
   IconZoomIn,
   IconZoomOut,
 } from '@tabler/icons-react';
@@ -24,7 +23,7 @@ import { ShortcutsHelp } from './components/ShortcutsHelp';
 import { WindowControls } from './components/WindowControls';
 import { Button } from './components/ui/button';
 import { Separator } from './components/ui/separator';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './components/ui/tooltip';
+import { TooltipLayer } from './components/ui/tooltip-layer';
 
 function ToolButton({
   icon,
@@ -38,51 +37,83 @@ function ToolButton({
   disabled?: boolean;
 }) {
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" onClick={onClick} disabled={disabled}>
-          {icon}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom">{label}</TooltipContent>
-    </Tooltip>
+    <Button
+      variant="ghost"
+      size="icon"
+      className="size-8 text-muted-foreground"
+      onClick={onClick}
+      disabled={disabled}
+      data-tip={label}
+    >
+      {icon}
+    </Button>
   );
 }
 
-/** 传播结果 toast（自动消失）。 */
-function PropagateToast() {
-  const last = useStore((s) => s.lastPropagate);
-  const [shown, setShown] = useState<typeof last>(null);
-
-  useEffect(() => {
-    if (last) {
-      setShown(last);
-      const t = setTimeout(() => setShown(null), 5000);
-      return () => clearTimeout(t);
-    }
-  }, [last]);
-
-  if (!shown) return null;
+/** 吸附开关：状态栏右侧磁铁图标按钮。 */
+function SnapToggle() {
+  const snapEnabled = useStore((s) => s.snapEnabled);
+  const setSnapEnabled = useStore((s) => s.setSnapEnabled);
   return (
-    <div className="animate-in fade-in slide-in-from-bottom-4 fixed bottom-11 left-1/2 z-40 flex -translate-x-1/2 items-center gap-2.5 rounded-lg border border-border/70 bg-popover/80 px-4 py-2.5 text-[13px] shadow-2xl backdrop-blur-xl">
-      <IconCircleCheck className="size-4 text-emerald-500" />
-      <span className="text-popover-foreground">
-        预标注完成：<b className="tabular-nums">{shown.applied}</b>/{shown.total} 张图片获得标注，
-        请逐张检查修正（低置信度区域已自动跳过）
-      </span>
-      <button
-        className="ml-1 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
-        onClick={() => setShown(null)}
-      >
-        <IconX className="size-3.5" />
-      </button>
-    </div>
+    <button
+      className={
+        'flex size-5 items-center justify-center rounded-md transition-colors ' +
+        (snapEnabled
+          ? 'bg-primary/15 text-primary'
+          : 'text-muted-foreground/60 hover:bg-accent hover:text-foreground')
+      }
+      onClick={() => setSnapEnabled(!snapEnabled)}
+      data-tip={snapEnabled ? '捕捉吸附：开（拖拽时吸附分割线，Ctrl 临时禁用，Alt 显示全部线）' : '捕捉吸附：关'}
+    >
+      <IconMagnet className="size-3.5" />
+    </button>
   );
 }
 
-function App() {
-  const init = useStore((s) => s.init);
-  const importPaths = useStore((s) => s.importPaths);
+/** 吸附容差：数字文本点击变输入框（分割线判定的最小连续像素数）。 */
+function SnapTolerance() {
+  const tolerance = useStore((s) => s.snapTolerance);
+  const setTolerance = useStore((s) => s.setSnapTolerance);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+
+  const commit = () => {
+    const v = Number(draft);
+    if (Number.isFinite(v) && v > 0) setTolerance(v);
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        className="h-5 w-12 rounded-md bg-accent px-1 text-right text-xs tabular-nums text-foreground outline-none"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value.replace(/[^\d]/g, ''))}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') commit();
+          if (e.key === 'Escape') setEditing(false);
+        }}
+      />
+    );
+  }
+  return (
+    <button
+      className="min-w-8 rounded-md px-1 text-xs tabular-nums text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      onClick={() => {
+        setDraft(String(tolerance));
+        setEditing(true);
+      }}
+      data-tip="吸附容差：判定分割线的最小连续像素数（点击修改）"
+    >
+      {tolerance}
+    </button>
+  );
+}
+
+function App() {  const init = useStore((s) => s.init);
+  const openWorkspace = useStore((s) => s.openWorkspace);
   const setZoom = useStore((s) => s.setZoom);
   const requestFit = useStore((s) => s.requestFit);
   const zoom = useStore((s) => s.zoom);
@@ -93,12 +124,7 @@ function App() {
   const history = useStore((s) => s.history);
   const current = useStore((s) => s.current);
   const images = useStore((s) => s.images);
-  const annos = useStore((s) => s.annos);
   const dims = useStore((s) => s.dims);
-  const selected = useStore((s) => s.selected);
-  const propagating = useStore((s) => s.propagating);
-  const propagateToAll = useStore((s) => s.propagateToAll);
-  const setCurrent = useStore((s) => s.setCurrent);
   const tool = useStore((s) => s.tool);
   useStore((s) => s.historyTick);
 
@@ -117,47 +143,30 @@ function App() {
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
   }, [flush]);
 
-  // 全局快捷键：撤销/重做 + ↑↓ 上下张
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (document.activeElement !== document.body) return;
-      if (e.ctrlKey || e.metaKey) {
-        const k = e.key.toLowerCase();
-        if (k === 'z' && !e.shiftKey) {
-          e.preventDefault();
-          undo();
-        } else if ((k === 'z' && e.shiftKey) || k === 'y') {
-          e.preventDefault();
-          redo();
-        }
-        return;
-      }
-      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-        const s = useStore.getState();
-        const idx = s.images.findIndex((i) => i.path === s.current);
-        const next = idx + (e.key === 'ArrowDown' ? 1 : -1);
-        if (next >= 0 && next < s.images.length) {
-          e.preventDefault();
-          s.setCurrent(s.images[next].path);
-        }
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [undo, redo, setCurrent]);
+  // 全局快捷键：定义在 lib/shortcuts 注册表，此处仅安装分发器
+  useEffect(() => installShortcuts(), []);
 
-  const importFiles = async () => {
-    const picked = await open({
-      multiple: true,
-      directory: false,
-      filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'bmp', 'webp'] }],
-    });
-    if (picked) await importPaths(Array.isArray(picked) ? picked : [picked]);
-  };
+  // 分割线异步识别：切图或容差变化时重新识别（Rust 竐缓存，不阻塞界面）
+  const snapTolerance = useStore((s) => s.snapTolerance);
+  const setSnapLines = useStore((s) => s.setSnapLines);
+  useEffect(() => {
+    if (!current) {
+      setSnapLines([]);
+      return;
+    }
+    let alive = true;
+    api
+      .detectLines(current, snapTolerance)
+      .then((lines) => alive && setSnapLines(lines))
+      .catch(() => alive && setSnapLines([]));
+    return () => {
+      alive = false;
+    };
+  }, [current, snapTolerance, setSnapLines]);
 
   const importDir = async () => {
     const picked = await open({ multiple: false, directory: true });
-    if (picked) await importPaths([picked]);
+    if (picked) await openWorkspace(picked);
   };
 
   if (!ready) {
@@ -169,11 +178,10 @@ function App() {
   }
 
   const dim = current ? dims[current] : undefined;
-  const boxes = current ? (annos[current] ?? []) : [];
   const idx = current ? images.findIndex((i) => i.path === current) : -1;
 
   return (
-    <TooltipProvider delayDuration={400}>
+    <>
       <div className="flex h-full flex-col bg-background">
         {/* ── 顶栏 = 标题栏（无边框窗口，可拖拽移动；双击最大化）── */}
         <header
@@ -197,19 +205,15 @@ function App() {
 
           <Separator orientation="vertical" className="mx-1.5 !h-5" />
 
-          <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-[13px]" onClick={importFiles}>
-            <IconPhoto className="size-3.5" />
-            图片
-          </Button>
           <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-[13px]" onClick={importDir}>
             <IconFolderOpen className="size-3.5" />
-            目录
+            打开目录
           </Button>
 
           <Separator orientation="vertical" className="mx-1.5 !h-5" />
 
           <ToolButton icon={<IconArrowBackUp className="size-3.5" />} label="撤销 (Ctrl+Z)" onClick={undo} disabled={!history.canUndo} />
-          <ToolButton icon={<IconArrowForwardUp className="size-3.5" />} label="重做 (Ctrl+Shift+Z)" onClick={redo} disabled={!history.canRedo} />
+          <ToolButton icon={<IconArrowForwardUp className="size-3.5" />} label="重做 (Ctrl+Y)" onClick={redo} disabled={!history.canRedo} />
 
           <Separator orientation="vertical" className="mx-1.5 !h-5" />
 
@@ -217,10 +221,11 @@ function App() {
           <button
             className="h-8 min-w-12 rounded-md px-1 text-[13px] tabular-nums text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             onClick={() => setZoom(1)}
-            title="重置为 100%"
+            data-tip="重置为 100%"
           >
             {Math.round(zoom * 100)}%
           </button>
+
           <ToolButton icon={<IconZoomIn className="size-3.5" />} label="放大" onClick={() => setZoom(Math.min(5, zoom * 1.2))} />
           <ToolButton icon={<IconMaximize className="size-3.5" />} label="适应窗口" onClick={requestFit} />
 
@@ -236,29 +241,7 @@ function App() {
             </span>
           )}
 
-          {/* 传播：当前图标注 → 全部其余图片 */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="secondary"
-                size="sm"
-                className="h-8 gap-1.5 text-[13px] shadow-sm transition-shadow hover:shadow-md"
-                disabled={!current || boxes.length === 0 || propagating != null || images.length < 2}
-                onClick={() => void propagateToAll()}
-              >
-                {propagating != null ? (
-                  <span className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                ) : (
-                  <IconSparkles className="size-3.5 text-primary" />
-                )}
-                {propagating != null ? `匹配中 ${propagating} 张…` : '自动预标注'}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="max-w-64 text-left">
-              以当前图的标注为模板，用模板匹配推算其余 {Math.max(images.length - 1, 0)} 张；
-              低置信度自动跳过，结果需人工复核
-            </TooltipContent>
-          </Tooltip>
+          {/* 传播按钮在 TagPalette 右端 */}
 
           <Button
             size="sm"
@@ -302,7 +285,16 @@ function App() {
                     {idx + 1}/{images.length}
                   </span>
                   <span className="text-muted-foreground/40">·</span>
-                  <span className="max-w-56 truncate">{images[idx]?.file_name}</span>
+                  <button
+                    className="max-w-56 truncate underline decoration-dotted underline-offset-2 hover:text-foreground"
+                    onClick={() => void api.revealPath(current)}
+                    data-tip={current}
+                    data-tip-hint="点击打开文件所在位置"
+                    data-tip-class="max-w-md whitespace-normal font-mono break-all"
+                    data-tip-side="top"
+                  >
+                    {images[idx]?.file_name}
+                  </button>
                   {dim && (
                     <>
                       <span className="text-muted-foreground/40">·</span>
@@ -311,32 +303,26 @@ function App() {
                       </span>
                     </>
                   )}
-                  <span className="text-muted-foreground/40">·</span>
-                  <span className="tabular-nums">{boxes.length} 框</span>
-                  {selected != null && boxes[selected] && (
-                    <>
-                      <span className="text-muted-foreground/40">·</span>
-                      <span className="tabular-nums text-foreground/90">
-                        {boxes[selected].tag} ({Math.round(boxes[selected].x)},
-                        {Math.round(boxes[selected].y)}, {Math.round(boxes[selected].w)}×
-                        {Math.round(boxes[selected].h)})
-                      </span>
-                    </>
-                  )}
                 </>
               ) : (
                 <span>就绪</span>
               )}
               <div className="flex-1" />
+
+              {/* 捕捉吸附：开关 + 容差（点击数字变成输入框） */}
+              <div className="flex items-center gap-1.5">
+                <SnapToggle />
+                <SnapTolerance />
+              </div>
             </footer>
           </main>
         </div>
 
         <RelabelMenu />
-        <PropagateToast />
         <ExportDialog open={showExport} onOpenChange={setShowExport} />
+        <TooltipLayer />
       </div>
-    </TooltipProvider>
+    </>
   );
 }
 

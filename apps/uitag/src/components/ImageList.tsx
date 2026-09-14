@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { IconCheck, IconPhoto } from '@tabler/icons-react';
 import { useStore } from '../store';
@@ -11,6 +11,14 @@ export function ImageList() {
   const setCurrent = useStore((s) => s.setCurrent);
   const annos = useStore((s) => s.annos);
   const tags = useStore((s) => s.tags.tags);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  // 当前图片变化（含启动时恢复上次选中）时滚动到可视区
+  useEffect(() => {
+    if (!current || !listRef.current) return;
+    const el = listRef.current.querySelector(`[data-path="${CSS.escape(current)}"]`);
+    el?.scrollIntoView({ block: 'nearest' });
+  }, [current, images]);
 
   const colorOf = useMemo(() => {
     const m = new Map(tags.map((t) => [t.name, t.color]));
@@ -44,13 +52,13 @@ export function ImageList() {
             <IconPhoto className="size-5 text-muted-foreground" />
           </div>
           <p className="text-xs leading-relaxed text-muted-foreground">
-            尚未导入图片
+            尚未打开目录
             <br />
-            使用上方按钮导入截图
+            使用上方「打开目录」选择图片目录
           </p>
         </div>
       ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2 pb-2">
+        <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2 pb-2">
           <div className="space-y-0.5">
             {images.map((img) => {
               const boxes = annos[img.path] ?? [];
@@ -59,12 +67,13 @@ export function ImageList() {
               return (
                 <button
                   key={img.path}
+                  data-path={img.path}
                   onClick={() => setCurrent(img.path)}
                   className={cn(
                     'flex w-full items-center gap-2.5 rounded-md p-1.5 text-left transition-all',
                     active
-                      ? 'bg-accent shadow-lg shadow-black/25 ring-[inset_0_0_0_1px_var(--border)]'
-                      : 'hover:bg-accent/50',
+                      ? 'relative z-10 bg-accent shadow-[0_6px_18px_rgb(0_0_0/0.6)] ring-[inset_0_0_0_1px_var(--border)]'
+                      : 'relative hover:bg-accent/50',
                   )}
                 >
                   <div
@@ -94,7 +103,8 @@ export function ImageList() {
                           ? 'font-medium text-sidebar-foreground'
                           : 'text-muted-foreground',
                       )}
-                      title={img.file_name}
+                      data-tip={img.file_name}
+                      data-tip-side="right"
                     >
                       {img.file_name}
                     </p>

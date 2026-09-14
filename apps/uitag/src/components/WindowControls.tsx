@@ -40,15 +40,15 @@ export function WindowControls() {
     <div className="flex h-full">
       <button
         className={cn(btn, 'hover:bg-foreground/10 hover:text-foreground')}
-        title="最小化"
         onClick={() => void win.minimize()}
+        data-tip="最小化"
       >
         <IconMinus className="size-3.5" strokeWidth={1.75} />
       </button>
       <button
         className={cn(btn, 'hover:bg-foreground/10 hover:text-foreground')}
-        title={maximized ? '还原' : '最大化'}
         onClick={() => void win.toggleMaximize()}
+        data-tip={maximized ? '还原' : '最大化'}
       >
         {maximized ? (
           <IconCopy className="size-3" strokeWidth={1.75} />
@@ -58,8 +58,8 @@ export function WindowControls() {
       </button>
       <button
         className={cn(btn, 'hover:bg-[#c42b1c] hover:text-white')}
-        title="关闭"
         onClick={() => void close()}
+        data-tip="关闭"
       >
         <IconX className="size-4" strokeWidth={1.75} />
       </button>
