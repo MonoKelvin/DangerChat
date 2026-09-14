@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>危信</title>
+    <script>
+      // 首帧防闪：CSS 加载前按持久化主题挂好 .dark 类
+      try {
+        var t = localStorage.getItem('main-ui:theme') || 'dark';
+        var dark =
+          t === 'dark' ||
+          (t === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+        if (dark) document.documentElement.classList.add('dark');
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

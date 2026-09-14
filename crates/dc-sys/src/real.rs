@@ -702,6 +702,64 @@ impl SysApi for RealSys {
     fn ime_composing(&self) -> bool {
         ime_composing_now()
     }
+
+    fn find_window_by_process(&self, process_name: &str) -> Option<Hwnd> {
+        find_window_by_process_impl(process_name)
+    }
+}
+
+/// EnumWindows 遍历顶层窗口，返回第一个「可见 + 非工具窗 + 非最小化 + 进程名匹配」的。
+/// 进程名比较不区分大小写。
+fn find_window_by_process_impl(process_name: &str) -> Option<Hwnd> {
+    use windows::core::BOOL;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindowLongW, IsIconic, IsWindowVisible, GWL_EXSTYLE, WS_EX_TOOLWINDOW,
+    };
+
+    struct Ctx {
+        want: String,
+        found: Option<Hwnd>,
+    }
+    // EnumWindows 回调约定：返回 TRUE 继续遍历
+    unsafe extern "system" fn on_wnd(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        let ctx = unsafe { &mut *(lparam.0 as *mut Ctx) };
+        if ctx.found.is_some() {
+            return true.into();
+        }
+        unsafe {
+            if !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() {
+                return true.into();
+            }
+            let ex = GetWindowLongW(hwnd, GWL_EXSTYLE);
+            if ex & WS_EX_TOOLWINDOW.0 as i32 != 0 {
+                return true.into();
+            }
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(hwnd, Some(&mut pid));
+            if pid == 0 {
+                return true.into();
+            }
+            match process_name_of(pid) {
+                Some(name) if name.eq_ignore_ascii_case(&ctx.want) => {
+                    ctx.found = Some(Hwnd(hwnd.0 as isize));
+                    false.into() // 停止遍历
+                }
+                _ => true.into(),
+            }
+        }
+    }
+
+    let mut ctx = Ctx {
+        want: process_name.to_string(),
+        found: None,
+    };
+    unsafe {
+        let _ = EnumWindows(
+            Some(on_wnd),
+            LPARAM(&mut ctx as *mut Ctx as isize),
+        );
+    }
+    ctx.found
 }
 
 /// 本地时区相对 UTC 的偏移（分钟，东为正）。
@@ -716,4 +774,10 @@ pub fn local_utc_offset_minutes() -> i32 {
             + s.wMinute as i64
     };
     (to_min(&local) - to_min(&utc)) as i32
+}
+
+/// 本地日期（年/月/日），供 bridge 的按日统计滚动用。
+pub fn local_ymd() -> (u32, u32, u32) {
+    let t = unsafe { GetLocalTime() };
+    (t.wYear as u32, t.wMonth as u32, t.wDay as u32)
 }

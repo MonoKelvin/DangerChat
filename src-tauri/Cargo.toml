@@ -1,0 +1,30 @@
+[package]
+name = "dangerchat"
+description = "危信主程序 Tauri 壳"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+default-run = "dangerchat"
+
+[lib]
+name = "dangerchat_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+dc-core.workspace = true
+dc-sys.workspace = true
+dc-pipeline.workspace = true
+dc-bridge.workspace = true
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-autostart = "2"
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

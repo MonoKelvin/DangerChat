@@ -4,6 +4,8 @@ members = [
     "crates/dc-core",
     "crates/dc-sys",
     "crates/dc-pipeline",
+    "crates/dc-bridge",
+    "src-tauri",
     "spikes/m3-inference",
     "tools/redline_scan",
     "apps/uitag/src-tauri",
@@ -52,6 +54,7 @@ regex = "1"
 dc-core = { path = "crates/dc-core" }
 dc-sys = { path = "crates/dc-sys" }
 dc-pipeline = { path = "crates/dc-pipeline" }
+dc-bridge = { path = "crates/dc-bridge" }
 
 # 测试
 tempfile = "3"

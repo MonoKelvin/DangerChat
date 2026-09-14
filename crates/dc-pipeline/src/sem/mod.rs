@@ -193,7 +193,16 @@ impl Module for SemStage {
 
     fn init(&mut self, mctx: &ModuleContext) -> Result<(), ModuleError> {
         // rules / contacts（文件缺失 → 空规则集，仅 L2 + warn，不 Fatal）
-        let rules_path = mctx.config.str_or("sem.rules_path", "config/rules.toml");
+        // 规则库默认在数据目录根（bootstrap 创建）；配置可覆盖（绝对路径）
+        let rules_default = mctx
+            .log_dir
+            .parent()
+            .map(|d| d.join("rules.toml"))
+            .unwrap_or_else(|| std::path::PathBuf::from("rules.toml"));
+        let rules_default_str = rules_default.to_string_lossy().into_owned();
+        let rules_path = mctx
+            .config
+            .str_or("sem.rules_path", &rules_default_str);
         match std::fs::read_to_string(rules_path) {
             Ok(text) => match RuleSet::from_toml(&text) {
                 Ok(rs) => self.rules = rs,
@@ -207,7 +216,15 @@ impl Module for SemStage {
                 self.rules = RuleSet::from_defs(Vec::new()).map_err(ModuleError::Fatal)?;
             }
         }
-        let contacts_path = mctx.config.str_or("sem.contacts_path", "config/contacts.toml");
+        let contacts_default = mctx
+            .log_dir
+            .parent()
+            .map(|d| d.join("contacts.toml"))
+            .unwrap_or_else(|| std::path::PathBuf::from("contacts.toml"));
+        let contacts_default_str = contacts_default.to_string_lossy().into_owned();
+        let contacts_path = mctx
+            .config
+            .str_or("sem.contacts_path", &contacts_default_str);
         match std::fs::read_to_string(contacts_path) {
             Ok(text) => match ContactBook::from_toml(&text) {
                 Ok(cb) => self.contacts = cb,

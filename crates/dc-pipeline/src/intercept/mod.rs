@@ -234,7 +234,7 @@ pub struct Intercept {
     tracker: Arc<DraftTracker>,
     slot: Arc<VerdictSlot>,
     triggers: Arc<TriggerBus>,
-    alerts: AlertBus,
+    alerts: Arc<AlertBus>,
     metrics: MetricsRecorder,
     log_dir: std::path::PathBuf,
 }
@@ -263,7 +263,7 @@ impl Intercept {
             tracker: Arc::new(tracker),
             slot: Arc::new(VerdictSlot::new()),
             triggers: Arc::new(TriggerBus::new(trigger_capacity)),
-            alerts: AlertBus::new(alert_capacity),
+            alerts: Arc::new(AlertBus::new(alert_capacity)),
             metrics: MetricsRecorder::default(),
             log_dir: std::path::PathBuf::new(),
         }
@@ -304,6 +304,10 @@ impl Intercept {
 
     pub fn triggers(&self) -> &TriggerBus {
         &self.triggers
+    }
+
+    pub fn alerts_arc(&self) -> Arc<AlertBus> {
+        Arc::clone(&self.alerts)
     }
 
     pub fn alerts(&self) -> &AlertBus {

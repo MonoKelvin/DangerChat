@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "危信",
+  "version": "0.1.0",
+  "identifier": "com.dangerchat.app",
+  "build": {
+    "beforeDevCommand": "pnpm -F main-ui dev",
+    "devUrl": "http://localhost:1421",
+    "beforeBuildCommand": "pnpm -F main-ui build",
+    "frontendDist": "../apps/main-ui/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "危信",
+        "width": 940,
+        "height": 640,
+        "minWidth": 760,
+        "minHeight": 520,
+        "center": true,
+        "decorations": false,
+        "visible": false
+      },
+      {
+        "label": "alert",
+        "title": "危信提示",
+        "width": 360,
+        "height": 260,
+        "decorations": false,
+        "resizable": false,
+        "visible": false,
+        "skipTaskbar": true,
+        "alwaysOnTop": true,
+        "focus": false,
+        "focusable": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["icons/icon.ico"]
+  }
+}

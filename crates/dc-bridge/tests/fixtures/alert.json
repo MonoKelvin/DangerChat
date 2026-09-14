@@ -1,0 +1,12 @@
+{
+  "level": "block",
+  "score": 1.0,
+  "reasons": [
+    "命中违禁词「sb」(severity=block)"
+  ],
+  "chat_target": "张总",
+  "draft_text": "你是 sb",
+  "draft_fingerprint": 42,
+  "draft_epoch": 3,
+  "countdown_secs": 10
+}

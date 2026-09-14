@@ -26,7 +26,7 @@ pub use api::{
 };
 pub use mock::{MockSys, MockWindow};
 #[cfg(windows)]
-pub use real::{local_utc_offset_minutes, RealSys};
+pub use real::{local_utc_offset_minutes, local_ymd, RealSys};
 
 /// 构造函数：当前平台的真实实现。
 #[cfg(windows)]
