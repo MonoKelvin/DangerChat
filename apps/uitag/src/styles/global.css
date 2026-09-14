@@ -4,10 +4,9 @@
 @custom-variant dark (&:is(.dark *));
 
 /* ---- 设计基调 ----
-   深色专业工具（标注软件的正确形态：暗环境、低饱和、截图为视觉焦点）。
-   应用强制深色——不跟随系统，避免半途切换造成标注状态视认混乱。 */
+   深/浅双主题：全部走语义 token（变量），html.dark 一键切换，
+   组件层不写主题相关颜色。默认深色（标注软件的暗环境形态）。 */
 
-/* 只保留 dark 一套 token：整卡应用挂在 :root，语义按深色调配 */
 :root {
   --radius: 0.5rem;
   --font-ui:
@@ -16,6 +15,36 @@
   --font-mono:
     "Cascadia Mono", "JetBrains Mono", ui-monospace, Consolas, monospace;
 
+  /* 浅色：面板白、画布浅灰网格 */
+  --canvas: oklch(0.952 0.004 254);
+  --canvas-grid: oklch(0.903 0.005 254);
+  --sidebar: oklch(0.982 0.003 254);
+  --background: oklch(0.995 0.001 254);
+  --card: oklch(0.985 0.002 254);
+  --popover: oklch(1 0 0);
+
+  --foreground: oklch(0.215 0.02 255);
+  --card-foreground: oklch(0.215 0.02 255);
+  --popover-foreground: oklch(0.215 0.02 255);
+
+  /* 强调色：蓝（深一档保证浅底对比度） */
+  --primary: oklch(0.55 0.17 255);
+  --primary-foreground: oklch(0.985 0.002 248);
+
+  --secondary: oklch(0.955 0.004 254);
+  --secondary-foreground: oklch(0.215 0.02 255);
+  --muted: oklch(0.958 0.004 254);
+  --muted-foreground: oklch(0.5 0.02 255);
+  --accent: oklch(0.938 0.008 255);
+  --accent-foreground: oklch(0.215 0.02 255);
+  --destructive: oklch(0.55 0.2 25);
+
+  --border: oklch(0.215 0.02 255 / 10%);
+  --input: oklch(0.215 0.02 255 / 14%);
+  --ring: oklch(0.55 0.17 255);
+}
+
+.dark {
   /* 表面三级：画布最暗 < 侧栏 < 内容面板 < 弹层 */
   --canvas: oklch(0.152 0.012 254);
   --canvas-grid: oklch(0.196 0.012 254);
@@ -28,7 +57,6 @@
   --card-foreground: oklch(0.955 0.003 248);
   --popover-foreground: oklch(0.955 0.003 248);
 
-  /* 强调色：蓝（工具感、非默认 Tailwind 蓝） */
   --primary: oklch(0.62 0.16 255);
   --primary-foreground: oklch(0.985 0.002 248);
 

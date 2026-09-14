@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { IconLoader2, IconPhotoOff, IconSquareDashed } from '@tabler/icons-react';
 import { useStore, type DragState, type Handle } from '../store';
@@ -244,6 +244,7 @@ export function AnnoCanvas() {
   const selected = useStore((s) => s.selected);
   const drag = useStore((s) => s.drag);
   const zoom = useStore((s) => s.zoom);
+  const panOffset = useStore((s) => s.pan);
   const fitTick = useStore((s) => s.fitTick);
   const setDim = useStore((s) => s.setDim);
   const snapLines = useStore((s) => s.snapLines);
@@ -330,9 +331,13 @@ export function AnnoCanvas() {
   /** 按视口自适应缩放：切图或点「适应窗口」时触发（fitTick 自增）。 */
   useEffect(() => {
     if (load !== 'ready' || !dim || !viewportRef.current) return;
+    stopZoomAnim(); // 适应窗口按视口整体重算，终止进行中的缩放动画
+    zoomAnchor.current = null;
     const vp = viewportRef.current.getBoundingClientRect();
     const fit = Math.min((vp.width - 48) / dim.width, (vp.height - 48) / dim.height, 1);
-    store.getState().setZoom(Math.max(0.1, Number(fit.toFixed(3))));
+    const s = store.getState();
+    s.setPan({ x: 0, y: 0 });
+    s.setZoom(Math.max(0.1, Number(fit.toFixed(3))));
   }, [fitTick, load, dim, store]);
 
   const toImageXY = useCallback(
@@ -489,7 +494,60 @@ export function AnnoCanvas() {
   // 滚轮缩放：锚定光标下的图像点；中键拖动平移。React onWheel 是 passive，
   // 必须手动挂 non-passive 监听才能 preventDefault。
   const zoomAnchor = useRef<{ clientX: number; clientY: number; imgX: number; imgY: number } | null>(null);
-  const pan = useRef<{ lastX: number; lastY: number } | null>(null);
+  const pan = useRef<{ startX: number; startY: number; lastX: number; lastY: number } | null>(null);
+
+  // 流畅缩放（参考 照片 UWP）：滚轮只更新目标倍率，rAF 指数逼近（快→缓渐变），
+  // 连续滚动目标持续累积；每帧校正滚动保持光标下的图像点不动。
+  const zoomTargetRef = useRef(1);
+  const zoomRafRef = useRef<number | null>(null);
+
+  const stopZoomAnim = () => {
+    if (zoomRafRef.current != null) {
+      cancelAnimationFrame(zoomRafRef.current);
+      zoomRafRef.current = null;
+    }
+  };
+
+  /** 缩放 k0→k1：按锚点同步校正平移，使光标下的图像点保持不动。
+   *  svg 中心 = 视口中心 + pan，故 pan' = pan + (img - dim/2)·(k0 − k1)。 */
+  const applyZoomAnchored = (
+    s: ReturnType<typeof useStore.getState>,
+    k0: number,
+    k1: number,
+  ) => {
+    const a = zoomAnchor.current;
+    const d = s.current ? s.dims[s.current] : undefined;
+    if (a && d) {
+      s.setPan({
+        x: s.pan.x + (a.imgX - d.width / 2) * (k0 - k1),
+        y: s.pan.y + (a.imgY - d.height / 2) * (k0 - k1),
+      });
+    }
+    s.setZoom(k1);
+  };
+
+  const animateZoom = (target: number) => {
+    zoomTargetRef.current = target;
+    if (zoomRafRef.current != null) return; // 已在跑，只改目标
+    const step = () => {
+      const s = useStore.getState();
+      const cur = s.zoom;
+      const t = zoomTargetRef.current;
+      const next = cur + (t - cur) * 0.22;
+      if (Math.abs(t - next) < 0.0015) {
+        zoomRafRef.current = null;
+        applyZoomAnchored(s, cur, t);
+        // 动画结束即锚点使命完成（延迟到本帧提交后清理）
+        requestAnimationFrame(() => (zoomAnchor.current = null));
+        return;
+      }
+      applyZoomAnchored(s, cur, next);
+      zoomRafRef.current = requestAnimationFrame(step);
+    };
+    zoomRafRef.current = requestAnimationFrame(step);
+  };
+
+  useEffect(() => stopZoomAnim, []); // 卸载清理
 
   useEffect(() => {
     const vp = viewportRef.current;
@@ -501,8 +559,10 @@ export function AnnoCanvas() {
       e.preventDefault();
       const s = useStore.getState();
       const factor = Math.min(1.3, Math.max(1 / 1.3, Math.exp(-e.deltaY * 0.0016)));
-      const next = Math.min(5, Math.max(0.1, s.zoom * factor));
-      if (next === s.zoom) return;
+      // 动画进行中在目标倍率上累积，否则从当前倍率起算
+      const base = zoomRafRef.current != null ? zoomTargetRef.current : s.zoom;
+      const next = Math.min(5, Math.max(0.1, base * factor));
+      if (next === base) return;
       const r = svg.getBoundingClientRect();
       zoomAnchor.current = {
         clientX: e.clientX,
@@ -510,7 +570,7 @@ export function AnnoCanvas() {
         imgX: (e.clientX - r.left) / s.zoom,
         imgY: (e.clientY - r.top) / s.zoom,
       };
-      s.setZoom(next);
+      animateZoom(next);
     };
 
     const onAuxClick = (e: MouseEvent) => {
@@ -525,46 +585,52 @@ export function AnnoCanvas() {
     };
   }, []);
 
-  // 缩放后校正滚动，让光标下的图像点保持在原地
-  useLayoutEffect(() => {
-    const a = zoomAnchor.current;
-    const svg = svgRef.current;
-    const vp = viewportRef.current;
-    if (!a || !svg || !vp) return;
-    zoomAnchor.current = null;
-    const r = svg.getBoundingClientRect();
-    const k = useStore.getState().zoom;
-    vp.scrollLeft += r.left + a.imgX * k - a.clientX;
-    vp.scrollTop += r.top + a.imgY * k - a.clientY;
-  }, [zoom]);
-
   const onViewportPointerDown = (e: React.PointerEvent) => {
     if (e.button !== 1) return;
     e.preventDefault();
-    pan.current = { lastX: e.clientX, lastY: e.clientY };
+    pan.current = { startX: e.clientX, startY: e.clientY, lastX: e.clientX, lastY: e.clientY };
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
   };
 
   const onViewportPointerMove = (e: React.PointerEvent) => {
-    if (!pan.current || !viewportRef.current) return;
-    const vp = viewportRef.current;
-    vp.scrollLeft -= e.clientX - pan.current.lastX;
-    vp.scrollTop -= e.clientY - pan.current.lastY;
-    pan.current = { lastX: e.clientX, lastY: e.clientY };
+    if (!pan.current) return;
+    const s = store.getState();
+    // 鼠标拖多少图片跟多少（同向）
+    s.setPan({
+      x: s.pan.x + (e.clientX - pan.current.lastX),
+      y: s.pan.y + (e.clientY - pan.current.lastY),
+    });
+    pan.current = { ...pan.current, lastX: e.clientX, lastY: e.clientY };
   };
 
-  const onViewportPointerUp = () => {
+  const onViewportPointerUp = (e: React.PointerEvent) => {
+    if (!pan.current) return;
+    const { startX, startY } = pan.current;
     pan.current = null;
+    // 位移很小 = 单击中键：流畅缩放到 100%（锚定点击位置，与滚轮缩放同动画）
+    const moved = Math.hypot(e.clientX - startX, e.clientY - startY);
+    if (moved > 4) return;
+    const svg = svgRef.current;
+    const s = store.getState();
+    if (!svg || !s.current) return;
+    const r = svg.getBoundingClientRect();
+    zoomAnchor.current = {
+      clientX: e.clientX,
+      clientY: e.clientY,
+      imgX: (e.clientX - r.left) / s.zoom,
+      imgY: (e.clientY - r.top) / s.zoom,
+    };
+    animateZoom(1);
   };
 
   const empty = (icon: React.ReactNode, title: string, hint?: string) => (
     <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
-      <div className="flex size-12 items-center justify-center rounded-full bg-white/5 text-white/40">
+      <div className="flex size-12 items-center justify-center rounded-full bg-foreground/5 text-muted-foreground">
         {icon}
       </div>
       <div>
-        <p className="text-sm font-medium text-white/70">{title}</p>
-        {hint && <p className="mt-1 text-xs text-white/40">{hint}</p>}
+        <p className="text-sm font-medium text-foreground/70">{title}</p>
+        {hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
       </div>
     </div>
   );
@@ -575,7 +641,7 @@ export function AnnoCanvas() {
   return (
     <div
       ref={viewportRef}
-      className="relative flex-1 overflow-auto bg-canvas"
+      className="relative flex-1 overflow-hidden bg-canvas"
       style={{
         backgroundImage:
           'linear-gradient(var(--canvas-grid) 1px, transparent 1px), linear-gradient(90deg, var(--canvas-grid) 1px, transparent 1px)',
@@ -600,20 +666,24 @@ export function AnnoCanvas() {
         empty(<IconPhotoOff className="size-6" />, '图片无法加载', '文件可能已被移动或删除')}
 
       {current && load === 'ready' && dim && (
-        <div className="flex min-h-full min-w-full items-center justify-center p-6">
+        /* 自由平移：视口大小容器 + translate 偏移，无滚动限制（任何缩放都能拖动） */
+        <div
+          className="flex h-full w-full items-center justify-center"
+          style={{ transform: `translate(${panOffset.x}px, ${panOffset.y}px)` }}
+        >
           <svg
             ref={svgRef}
             width={dim.width * zoom}
             height={dim.height * zoom}
             viewBox={`0 0 ${dim.width} ${dim.height}`}
             className={cn(
-              'block shrink-0 rounded-sm ring-1 ring-white/10 transition-shadow',
+              'block shrink-0 rounded-sm ring-1 ring-border transition-shadow',
               tool === 'draw' && !drag ? 'cursor-crosshair' : 'cursor-default',
             )}
             style={{
               touchAction: 'none',
               overflow: 'visible',
-              boxShadow: '0 8px 40px rgb(0 0 0 / 0.5)',
+              boxShadow: '0 4px 16px rgb(0 0 0 / 0.25)',
               // 拖拽期间明确光标：移动 = move 图标，绘制 = 十字（覆盖 class 的 crosshair/default）
               cursor: drag ? (drag.kind === 'draw' ? 'crosshair' : 'move') : undefined,
             }}
@@ -790,7 +860,8 @@ export function AnnoCanvas() {
                       y1={l.pos}
                       x2={dim!.width + ext}
                       y2={l.pos}
-                      stroke={showAllLines ? 'rgba(255,255,255,0.35)' : 'var(--color-primary)'}
+                      stroke={showAllLines ? 'var(--color-muted-foreground)' : 'var(--color-primary)'}
+                      opacity={showAllLines ? 0.45 : undefined}
                       strokeWidth={sw}
                       strokeDasharray={`${6 / zoom} ${4 / zoom}`}
                     />
@@ -801,7 +872,8 @@ export function AnnoCanvas() {
                       y1={-ext}
                       x2={l.pos}
                       y2={dim!.height + ext}
-                      stroke={showAllLines ? 'rgba(255,255,255,0.35)' : 'var(--color-primary)'}
+                      stroke={showAllLines ? 'var(--color-muted-foreground)' : 'var(--color-primary)'}
+                      opacity={showAllLines ? 0.45 : undefined}
                       strokeWidth={sw}
                       strokeDasharray={`${6 / zoom} ${4 / zoom}`}
                     />

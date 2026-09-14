@@ -129,21 +129,23 @@ export function PropagateDialog({
                   <span className="ml-0.5 text-xs font-normal text-muted-foreground">张</span>
                 </span>
               </div>
-              <label
+              {/* 不用 <label>：label 会把点击转发给内部 button（Radix Checkbox），
+                  与外层 onClick 叠加导致勾选状态来回抵消 */}
+              <div
                 className={cn(
                   'flex cursor-pointer items-center gap-2.5 rounded-lg border px-3.5 py-3 transition-colors',
                   overwrite ? 'border-primary/60 bg-primary/5' : 'bg-muted/30 hover:bg-muted/50',
                 )}
                 onClick={() => setOverwrite((v) => !v)}
               >
-                <Checkbox checked={overwrite} className="pointer-events-none" />
+                <Checkbox checked={overwrite} className="pointer-events-none" tabIndex={-1} />
                 <span className="flex-1">
                   <span className="block text-[13px]">覆盖已有标注</span>
                   <span className="block text-xs text-muted-foreground">
                     不勾选时仅处理未标注的图片
                   </span>
                 </span>
-              </label>
+              </div>
             </div>
 
             {error && (

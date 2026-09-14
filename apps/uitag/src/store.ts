@@ -29,6 +29,8 @@ interface UiTagStore {
   selected: number | null;
   drag: DragState;
   zoom: number;
+  /** 画布自由平移偏移（视口中心为原点，无限制；中键拖动） */
+  pan: { x: number; y: number };
   /** 自增计数：请求画布重新按视口 fit（「适应窗口」按钮与切图都用它） */
   fitTick: number;
   history: History;
@@ -42,12 +44,18 @@ interface UiTagStore {
   snapTolerance: number;
   /** 当前图片识别出的吸附线（异步识别完成后填充） */
   snapLines: SnapLine[];
+  /** 图片多选：空 = 退化为单选（current）；长度 >1 时画布切换 grid 视图 */
+  selection: string[];
   /** 当前图片锁定的框索引（会话级，双击切换；锁定框不可选中/拖拽） */
   locked: number[];
 
   setSnapEnabled: (v: boolean) => void;
   setSnapTolerance: (v: number) => void;
   setSnapLines: (lines: SnapLine[]) => void;
+  /** 应用图片选择（单选 = 长度 1 或 0；多选 = 长度 >1，current 落在末项） */
+  applySelection: (paths: string[]) => void;
+  /** 清空给定图片的全部标注（逐图进撤销栈，Ctrl+Z 可还原） */
+  clearImages: (paths: string[]) => void;
   toggleLock: (index: number) => void;
 
   init: () => Promise<void>;
@@ -62,6 +70,7 @@ interface UiTagStore {
   select: (index: number | null) => void;
   setDrag: (d: DragState) => void;
   setZoom: (z: number) => void;
+  setPan: (p: { x: number; y: number }) => void;
   requestFit: () => void;
 
   commit: (cmd: Cmd) => void;
@@ -99,6 +108,7 @@ export const useStore = create<UiTagStore>((set, get) => ({
   selected: null,
   drag: null,
   zoom: 1,
+  pan: { x: 0, y: 0 },
   fitTick: 0,
   history: new History(),
   historyTick: 0,
@@ -107,11 +117,30 @@ export const useStore = create<UiTagStore>((set, get) => ({
   snapEnabled: true,
   snapTolerance: 100,
   snapLines: [],
+  selection: [],
   locked: [],
 
   setSnapEnabled: (v) => set({ snapEnabled: v }),
   setSnapTolerance: (v) => set({ snapTolerance: Math.min(4096, Math.max(8, Math.round(v))) }),
   setSnapLines: (lines) => set({ snapLines: lines }),
+
+  applySelection: (paths) =>
+    set((s) => ({
+      selection: paths,
+      current: paths.length ? paths[paths.length - 1] : null,
+      selected: null,
+      drag: null,
+      locked: [],
+      fitTick: s.fitTick + 1,
+    })),
+
+  clearImages: (paths) => {
+    const annos = get().annos;
+    for (const p of paths) {
+      const boxes = annos[p] ?? [];
+      if (boxes.length > 0) get().commit({ kind: 'clear', path: p, boxes });
+    }
+  },
 
   toggleLock: (index) => {
     const s = get();
@@ -159,6 +188,7 @@ export const useStore = create<UiTagStore>((set, get) => ({
       historyTick: prev.historyTick + 1,
       dims: {},
       snapLines: [],
+      selection: [],
       locked: [],
     });
     localStorage.setItem(LAST_WORKDIR_KEY, dir);
@@ -168,6 +198,7 @@ export const useStore = create<UiTagStore>((set, get) => ({
     if (path) localStorage.setItem(LAST_CURRENT_KEY, path);
     set((s) => ({
       current: path,
+      selection: [], // 单选导航 = 退出多选
       selected: null,
       drag: null,
       locked: [],
@@ -182,6 +213,7 @@ export const useStore = create<UiTagStore>((set, get) => ({
   select: (index) => set({ selected: index }),
   setDrag: (d) => set({ drag: d }),
   setZoom: (z) => set({ zoom: z }),
+  setPan: (p) => set({ pan: p }),
   requestFit: () => set((s) => ({ fitTick: s.fitTick + 1 })),
 
   commit: (cmd) => {

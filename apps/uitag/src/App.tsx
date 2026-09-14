@@ -17,9 +17,11 @@ import { useStore } from './store';
 import { ImageList } from './components/ImageList';
 import { TagPalette } from './components/TagPalette';
 import { AnnoCanvas } from './components/AnnoCanvas';
+import { ImageGrid } from './components/ImageGrid';
 import { RelabelMenu } from './components/RelabelMenu';
 import { ExportDialog } from './components/ExportDialog';
 import { ShortcutsHelp } from './components/ShortcutsHelp';
+import { ThemeToggle } from './components/ThemeToggle';
 import { WindowControls } from './components/WindowControls';
 import { Button } from './components/ui/button';
 import { Separator } from './components/ui/separator';
@@ -126,6 +128,8 @@ function App() {  const init = useStore((s) => s.init);
   const images = useStore((s) => s.images);
   const dims = useStore((s) => s.dims);
   const tool = useStore((s) => s.tool);
+  const selection = useStore((s) => s.selection);
+  const multi = selection.length > 1;
   useStore((s) => s.historyTick);
 
   const [showExport, setShowExport] = useState(false);
@@ -230,6 +234,7 @@ function App() {  const init = useStore((s) => s.init);
           <ToolButton icon={<IconMaximize className="size-3.5" />} label="适应窗口" onClick={requestFit} />
 
           <Separator orientation="vertical" className="mx-1.5 !h-5" />
+          <ThemeToggle />
           <ShortcutsHelp />
 
           <div className="flex-1" />
@@ -261,10 +266,18 @@ function App() {  const init = useStore((s) => s.init);
           <ImageList />
           <main className="flex min-w-0 flex-1 flex-col">
             <TagPalette />
-            <AnnoCanvas />
+            {multi ? <ImageGrid /> : <AnnoCanvas />}
             {/* ── 状态栏 ── */}
             <footer className="flex h-7 shrink-0 items-center gap-3 border-t border-border/60 bg-card px-3 text-xs text-muted-foreground">
-              {current ? (
+              {multi ? (
+                <>
+                  <span className="flex items-center gap-1.5 rounded bg-primary/15 px-1.5 py-0.5 text-[11px] font-medium text-primary">
+                    <span className="size-1.5 rounded-full bg-primary" />
+                    多选
+                  </span>
+                  <span className="tabular-nums">已选 {selection.length} 张</span>
+                </>
+              ) : current ? (
                 <>
                   <span
                     className={
@@ -309,11 +322,13 @@ function App() {  const init = useStore((s) => s.init);
               )}
               <div className="flex-1" />
 
-              {/* 捕捉吸附：开关 + 容差（点击数字变成输入框） */}
-              <div className="flex items-center gap-1.5">
-                <SnapToggle />
-                <SnapTolerance />
-              </div>
+              {/* 捕捉吸附：开关 + 容差（多选 grid 视图下隐藏） */}
+              {!multi && (
+                <div className="flex items-center gap-1.5">
+                  <SnapToggle />
+                  <SnapTolerance />
+                </div>
+              )}
             </footer>
           </main>
         </div>

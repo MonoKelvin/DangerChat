@@ -3,9 +3,18 @@ import { IconSparkles, IconTrash } from '@tabler/icons-react';
 import { useStore } from '../store';
 import { cn } from '@/lib/utils';
 import { Button } from './ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from './ui/dialog';
 import { PropagateDialog } from './PropagateDialog';
 
-/** 标签选择器：色点 + 名称 + 数字快捷键；右端为「自动预标注」图标按钮。 */
+/** 标签选择器：色点 + 名称 + 数字快捷键；右端为「自动预标注」图标按钮。
+ *  多选模式（>1 张）：标签按钮置灰，删除按钮变为「清空多选图片标注」。 */
 export function TagPalette() {
   const tags = useStore((s) => s.tags.tags);
   const activeTag = useStore((s) => s.activeTag);
@@ -15,11 +24,18 @@ export function TagPalette() {
   const images = useStore((s) => s.images);
   const propagating = useStore((s) => s.propagating);
   const clearCurrent = useStore((s) => s.clearCurrent);
+  const clearImages = useStore((s) => s.clearImages);
+  const selection = useStore((s) => s.selection);
+
+  const sel = selection.length > 0 ? selection : current ? [current] : [];
+  const multi = sel.length > 1;
+  const multiAnnotated = multi ? sel.filter((p) => (annos[p]?.length ?? 0) > 0).length : 0;
 
   const counts = current ? (annos[current] ?? []) : [];
   const countOf = (name: string) => counts.filter((b) => b.tag === name).length;
   const canPropagate = current && counts.length > 0 && propagating == null && images.length >= 2;
   const [showPropagate, setShowPropagate] = useState(false);
+  const [showClearMulti, setShowClearMulti] = useState(false);
 
   return (
     <div className="flex items-center gap-1 border-b bg-card px-3 py-2">
@@ -27,9 +43,11 @@ export function TagPalette() {
         variant="ghost"
         size="icon"
         className="size-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-        disabled={counts.length === 0}
-        onClick={clearCurrent}
-        data-tip="清空当前图片的标注"
+        disabled={multi ? multiAnnotated === 0 : counts.length === 0}
+        onClick={() => (multi ? setShowClearMulti(true) : clearCurrent())}
+        data-tip={
+          multi ? `清空 ${multiAnnotated} 张图片的标注` : '清空当前图片的标注'
+        }
       >
         <IconTrash className="size-4" />
       </Button>
@@ -40,6 +58,7 @@ export function TagPalette() {
         return (
           <button
             key={t.name}
+            disabled={multi}
             onClick={() => setActiveTag(t.name)}
             data-tip={`${t.label}（快捷键 ${i + 1}）`}
             className={cn(
@@ -47,6 +66,7 @@ export function TagPalette() {
               active
                 ? 'bg-accent font-medium text-accent-foreground shadow-[inset_0_0_0_1px_var(--border)]'
                 : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+              multi && 'cursor-not-allowed opacity-40 hover:bg-transparent',
             )}
           >
             <span
@@ -68,12 +88,14 @@ export function TagPalette() {
         variant="ghost"
         size="icon"
         className="size-8 text-primary"
-        disabled={!canPropagate}
+        disabled={!canPropagate || multi}
         onClick={() => setShowPropagate(true)}
         data-tip={
-          propagating != null
-            ? `匹配中 ${propagating.done}/${propagating.total} 张…`
-            : '自动预标注：以当前图标注为模板匹配其余图片，结果需人工复核'
+          multi
+            ? '多选模式下不可用'
+            : propagating != null
+              ? `匹配中 ${propagating.done}/${propagating.total} 张…`
+              : '自动预标注：以当前图标注为模板匹配其余图片，结果需人工复核'
         }
       >
         {propagating != null ? (
@@ -83,6 +105,30 @@ export function TagPalette() {
         )}
       </Button>
       <PropagateDialog open={showPropagate} onOpenChange={setShowPropagate} />
+
+      {/* 多选清空确认 */}
+      <Dialog open={showClearMulti} onOpenChange={setShowClearMulti}>
+        <DialogContent className="sm:max-w-xs">
+          <DialogHeader>
+            <DialogTitle>清空标注</DialogTitle>
+            <DialogDescription>将清空 {multiAnnotated} 张图片的全部标注，是否继续？</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowClearMulti(false)}>
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                clearImages(sel);
+                setShowClearMulti(false);
+              }}
+            >
+              清空
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
