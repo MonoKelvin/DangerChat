@@ -194,6 +194,7 @@ pub fn get_rules(state: State<'_, AppState>) -> CmdResult<Vec<RuleDto>> {
 
 #[tauri::command]
 pub fn save_rules(state: State<'_, AppState>, rules: Vec<RuleDto>) -> CmdResult<()> {
+    tracing::info!(count = rules.len(), "收到保存规则请求");
     // 先校验全部可解析（整批原子：任一非法拒绝保存）
     let ruleset = dc_pipeline::sem::rules::RuleSet::from_defs(
         rules
@@ -214,7 +215,20 @@ pub fn save_rules(state: State<'_, AppState>, rules: Vec<RuleDto>) -> CmdResult<
         .map_err(|e| BridgeError::Config(format!("toml 序列化失败：{e}")))?;
     let path = state.data_dir.join("rules.toml");
     std::fs::write(&path, out).map_err(|e| BridgeError::Io(e.to_string()))?;
-    tracing::info!(count = rules.len(), "规则库已保存");
+    tracing::info!(count = rules.len(), path = %path.display(), "规则库已保存到文件");
+
+    // 通知 Guard 重新加载规则（如果 Guard 正在运行）
+    if let Ok(guard_opt) = state.guard.lock() {
+        if let Some(guard) = guard_opt.as_ref() {
+            let rules_path = path.to_string_lossy().to_string();
+            let contacts_path = state.data_dir.join("contacts.toml").to_string_lossy().to_string();
+            tracing::info!("通知 Guard 重新加载规则");
+            guard.reload_rules(&rules_path, &contacts_path);
+        } else {
+            tracing::warn!("Guard 未运行，规则将在下次启动时生效");
+        }
+    }
+
     Ok(())
 }
 

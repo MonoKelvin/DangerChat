@@ -33,6 +33,7 @@ spikes/**/models/
 
 # Projcet files
 resources/training_set/wechat_snapcaptures/
+resources/training_set/*.zip
 *.tsbuildinfo
 
 # ONNX 模型权重与字典（models/README.md 记下载源）

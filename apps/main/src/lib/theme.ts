@@ -2,7 +2,7 @@
 
 export type Theme = 'dark' | 'light' | 'system';
 
-const KEY = 'uitag:theme';
+const KEY = 'dangerchat:theme';
 const ORDER: Theme[] = ['dark', 'light', 'system'];
 
 export const THEME_LABEL: Record<Theme, string> = {

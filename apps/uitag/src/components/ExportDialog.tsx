@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react';
 import { save } from '@tauri-apps/plugin-dialog';
-import { IconCircleCheck, IconFileZip, IconLoader2 } from '@tabler/icons-react';
+import { IconCircleCheck, IconFileZip, IconFolderOpen, IconLoader2 } from '@tabler/icons-react';
 import { useStore } from '../store';
+import * as api from '../lib/tauri';
 import { Button } from './ui/button';
 import {
   Dialog,
@@ -89,6 +90,10 @@ export function ExportDialog({
               {result}
             </p>
             <DialogFooter>
+              <Button variant="outline" onClick={() => void api.revealPath(result)}>
+                <IconFolderOpen className="size-4" />
+                打开路径
+              </Button>
               <Button onClick={() => reset(false)}>关闭</Button>
             </DialogFooter>
           </>
