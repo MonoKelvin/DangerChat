@@ -14,6 +14,7 @@ pub mod head;
 pub mod rules;
 
 use std::time::Instant;
+use std::sync::RwLock;
 
 use dc_core::{
     ConfigField, ConfigType, ConfigValue, MetricsRecorder, ModuleContext, ModuleError,
@@ -32,8 +33,8 @@ pub const THRESHOLD_CASUAL: f32 = 0.35;
 pub const BLOCK_MARGIN: f32 = 0.15;
 
 pub struct SemStage {
-    rules: RuleSet,
-    contacts: ContactBook,
+    rules: RwLock<RuleSet>,
+    contacts: RwLock<ContactBook>,
     /// L2 三件：None = 未加载（fail-open 仅 L1）。
     embedder: Option<embedder::Embedder>,
     heads: head::Heads,
@@ -52,11 +53,11 @@ impl SemStage {
     /// 空构造（init 前占位；guard 装配用）。
     pub fn empty() -> Self {
         Self {
-            rules: RuleSet::from_defs(Vec::new()).unwrap_or_else(|_| {
+            rules: RwLock::new(RuleSet::from_defs(Vec::new()).unwrap_or_else(|_| {
                 // from_defs 对空集永远 Ok；此处 unreachable 仅防御
                 panic!("空规则集构造失败")
-            }),
-            contacts: ContactBook::default(),
+            })),
+            contacts: RwLock::new(ContactBook::default()),
             embedder: None,
             heads: head::Heads::fallback_only(),
             l2_enabled: false,
@@ -69,8 +70,8 @@ impl SemStage {
     /// 测试用：仅 L1。
     pub fn l1_only(rules: RuleSet, contacts: ContactBook) -> Self {
         Self {
-            rules,
-            contacts,
+            rules: RwLock::new(rules),
+            contacts: RwLock::new(contacts),
             embedder: None,
             heads: head::Heads::fallback_only(),
             l2_enabled: false,
@@ -80,14 +81,52 @@ impl SemStage {
         }
     }
 
+    /// 热重载规则和联系人（保存后由前端触发）。
+    pub fn reload_rules_and_contacts(&self, rules_path: &str, contacts_path: &str) {
+        // 重载规则
+        match std::fs::read_to_string(rules_path) {
+            Ok(text) => match RuleSet::from_toml(&text) {
+                Ok(rs) => {
+                    if let Ok(mut w) = self.rules.write() {
+                        *w = rs;
+                        tracing::info!(path = %rules_path, "规则库热重载成功");
+                    }
+                }
+                Err(e) => tracing::warn!(error = %e, "规则库解析失败，保持原有规则"),
+            },
+            Err(e) => tracing::warn!(path = %rules_path, error = %e, "规则库读取失败"),
+        }
+
+        // 重载联系人
+        match std::fs::read_to_string(contacts_path) {
+            Ok(text) => match ContactBook::from_toml(&text) {
+                Ok(cb) => {
+                    if let Ok(mut w) = self.contacts.write() {
+                        *w = cb;
+                        tracing::info!(path = %contacts_path, "联系人画像热重载成功");
+                    }
+                }
+                Err(e) => tracing::warn!(error = %e, "联系人画像解析失败，保持原有画像"),
+            },
+            Err(_) => {}
+        }
+    }
+
     /// 融合判定（§5.7 判定算法；纯逻辑，可脱离 Stage 单测）。
     pub fn judge(&self, input: &OcrResult) -> Verdict {
         let draft = input.draft_text.trim();
-        let profile = self.contacts.profile_of(input.chat_target.as_deref().unwrap_or(""));
+
+        // 读取联系人画像（使用 RwLock）
+        let profile = self.contacts.read()
+            .ok()
+            .map(|c| c.profile_of(input.chat_target.as_deref().unwrap_or("")))
+            .unwrap_or(Profile::Formal);
 
         // L1（永远启用，毫秒级；命中短路）
-        if let Some(hit) = self.rules.first_hit(draft, profile) {
-            return Verdict::from_rule(&hit.pattern, hit.severity.into());
+        if let Ok(rules) = self.rules.read() {
+            if let Some(hit) = rules.first_hit(draft, profile) {
+                return Verdict::from_rule(&hit.pattern, hit.severity.into());
+            }
         }
 
         // 空草稿 → Safe
@@ -205,15 +244,23 @@ impl Module for SemStage {
             .str_or("sem.rules_path", &rules_default_str);
         match std::fs::read_to_string(rules_path) {
             Ok(text) => match RuleSet::from_toml(&text) {
-                Ok(rs) => self.rules = rs,
+                Ok(rs) => {
+                    if let Ok(mut w) = self.rules.write() {
+                        *w = rs;
+                    }
+                }
                 Err(e) => {
                     tracing::warn!(error = %e, "规则库非法，按空规则集继续");
-                    self.rules = RuleSet::from_defs(Vec::new()).map_err(ModuleError::Fatal)?;
+                    if let Ok(mut w) = self.rules.write() {
+                        *w = RuleSet::from_defs(Vec::new()).map_err(ModuleError::Fatal)?;
+                    }
                 }
             },
             Err(e) => {
                 tracing::warn!(path = %rules_path, error = %e, "规则库不存在，按空规则集继续");
-                self.rules = RuleSet::from_defs(Vec::new()).map_err(ModuleError::Fatal)?;
+                if let Ok(mut w) = self.rules.write() {
+                    *w = RuleSet::from_defs(Vec::new()).map_err(ModuleError::Fatal)?;
+                }
             }
         }
         let contacts_default = mctx
@@ -227,13 +274,23 @@ impl Module for SemStage {
             .str_or("sem.contacts_path", &contacts_default_str);
         match std::fs::read_to_string(contacts_path) {
             Ok(text) => match ContactBook::from_toml(&text) {
-                Ok(cb) => self.contacts = cb,
+                Ok(cb) => {
+                    if let Ok(mut w) = self.contacts.write() {
+                        *w = cb;
+                    }
+                }
                 Err(e) => {
                     tracing::warn!(error = %e, "画像非法，全部按 formal 保守处理");
-                    self.contacts = ContactBook::default();
+                    if let Ok(mut w) = self.contacts.write() {
+                        *w = ContactBook::default();
+                    }
                 }
             },
-            Err(_) => self.contacts = ContactBook::default(),
+            Err(_) => {
+                if let Ok(mut w) = self.contacts.write() {
+                    *w = ContactBook::default();
+                }
+            }
         }
 
         // L2：模型 + 头

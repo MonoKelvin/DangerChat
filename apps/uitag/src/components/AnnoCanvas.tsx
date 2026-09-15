@@ -7,6 +7,17 @@ import { cn } from '@/lib/utils';
 
 const HANDLES: Handle[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
 const MIN_BOX = 4;
+/** 按下到松手的位移小于此值（屏幕像素）视为「点击」：框不动、不吸附、不提交。
+ *  没有这个阈值时，选中框的瞬间就会被吸附线拉走、松手再弹回 —— 即点击抖动。 */
+const DRAG_SLOP = 3;
+
+/** 拖拽是否已越过点击阈值。draw 不参与（起手即预览虚线框，本就该跟随光标）。 */
+function isDragging(d: NonNullable<DragState>, zoom: number): boolean {
+  const slop = DRAG_SLOP / zoom;
+  if (d.kind === 'move') return Math.hypot(d.curX, d.curY) > slop;
+  if (d.kind === 'resize') return Math.hypot(d.curX - d.grabX, d.curY - d.grabY) > slop;
+  return true;
+}
 
 /** 把 hex 颜色压暗到 f 比例（锚点芯色：与框同色系的深色，不用白色）。 */
 function darken(hex: string, f: number): string {
@@ -220,16 +231,30 @@ function hitTest(
   return null;
 }
 
-/** 实时拖拽预览时把光标点夹回图片内（仅 draw/resize：curX/curY 是图像坐标）。
- *  move 的 curX/curY 是位移增量（可为负），不能钳制——由 clampBox 钳最终框。 */
+/** 实时拖拽预览时把光标点夹回图片内（仅 draw：curX/curY 是图像坐标）。
+ *  move 的 curX/curY 是位移增量（可为负），resize 由 resizePoint 自己钳制。 */
 function clampDrag(
-  d: Extract<NonNullable<DragState>, { kind: 'draw' | 'resize' }>,
+  d: Extract<NonNullable<DragState>, { kind: 'draw' }>,
   dim: { width: number; height: number },
 ): NonNullable<DragState> {
   const cx = Math.min(Math.max(d.curX, 0), dim.width);
   const cy = Math.min(Math.max(d.curY, 0), dim.height);
   if (cx === d.curX && cy === d.curY) return d;
   return { ...d, curX: cx, curY: cy };
+}
+
+/** resize 的有效拖拽点：扣掉「按下位置与手柄锚点的偏差」。
+ *  手柄有 4px 半径，按边缘按下时 grab 与锚点差几像素，
+ *  直接拿光标位置当新角点会让框在按下瞬间跳这几像素。 */
+function resizePoint(
+  d: Extract<NonNullable<DragState>, { kind: 'resize' }>,
+  dim: { width: number; height: number },
+): { x: number; y: number } {
+  const a = anchorOf(d.orig, d.handle);
+  return {
+    x: Math.min(Math.max(d.curX + (a.x - d.grabX), 0), dim.width),
+    y: Math.min(Math.max(d.curY + (a.y - d.grabY), 0), dim.height),
+  };
 }
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
@@ -396,7 +421,12 @@ export function AnnoCanvas() {
     }
     const path = s.current;
     const min = MIN_BOX / zoom;
-    const d = dim && d0.kind !== 'move' ? clampDrag(d0, dim) : d0;
+    const d = dim && d0.kind === 'draw' ? clampDrag(d0, dim) : d0;
+    // 位移没越过点击阈值 = 单击选中，不改框也不提交（避免按下被吸附、松手弹回的抖动）
+    if (!isDragging(d, zoom)) {
+      s.setDrag(null);
+      return;
+    }
     if (d.kind === 'draw') {
       const w = Math.abs(d.curX - d.startX);
       const h = Math.abs(d.curY - d.startY);
@@ -415,15 +445,14 @@ export function AnnoCanvas() {
         s.exitDraw();
       }
     } else if (d.kind === 'move') {
-      if (d.curX !== 0 || d.curY !== 0) {
-        const after = applySnap(
-          clampBox({ ...d.orig, x: d.orig.x + d.curX, y: d.orig.y + d.curY }, dim!),
-          true,
-        ).box;
-        s.commit({ kind: 'transform', path, index: d.index, before: d.orig, after });
-      }
+      const after = applySnap(
+        clampBox({ ...d.orig, x: d.orig.x + d.curX, y: d.orig.y + d.curY }, dim!),
+        true,
+      ).box;
+      s.commit({ kind: 'transform', path, index: d.index, before: d.orig, after });
     } else {
-      const after = applySnap(clampBox(resizeFrom(d.orig, d.handle, d.curX, d.curY), dim!), false).box;
+      const p = resizePoint(d, dim!);
+      const after = applySnap(clampBox(resizeFrom(d.orig, d.handle, p.x, p.y), dim!), false).box;
       const changed =
         after.x !== d.orig.x || after.y !== d.orig.y || after.w !== d.orig.w || after.h !== d.orig.h;
       if (changed && after.w >= min && after.h >= min) {
@@ -442,7 +471,9 @@ export function AnnoCanvas() {
 
   const preview: AnnoBox | null = (() => {
     if (!drag || !dim) return null;
-    const d = drag.kind === 'move' ? drag : clampDrag(drag, dim);
+    // 未越过点击阈值：保持原框，不预览、不吸附（与 onPointerUp 的判定一致）
+    if (!isDragging(drag, zoom)) return drag.kind === 'draw' ? null : drag.orig;
+    const d = drag.kind === 'draw' ? clampDrag(drag, dim) : drag;
     if (d.kind === 'draw') {
       return clampBox(
         {
@@ -458,10 +489,13 @@ export function AnnoCanvas() {
     if (d.kind === 'move') {
       return clampBox({ ...d.orig, x: d.orig.x + d.curX, y: d.orig.y + d.curY }, dim);
     }
-    return clampBox(resizeFrom(d.orig, d.handle, d.curX, d.curY), dim);
+    const p = resizePoint(d, dim);
+    return clampBox(resizeFrom(d.orig, d.handle, p.x, p.y), dim);
   })();
 
-  const snapRes = preview ? applySnap(preview, drag?.kind === 'move') : null;
+  // 阈值内的按下不吸附（preview 已是原框，再吸附会把框拉走 = 抖动）
+  const dragging = drag ? isDragging(drag, zoom) : false;
+  const snapRes = preview && dragging ? applySnap(preview, drag?.kind === 'move') : null;
   const snapped = snapRes?.box ?? preview;
   const snapGuides = snapRes?.guides ?? [];
 
@@ -834,6 +868,8 @@ export function AnnoCanvas() {
                               kind: 'resize',
                               index: i,
                               handle: h,
+                              grabX: pt.x,
+                              grabY: pt.y,
                               curX: pt.x,
                               curY: pt.y,
                               orig: boxes[i],

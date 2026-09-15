@@ -4,10 +4,10 @@
   "version": "0.1.0",
   "identifier": "com.dangerchat.app",
   "build": {
-    "beforeDevCommand": "pnpm -F main-ui dev",
+    "beforeDevCommand": "pnpm -F main dev",
     "devUrl": "http://localhost:1421",
-    "beforeBuildCommand": "pnpm -F main-ui build",
-    "frontendDist": "../apps/main-ui/dist"
+    "beforeBuildCommand": "pnpm -F main build",
+    "frontendDist": "../apps/main/dist"
   },
   "app": {
     "windows": [

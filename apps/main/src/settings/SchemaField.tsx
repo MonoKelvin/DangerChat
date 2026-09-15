@@ -1,5 +1,6 @@
 import type { ConfigFieldDto } from '../lib/types';
 import { cn } from '../lib/utils';
+import { Switch } from '../components/Switch';
 
 /** SchemaField：ConfigType → 控件（schema 驱动渲染，新增配置项零前端改动，FR-UI-05）。 */
 
@@ -10,13 +11,15 @@ interface FieldProps {
 }
 
 const input =
-  'h-8 w-full rounded-md border border-border/60 bg-background px-2.5 text-sm outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring';
+  'h-10 w-full rounded-lg border border-[var(--border)] bg-[var(--input-bg)] px-3.5 text-sm text-[var(--text-primary)] outline-none transition-all duration-150 placeholder:text-[var(--text-tertiary)] hover:border-[var(--border-strong)] focus:border-[var(--primary)] focus:ring-2 focus:ring-[var(--focus-ring)]';
 
 export function SchemaField({ field, value, onChange }: FieldProps) {
   const label = (
-    <div className="min-w-0">
-      <p className="text-sm font-medium">{field.label}</p>
-      {field.help && <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{field.help}</p>}
+    <div className="min-w-0 flex-1">
+      <p className="text-[13px] font-medium leading-snug text-[var(--text-primary)]">{field.label}</p>
+      {field.help && (
+        <p className="mt-1 text-xs leading-relaxed text-[var(--text-secondary)]">{field.help}</p>
+      )}
     </div>
   );
 
@@ -24,22 +27,11 @@ export function SchemaField({ field, value, onChange }: FieldProps) {
     switch (field.ty) {
       case 'bool':
         return (
-          <button
-            role="switch"
-            aria-checked={value === true}
-            onClick={() => onChange(!(value === true))}
-            className={cn(
-              'relative h-6 w-11 shrink-0 rounded-full transition-colors',
-              value === true ? 'bg-primary' : 'bg-muted-foreground/30',
-            )}
-          >
-            <span
-              className={cn(
-                'absolute top-0.5 size-5 rounded-full bg-white shadow transition-all',
-                value === true ? 'left-[22px]' : 'left-0.5',
-              )}
-            />
-          </button>
+          <Switch
+            checked={value === true}
+            onChange={(checked) => onChange(checked)}
+            label={field.label}
+          />
         );
       case 'int':
       case 'float': {
@@ -47,7 +39,7 @@ export function SchemaField({ field, value, onChange }: FieldProps) {
         return (
           <input
             type="number"
-            className={cn(input, 'w-32 text-right tabular-nums')}
+            className={cn(input, 'w-36 text-right tabular-nums')}
             value={Number.isFinite(num) ? num : 0}
             step={field.ty === 'float' ? 0.05 : 1}
             onChange={(e) => {
@@ -60,7 +52,7 @@ export function SchemaField({ field, value, onChange }: FieldProps) {
       case 'enum':
         return (
           <select
-            className={cn(input, 'w-48')}
+            className={cn(input, 'w-52 cursor-pointer')}
             value={String(value ?? '')}
             onChange={(e) => onChange(e.target.value)}
           >
@@ -89,6 +81,7 @@ export function SchemaField({ field, value, onChange }: FieldProps) {
           <input
             className={input}
             value={String(value ?? '')}
+            placeholder={field.ty === 'path' ? '文件路径' : ''}
             onChange={(e) => onChange(e.target.value)}
           />
         );
@@ -96,9 +89,9 @@ export function SchemaField({ field, value, onChange }: FieldProps) {
   })();
 
   return (
-    <div className="flex items-center justify-between gap-6 rounded-lg border border-border/40 bg-card/50 px-4 py-3">
+    <div className="group flex items-center justify-between gap-8 rounded-lg bg-[var(--card-bg)] px-5 py-4 shadow-[var(--shadow-sm)] transition-all duration-150 hover:shadow-[var(--shadow-md)]">
       {label}
-      {control}
+      <div className="shrink-0">{control}</div>
     </div>
   );
 }

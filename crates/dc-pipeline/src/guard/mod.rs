@@ -163,6 +163,11 @@ impl Guard {
         // sem 不热重载（规则/头热更新走 M6 set_config → 快照重建；模型本体常驻）
     }
 
+    /// 规则热重载：保存 rules.toml 后前端调用此方法让 sem 重新加载规则。
+    pub fn reload_rules(&self, rules_path: &str, contacts_path: &str) {
+        self.stages.sem.reload_rules_and_contacts(rules_path, contacts_path);
+    }
+
     pub fn stop(&mut self) {
         self.cancel.cancel();
         if let Some(w) = self.worker.take() {

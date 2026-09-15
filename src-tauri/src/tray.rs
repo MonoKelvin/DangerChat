@@ -66,7 +66,11 @@ pub fn build(app: &AppHandle) -> tauri::Result<TrayIcon> {
                 let _ = app.emit(events::EVENT_STATUS, dc_bridge::commands::status_of(&state));
             }
             "open" => show_main(app),
-            "quit" => app.exit(0),
+            "quit" => {
+                // 设置退出意图，允许 ExitRequested 真正退出
+                crate::set_exit_intent();
+                app.exit(0);
+            }
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {

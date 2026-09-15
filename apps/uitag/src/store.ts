@@ -7,7 +7,17 @@ import * as api from './lib/tauri';
 export type DragState =
   | { kind: 'draw'; startX: number; startY: number; curX: number; curY: number }
   | { kind: 'move'; index: number; grabX: number; grabY: number; curX: number; curY: number; orig: AnnoBox }
-  | { kind: 'resize'; index: number; handle: Handle; curX: number; curY: number; orig: AnnoBox }
+  | {
+      kind: 'resize';
+      index: number;
+      handle: Handle;
+      /** 按下位置（图像坐标）：与手柄锚点的偏移要扣除，否则点一下手柄框就跳几像素 */
+      grabX: number;
+      grabY: number;
+      curX: number;
+      curY: number;
+      orig: AnnoBox;
+    }
   | null;
 
 export type Handle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';

@@ -3,9 +3,17 @@
 mod bootstrap;
 mod tray;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use tauri::{Manager, RunEvent};
+
+/// 退出意图：托盘"退出"设置为 true，允许进程真正退出；窗口关闭不设置，保持托盘常驻。
+static ALLOW_EXIT: AtomicBool = AtomicBool::new(false);
+
+pub fn set_exit_intent() {
+    ALLOW_EXIT.store(true, Ordering::SeqCst);
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -66,8 +74,10 @@ pub fn run() {
         .expect("tauri 构建失败")
         .run(|_app, event| {
             if let RunEvent::ExitRequested { api, .. } = event {
-                // 关主窗口不退出（托盘常驻）；真正退出走托盘菜单
-                api.prevent_exit();
+                // 只有托盘明确退出时允许真正退出；窗口关闭保持托盘常驻
+                if !ALLOW_EXIT.load(Ordering::SeqCst) {
+                    api.prevent_exit();
+                }
             }
         });
 }
