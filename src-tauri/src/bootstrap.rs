@@ -16,15 +16,18 @@ use dc_pipeline::intercept::{Intercept, InterceptConfig, InterceptDeps};
 use dc_pipeline::{layout, ocr, sem};
 use dc_sys::RealSys;
 
-/// 数据目录：`%APPDATA%\DangerChat\`（config.toml / logs / models / stats.json）。
-fn data_dir(app: &tauri::AppHandle) -> std::path::PathBuf {
+/// 系统默认数据目录：`%APPDATA%\<identifier>`。
+fn default_data_dir(app: &tauri::AppHandle) -> std::path::PathBuf {
     app.path()
         .app_data_dir()
         .expect("app_data_dir 解析失败（%APPDATA% 不可用）")
 }
 
 pub fn bootstrap(app: &tauri::AppHandle) -> Arc<AppState> {
-    let data_dir = data_dir(app);
+    let default_dir = default_data_dir(app);
+    let _ = std::fs::create_dir_all(&default_dir);
+    // 自定义数据目录指针（默认目录下的 data_dir.txt）优先于系统默认
+    let data_dir = dc_bridge::state::resolve_data_dir(default_dir.clone());
     let _ = std::fs::create_dir_all(&data_dir);
 
     // 1) 日志（最先：一切后续步骤可观测）
@@ -45,7 +48,6 @@ pub fn bootstrap(app: &tauri::AppHandle) -> Arc<AppState> {
     let config = Arc::new(
         ConfigCenter::open(data_dir.join("config.toml")).expect("配置中心打开失败"),
     );
-    let intercept_cfg = InterceptConfig::default();
     {
         // intercept 的配置面是自由函数（含 target.process_name 等装配前需要的键）
         config
@@ -68,15 +70,26 @@ pub fn bootstrap(app: &tauri::AppHandle) -> Arc<AppState> {
         config
             .register_module(
                 "alert",
-                vec![dc_core::ConfigField {
-                    key: "alert.timeout_secs".into(),
-                    ty: dc_core::ConfigType::Int { min: 3, max: 60 },
-                    default: dc_core::ConfigValue::Int(10),
-                    label: "弹窗倒计时".into(),
-                    help: "超时自动「仍然发送」；倒计时内可按键/点击覆盖".into(),
-                    group: "拦截与提示".into(),
-                    owner: "alert".into(),
-                }],
+                vec![
+                    dc_core::ConfigField {
+                        key: "alert.timeout_secs".into(),
+                        ty: dc_core::ConfigType::Int { min: 3, max: 60 },
+                        default: dc_core::ConfigValue::Int(10),
+                        label: "弹窗倒计时".into(),
+                        help: "超时后弹窗自动关闭（等同「关闭」）".into(),
+                        group: "拦截与提示".into(),
+                        owner: "alert".into(),
+                    },
+                    dc_core::ConfigField {
+                        key: "alert.shake".into(),
+                        ty: dc_core::ConfigType::Bool,
+                        default: dc_core::ConfigValue::Bool(true),
+                        label: "弹窗重点提示".into(),
+                        help: "弹出时抖动窗口并闪烁边框".into(),
+                        group: "拦截与提示".into(),
+                        owner: "alert".into(),
+                    },
+                ],
             )
             .expect("alert schema 注册失败");
         config.finalize().expect("配置 finalize 失败");
@@ -88,9 +101,15 @@ pub fn bootstrap(app: &tauri::AppHandle) -> Arc<AppState> {
     // 4) Intercept（钩子 + 前台监听；RAII guard 存在 AppState 生命周期外——
     //    由 Intercept 自身持有，进程退出随 Drop 卸载）
     let sys: Arc<dyn dc_sys::SysApi> = Arc::new(RealSys::new());
-    let deps = InterceptDeps::new(Arc::clone(&sys), intercept_cfg);
+    // 配置从快照构建（曾硬编码 default → target.process_name 改动对钩子不生效）
+    let deps = InterceptDeps::new(
+        Arc::clone(&sys),
+        InterceptConfig::from_snapshot(&config.snapshot()),
+    );
     let intercept = Arc::new(Intercept::new(deps));
-    let _hook_guard = intercept.start().expect("键盘钩子安装失败");
+    // RAII guard 存栈上会在 bootstrap 返回时 Drop（钩子被卸载，M6 以来的隐性缺陷）。
+    // 钩子必须活到进程结束——进程退出时 OS 自动解除，故 forget 释放所有权。
+    std::mem::forget(intercept.start().expect("键盘钩子安装失败"));
 
     // 5) 组装 AppState
     let target = config
@@ -110,6 +129,9 @@ pub fn bootstrap(app: &tauri::AppHandle) -> Arc<AppState> {
             config.snapshot().i64_or("alert.timeout_secs", 10).max(1) as u64,
         ),
         data_dir: data_dir.clone(),
+        default_data_dir: default_dir,
+        // logo 基础色相（暖红）：前端主题色切换时经 set_tray_hue 覆盖
+        tray_hue_deg: std::sync::atomic::AtomicU32::new(11),
     });
 
     // 6) 默认规则库/画像（首启空文件，sem 模块容忍缺失）

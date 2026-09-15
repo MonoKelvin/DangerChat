@@ -20,7 +20,7 @@ pub mod keys;
 pub mod state;
 pub mod tracker;
 
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -62,7 +62,7 @@ impl Default for InterceptConfig {
             enabled: true,
             send_key: SendKey::Enter,
             target_process: "WeChat.exe".to_string(),
-            verdict_ttl: Duration::from_millis(2000),
+            verdict_ttl: Duration::from_millis(10_000),
             fast_debounce: Duration::from_millis(150),
             allow_once_timeout: Duration::from_millis(30_000),
             foreground_debounce: Duration::from_millis(3000),
@@ -138,8 +138,8 @@ pub fn config_schema() -> Vec<ConfigField> {
         ConfigField::new(
             "guard.verdict_ttl_ms",
             ConfigType::Int {
-                min: 100,
-                max: 10_000,
+                min: 500,
+                max: 60_000,
             },
             ConfigValue::Int(default.verdict_ttl.as_millis() as i64),
             "判定有效期（毫秒）",
@@ -229,6 +229,14 @@ pub struct Intercept {
     sys: Arc<dyn SysApi>,
     clock: Arc<dyn Clock>,
     config: InterceptConfig,
+    /// 目标进程名（热更新；on_foreground 的 sys-thread 读，低频，锁可接受）。
+    target: std::sync::RwLock<String>,
+    /// 发送键（热更新；钩子裁决路径读，原子解码保持 O(1)）。
+    send_key: AtomicU8,
+    /// 守护开关（热更新；refresh_state 读）。
+    enabled: AtomicBool,
+    /// 判定有效期毫秒（热更新；回车裁决读）。
+    verdict_ttl_ms: AtomicU64,
     state: AtomicU8,
     foreground: ForegroundTracker,
     tracker: Arc<DraftTracker>,
@@ -254,10 +262,18 @@ impl Intercept {
             // §5.3 错误矩阵：目标进程名配置为空必须在装配期被拒绝（调用方检查 config）
             tracing::error!("target.process_name 为空：守护不会生效");
         }
+        let send_key = AtomicU8::new(SendKey::encode(config.send_key));
+        let target = std::sync::RwLock::new(config.target_process.clone());
+        let enabled = AtomicBool::new(config.enabled);
+        let verdict_ttl_ms = AtomicU64::new(config.verdict_ttl.as_millis() as u64);
         Self {
             sys,
             clock,
             config,
+            target,
+            send_key,
+            enabled,
+            verdict_ttl_ms,
             state: AtomicU8::new(GuardState::Suspended.to_u8()),
             foreground,
             tracker: Arc::new(tracker),
@@ -267,6 +283,32 @@ impl Intercept {
             metrics: MetricsRecorder::default(),
             log_dir: std::path::PathBuf::new(),
         }
+    }
+
+    /// 热更新目标进程名（set_config → 即时生效，无需重启）。
+    pub fn set_target_process(&self, name: &str) {
+        if let Ok(mut t) = self.target.write() {
+            *t = name.trim().to_string();
+        }
+    }
+
+    /// 热更新发送键。
+    pub fn set_send_key(&self, key: SendKey) {
+        self.send_key.store(SendKey::encode(key), Ordering::SeqCst);
+    }
+
+    /// 热更新守护开关。
+    pub fn set_enabled(&self, on: bool) {
+        self.enabled.store(on, Ordering::SeqCst);
+    }
+
+    /// 热更新判定有效期。
+    pub fn set_verdict_ttl_ms(&self, ms: u64) {
+        self.verdict_ttl_ms.store(ms.clamp(100, 60_000), Ordering::SeqCst);
+    }
+
+    fn current_send_key(&self) -> SendKey {
+        SendKey::decode(self.send_key.load(Ordering::SeqCst))
     }
 
     /// 便捷构造：默认时钟 + 传入的 sys。
@@ -369,7 +411,7 @@ impl Intercept {
         // 注意：组合态优先于 Cooldown 分支，因此组合期间数字键 1/2/3 会被输入法吃掉、
         // 不会路由为弹窗动作——此时用鼠标点弹窗按钮即可（弹窗本身不夺焦点）。
         if self.sys.ime_composing() {
-            if ev.is_key_down && (is_send_key(ev, self.config.send_key) || ev.is_ime_consumed()) {
+            if ev.is_key_down && (is_send_key(ev, self.current_send_key()) || ev.is_ime_consumed()) {
                 self.tracker.bump();
                 let _ = self.triggers.offer_fast();
             }
@@ -390,7 +432,7 @@ impl Intercept {
                 }
                 return HookAction::Swallow;
             }
-            if is_send_key(ev, self.config.send_key) {
+            if is_send_key(ev, self.current_send_key()) {
                 return HookAction::Swallow;
             }
             // §2.4：弹窗存续期「用户可继续打字，纪元正常推进」——必须推进，
@@ -404,7 +446,7 @@ impl Intercept {
         }
 
         // 4) Active：发送键裁决 / 内容键推进纪元
-        if is_send_key(ev, self.config.send_key) {
+        if is_send_key(ev, self.current_send_key()) {
             if !ev.is_key_down {
                 return HookAction::Pass;
             }
@@ -415,13 +457,16 @@ impl Intercept {
             if self.tracker.is_snoozed() {
                 return HookAction::Pass;
             }
-            let Some(verdict) = self.slot.load_fresh(self.config.verdict_ttl, now) else {
-                tracing::debug!("fail-open：无新鲜判定");
+            let Some(verdict) = self.slot.load_fresh(
+                    Duration::from_millis(self.verdict_ttl_ms.load(Ordering::SeqCst)),
+                    now,
+                ) else {
+                tracing::info!("fail-open：无新鲜判定");
                 return HookAction::Pass;
             };
             if verdict.draft_epoch != self.tracker.epoch() {
                 // 判定对应的草稿已被改动 → 结果失效（§2.2 性质论证）
-                tracing::debug!("fail-open：判定纪元落后于草稿");
+                tracing::info!("fail-open：判定纪元落后于草稿");
                 return HookAction::Pass;
             }
             match verdict.level {
@@ -460,7 +505,7 @@ impl Intercept {
             // 唤醒即时生效：用户切回目标程序后不该还要等去抖窗口
             self.transition(GuardEvent::ForegroundActive, now);
         }
-        tracing::debug!(
+        tracing::info!(
             process = %info.process_name,
             is_target,
             state = self.state().as_str(),
@@ -470,8 +515,12 @@ impl Intercept {
 
     /// 前台进程是否为目标程序（仅比较进程名，不做任何进程内部探测，C-05/C-06）。
     pub fn matches_target(&self, info: &ForegroundInfo) -> bool {
-        let target = self.config.target_process.trim();
-        !target.is_empty() && info.process_name.eq_ignore_ascii_case(target)
+        let target = self
+            .target
+            .read()
+            .map(|t| t.trim().to_string())
+            .unwrap_or_default();
+        !target.is_empty() && info.process_name.eq_ignore_ascii_case(&target)
     }
 
     /// 应用弹窗动作（dc-alert → dc-bridge → 这里）。
@@ -543,7 +592,7 @@ impl Intercept {
 
     /// 把前台派生态（Active/Suspended）落到存储里，并返回当前有效状态。
     fn refresh_state(&self, now_ms: u64) -> GuardState {
-        if !self.config.enabled {
+        if !self.enabled.load(Ordering::SeqCst) {
             return GuardState::Paused;
         }
         let stored = GuardState::from_u8(self.state.load(Ordering::SeqCst));

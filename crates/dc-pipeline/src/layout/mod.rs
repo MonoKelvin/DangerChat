@@ -78,7 +78,24 @@ impl LayoutStage {
     ) -> Result<RegionLayout, StageError> {
         ctx.cancel.check()?;
         let Some(sess) = &self.session else {
-            return Err(StageError::Fatal("layout 模型未加载".into()));
+            // 模型未加载（init 失败/未导入）：窗口底部区域兜底为输入区。
+            // 聊天输入框恒在窗口底部——只 OCR 底部 30% 区域，比整窗快 3~5 倍，
+            // 快环缓存后打字停顿只需跑小区域，判定延迟进入秒级。
+            // 不 Fatal——否则 Guard 整体停用，规则拦截也一并失效。
+            tracing::warn!(
+                "layout 模型未加载，输入区按窗口底部 30% 兜底（设置→模型与设备 导入后恢复精确定位）"
+            );
+            let (w, h) = (snapshot.image.width(), snapshot.image.height());
+            let band = (h * 3 / 10).max(80);
+            return Ok(RegionLayout {
+                regions: vec![Region {
+                    tag: crate::contract::TAG_MSG_INPUT.into(),
+                    rect: dc_sys::Rect::new(0, (h - band) as i32, w, band),
+                    confidence: 0.0,
+                }],
+                layout_epoch: 0,
+                inferred_at: Instant::now(),
+            });
         };
 
         // 1) letterbox：RGBA → 1×3×side×side CHW

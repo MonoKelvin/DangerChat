@@ -18,6 +18,7 @@ toml.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 crossbeam-channel.workspace = true
+rfd = "0.16"
 
 [dev-dependencies]
 tempfile.workspace = true

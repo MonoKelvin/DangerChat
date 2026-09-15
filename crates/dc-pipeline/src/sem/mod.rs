@@ -209,40 +209,18 @@ impl Module for SemStage {
                 group: "拦截与提示".into(),
                 owner: "sem".into(),
             },
-            ConfigField {
-                key: "sem.rules_path".into(),
-                ty: ConfigType::Path,
-                default: ConfigValue::Str("config/rules.toml".into()),
-                label: "违禁词库".into(),
-                help: "rules.toml 路径（FR-SEM-04，支持热重载）".into(),
-                group: "拦截与提示".into(),
-                owner: "sem".into(),
-            },
-            ConfigField {
-                key: "sem.contacts_path".into(),
-                ty: ConfigType::Path,
-                default: ConfigValue::Str("config/contacts.toml".into()),
-                label: "聊天对象画像".into(),
-                help: "contacts.toml 路径（FR-SEM-03）".into(),
-                group: "拦截与提示".into(),
-                owner: "sem".into(),
-            },
         ]
     }
 
     fn init(&mut self, mctx: &ModuleContext) -> Result<(), ModuleError> {
-        // rules / contacts（文件缺失 → 空规则集，仅 L2 + warn，不 Fatal）
-        // 规则库默认在数据目录根（bootstrap 创建）；配置可覆盖（绝对路径）
-        let rules_default = mctx
+        // rules / contacts 固定在数据目录根（bootstrap 创建/bridge 保存均写此路径）。
+        // 曾有 sem.rules_path 相对路径默认值导致读写错位，已移除该配置项。
+        let rules_path = mctx
             .log_dir
             .parent()
             .map(|d| d.join("rules.toml"))
             .unwrap_or_else(|| std::path::PathBuf::from("rules.toml"));
-        let rules_default_str = rules_default.to_string_lossy().into_owned();
-        let rules_path = mctx
-            .config
-            .str_or("sem.rules_path", &rules_default_str);
-        match std::fs::read_to_string(rules_path) {
+        match std::fs::read_to_string(&rules_path) {
             Ok(text) => match RuleSet::from_toml(&text) {
                 Ok(rs) => {
                     if let Ok(mut w) = self.rules.write() {
@@ -257,22 +235,18 @@ impl Module for SemStage {
                 }
             },
             Err(e) => {
-                tracing::warn!(path = %rules_path, error = %e, "规则库不存在，按空规则集继续");
+                tracing::warn!(path = %rules_path.display(), error = %e, "规则库不存在，按空规则集继续");
                 if let Ok(mut w) = self.rules.write() {
                     *w = RuleSet::from_defs(Vec::new()).map_err(ModuleError::Fatal)?;
                 }
             }
         }
-        let contacts_default = mctx
+        let contacts_path = mctx
             .log_dir
             .parent()
             .map(|d| d.join("contacts.toml"))
             .unwrap_or_else(|| std::path::PathBuf::from("contacts.toml"));
-        let contacts_default_str = contacts_default.to_string_lossy().into_owned();
-        let contacts_path = mctx
-            .config
-            .str_or("sem.contacts_path", &contacts_default_str);
-        match std::fs::read_to_string(contacts_path) {
+        match std::fs::read_to_string(&contacts_path) {
             Ok(text) => match ContactBook::from_toml(&text) {
                 Ok(cb) => {
                     if let Ok(mut w) = self.contacts.write() {

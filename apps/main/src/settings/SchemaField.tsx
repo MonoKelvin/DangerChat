@@ -1,6 +1,8 @@
 import type { ConfigFieldDto } from '../lib/types';
-import { cn } from '../lib/utils';
 import { Switch } from '../components/Switch';
+import { Combobox } from '../components/Combobox';
+import { NumberInput } from '../components/NumberInput';
+import { SettingsRow } from '../components/SettingsGroup';
 
 /** SchemaField：ConfigType → 控件（schema 驱动渲染，新增配置项零前端改动，FR-UI-05）。 */
 
@@ -11,18 +13,9 @@ interface FieldProps {
 }
 
 const input =
-  'h-10 w-full rounded-lg border border-[var(--border)] bg-[var(--input-bg)] px-3.5 text-sm text-[var(--text-primary)] outline-none transition-all duration-150 placeholder:text-[var(--text-tertiary)] hover:border-[var(--border-strong)] focus:border-[var(--primary)] focus:ring-2 focus:ring-[var(--focus-ring)]';
+  'h-9 w-full rounded-lg bg-[var(--input-bg)] px-3.5 text-sm text-[var(--text-primary)] outline-none transition-all duration-150 placeholder:text-[var(--text-tertiary)] hover:bg-[var(--active-overlay)] focus:bg-[var(--panel-bg)] focus:shadow-[inset_0_0_0_1.5px_var(--brand)]';
 
 export function SchemaField({ field, value, onChange }: FieldProps) {
-  const label = (
-    <div className="min-w-0 flex-1">
-      <p className="text-[13px] font-medium leading-snug text-[var(--text-primary)]">{field.label}</p>
-      {field.help && (
-        <p className="mt-1 text-xs leading-relaxed text-[var(--text-secondary)]">{field.help}</p>
-      )}
-    </div>
-  );
-
   const control = (() => {
     switch (field.ty) {
       case 'bool':
@@ -36,32 +29,23 @@ export function SchemaField({ field, value, onChange }: FieldProps) {
       case 'int':
       case 'float': {
         const num = typeof value === 'number' ? value : Number(value ?? 0);
+        const step = field.ty === 'float' ? 0.05 : 1;
         return (
-          <input
-            type="number"
-            className={cn(input, 'w-36 text-right tabular-nums')}
+          <NumberInput
             value={Number.isFinite(num) ? num : 0}
-            step={field.ty === 'float' ? 0.05 : 1}
-            onChange={(e) => {
-              const v = field.ty === 'float' ? parseFloat(e.target.value) : parseInt(e.target.value, 10);
-              onChange(Number.isFinite(v) ? v : 0);
-            }}
+            onChange={(v) => onChange(v)}
+            step={step}
           />
         );
       }
       case 'enum':
         return (
-          <select
-            className={cn(input, 'w-52 cursor-pointer')}
+          <Combobox
             value={String(value ?? '')}
-            onChange={(e) => onChange(e.target.value)}
-          >
-            {(field.default as unknown as { options?: string[] })?.options?.map?.((o) => (
-              <option key={o} value={o}>
-                {o}
-              </option>
-            )) ?? <option value={String(value ?? '')}>{String(value ?? '')}</option>}
-          </select>
+            options={field.options.map((o) => ({ value: o, label: o }))}
+            onChange={(v) => onChange(v)}
+            className="w-52"
+          />
         );
       case 'strlist': {
         const list = Array.isArray(value) ? (value as string[]) : [];
@@ -89,9 +73,8 @@ export function SchemaField({ field, value, onChange }: FieldProps) {
   })();
 
   return (
-    <div className="group flex items-center justify-between gap-8 rounded-lg bg-[var(--card-bg)] px-5 py-4 shadow-[var(--shadow-sm)] transition-all duration-150 hover:shadow-[var(--shadow-md)]">
-      {label}
-      <div className="shrink-0">{control}</div>
-    </div>
+    <SettingsRow label={field.label} subtitle={field.help}>
+      {control}
+    </SettingsRow>
   );
 }

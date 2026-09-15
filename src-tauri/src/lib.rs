@@ -6,13 +6,25 @@ mod tray;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use tauri::{Manager, RunEvent};
+use tauri::{AppHandle, Manager, RunEvent};
 
 /// 退出意图：托盘"退出"设置为 true，允许进程真正退出；窗口关闭不设置，保持托盘常驻。
 static ALLOW_EXIT: AtomicBool = AtomicBool::new(false);
 
 pub fn set_exit_intent() {
     ALLOW_EXIT.store(true, Ordering::SeqCst);
+}
+
+/// 前端主题色切换：存色相（dc-bridge）并即时刷新托盘图标。
+#[tauri::command]
+fn set_tray_hue(app: AppHandle, hue: u32) -> Result<(), String> {
+    let state = app
+        .state::<Arc<dc_bridge::state::AppState>>()
+        .inner()
+        .clone();
+    dc_bridge::commands::set_tray_hue_inner(&state, hue);
+    tray::refresh(&app);
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -36,6 +48,11 @@ pub fn run() {
             dc_bridge::commands::get_guard_status,
             dc_bridge::commands::clear_logs,
             dc_bridge::commands::alert_action,
+            dc_bridge::commands::get_data_dir,
+            dc_bridge::commands::pick_data_dir,
+            dc_bridge::commands::set_data_dir,
+            dc_bridge::commands::open_data_dir,
+            set_tray_hue,
         ])
         .setup(|app| {
             // 1) 装配（日志/配置/钩子/发现前置）

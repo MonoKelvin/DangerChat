@@ -49,6 +49,27 @@ export async function alertAction(action: 'allow' | 'cancel' | 'edit' | 'snooze'
   return invoke('alert_action', { action });
 }
 
+export interface DataDirInfo {
+  current: string;
+  custom: boolean;
+}
+
+export async function getDataDir(): Promise<DataDirInfo> {
+  return invoke<DataDirInfo>('get_data_dir');
+}
+
+export async function pickDataDir(): Promise<string | null> {
+  return invoke<string | null>('pick_data_dir');
+}
+
+export async function setDataDir(path: string): Promise<void> {
+  return invoke('set_data_dir', { path });
+}
+
+export async function openDataDir(): Promise<void> {
+  return invoke('open_data_dir');
+}
+
 /** 首启同意状态（localStorage；「不再弹出」= true） */
 export const NOTICE_KEY = 'dangerchat:notice-agreed';
 export function hasAgreedNotice(): boolean {
@@ -56,4 +77,9 @@ export function hasAgreedNotice(): boolean {
 }
 export function agreeNotice(): void {
   localStorage.setItem(NOTICE_KEY, '1');
+}
+
+/** 主题色切换 → 托盘图标同步按该色相着色（即时刷新） */
+export async function setTrayHue(hue: number): Promise<void> {
+  return invoke('set_tray_hue', { hue });
 }

@@ -18,8 +18,10 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
           size === 'sm' && 'size-8 text-sm',
           size === 'md' && 'size-10 text-base',
           variant === 'default' && 'hover:bg-[var(--hover-overlay)]',
-          variant === 'ghost' && 'text-[var(--text-secondary)] hover:bg-[var(--hover-overlay)] hover:text-[var(--text-primary)]',
-          variant === 'primary' && 'bg-[var(--primary)] text-[var(--primary-text)] hover:bg-[var(--primary-hover)] shadow-[var(--shadow-sm)]',
+          variant === 'ghost' &&
+            'text-[var(--text-secondary)] hover:bg-[var(--hover-overlay)] hover:text-[var(--text-primary)]',
+          variant === 'primary' &&
+            'bg-[var(--brand)] text-[var(--brand-text)] hover:bg-[var(--brand-hover)] shadow-[var(--shadow-sm)]',
           variant === 'danger' && 'hover:bg-[var(--danger)] hover:text-white',
           className,
         )}

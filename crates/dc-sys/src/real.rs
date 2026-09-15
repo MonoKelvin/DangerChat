@@ -79,6 +79,8 @@ thread_local! {
 /// IME 组合态：`VK_PROCESSKEY` 为主信号（最近一次消费键的单调毫秒），
 /// `EVENT_OBJECT_IME_SHOW/HIDE` 修正组合开始/结束边界（FR-SRC-09、§5.2）。
 static IME_LAST_PROCESSKEY_MS: AtomicU64 = AtomicU64::new(0);
+static KEY_PROC_INVOKED: AtomicU64 = AtomicU64::new(0);
+static FG_PROC_INVOKED: AtomicU64 = AtomicU64::new(0);
 static IME_SHOWN: AtomicBool = AtomicBool::new(false);
 
 /// 距离最近一次「被输入法消费的键」多久仍视为组合中。
@@ -202,8 +204,19 @@ impl Drop for SysThread {
 fn sys_thread_main(ctrl: Receiver<SysReq>, event: isize, shutdown: Arc<AtomicBool>) {
     let mut state = ThreadState::default();
     let mut msg = MSG::default();
+    let mut last_heartbeat = std::time::Instant::now();
 
     while !shutdown.load(Ordering::SeqCst) {
+        if last_heartbeat.elapsed() >= std::time::Duration::from_secs(5) {
+            last_heartbeat = std::time::Instant::now();
+            tracing::info!(
+                key_invoked = KEY_PROC_INVOKED.load(Ordering::SeqCst),
+                fg_invoked = FG_PROC_INVOKED.load(Ordering::SeqCst),
+                keyboard_hook = state.keyboard.is_some(),
+                foreground_hook = state.foreground.is_some(),
+                "sys-thread 心跳"
+            );
+        }
         // 1) 处理安装/卸载请求
         while let Ok(req) = ctrl.try_recv() {
             handle_request(req, &mut state);
@@ -353,6 +366,7 @@ fn install_win_event(
 // ---------------------------------------------------------------------------
 
 unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    KEY_PROC_INVOKED.fetch_add(1, Ordering::SeqCst);
     if code < 0 {
         return unsafe { CallNextHookEx(None, code, wparam, lparam) };
     }
@@ -408,6 +422,7 @@ unsafe extern "system" fn foreground_proc(
     _thread: u32,
     _time: u32,
 ) {
+    FG_PROC_INVOKED.fetch_add(1, Ordering::SeqCst);
     if event != EVENT_SYSTEM_FOREGROUND {
         return;
     }
