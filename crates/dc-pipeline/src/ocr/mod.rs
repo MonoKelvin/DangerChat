@@ -208,7 +208,8 @@ impl Module for OcrStage {
         let paths =
             engine::resolve_paths(&det, &cls, &rec).map_err(ModuleError::Fatal)?;
         let intra = mctx.config.i64_or("device.intra_threads", 2).clamp(1, 4) as usize;
-        let engine = engine::OcrEngine::new(&paths, intra).map_err(ModuleError::Fatal)?;
+        let gpu = mctx.config.str_or("ocr.device", "direct-ml") == "direct-ml";
+        let engine = engine::OcrEngine::new(&paths, intra, gpu).map_err(ModuleError::Fatal)?;
         let default_noise: Vec<String> = vec!["发送".into(), "按住 说话".into()];
         self.noise_words = mctx
             .config
@@ -216,7 +217,7 @@ impl Module for OcrStage {
         self.min_conf = mctx.config.f64_or("ocr.min_conf", 0.5);
         self.upscale = mctx.config.bool_or("ocr.upscale", true);
         self.engine = Some(engine);
-        tracing::info!("OCR 引擎已加载（PP-OCRv4 mobile，CPU）");
+        tracing::info!("OCR 引擎已加载（PP-OCRv4 mobile，{}）", if gpu { "DirectML GPU" } else { "CPU" });
         Ok(())
     }
 

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { agreeNotice } from '../lib/commands';
+import { Checkbox } from '../components/Checkbox';
 
 /**
  * 首次启动告知页（FR-UI-08，合规文档 §5.1 强制项）。
@@ -63,17 +64,13 @@ export function NoticePage({ onAgree }: { onAgree: () => void }) {
         </section>
 
         <div className="flex items-center justify-between pt-2">
-          <label className="flex cursor-pointer items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={checked}
-              onChange={(e) => setChecked(e.target.checked)}
-              className="size-4 accent-[var(--primary)]"
-            />
-            我已阅读并理解以上内容，自行承担使用风险
-          </label>
+          <Checkbox
+            checked={checked}
+            onChange={setChecked}
+            label="我已阅读并理解以上内容，自行承担使用风险"
+          />
           <button
-            className="h-9 rounded-md bg-primary px-6 text-sm text-primary-foreground transition-opacity disabled:opacity-40"
+            className="h-9 rounded-lg bg-[var(--brand)] px-6 text-sm font-medium text-[var(--brand-text)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--brand-hover)] disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
             disabled={!checked}
             onClick={() => {
               agreeNotice();

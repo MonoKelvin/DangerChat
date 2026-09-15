@@ -1,24 +1,28 @@
 import { useEffect, useRef, useState } from 'react';
-import { cn } from '../lib/utils';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import { ShieldAlert } from 'lucide-react';
 import type { AlertPayload } from '../lib/types';
-import { alertAction } from '../lib/commands';
+import { alertAction, getConfig } from '../lib/commands';
 import { onAlert } from '../lib/events';
 
 /**
- * dc-alert 弹窗（FR-BRG-02/04）：常驻隐藏窗口的根组件。
- * 键盘 1/2/3/0 由全局钩子在 Cooldown 期截获代转（弹窗无焦点收不到键盘）——
- * 本组件只响应鼠标点击 + `alert://action` 事件做视觉反馈。
+ * dc-alert 拦截弹窗：常驻隐藏窗口的根组件。
+ * 两个动作：「我已知晓」= 静默当前草稿（改稿即恢复守护）；「关闭」= 解除本轮
+ * 拦截（草稿未变时下次发送会再次弹出）。超时等同「关闭」。
+ * 任何路径（按钮/超时/异常）都必须隐藏窗口——曾经只改 React 状态导致窗口残留。
  */
 export function AlertRoot() {
   const [payload, setPayload] = useState<AlertPayload | null>(null);
-  const [phase, setPhase] = useState<'idle' | 'show' | 'allow-hint'>('idle');
+  const [visible, setVisible] = useState(false);
   const [countdown, setCountdown] = useState(0);
+  const [shakeOn, setShakeOn] = useState(true);
   const timerRef = useRef<number | null>(null);
 
   useEffect(() => {
+    void getConfig('alert.shake').then((v) => setShakeOn(v !== false));
     const un = onAlert((p) => {
       setPayload(p);
-      setPhase('show');
+      setVisible(true);
       setCountdown(p.countdown_secs);
     });
     return () => {
@@ -26,13 +30,13 @@ export function AlertRoot() {
     };
   }, []);
 
-  // 倒计时：归零自动「仍然发送」（已拍板默认；FR-BRG-04 默认值修订）
+  // 倒计时归零 →「关闭」
   useEffect(() => {
-    if (phase !== 'show' || countdown <= 0) return;
+    if (!visible || countdown <= 0) return;
     timerRef.current = window.setTimeout(() => {
       setCountdown((c) => {
         if (c <= 1) {
-          void doAction('allow');
+          void doAction('cancel');
           return 0;
         }
         return c - 1;
@@ -42,100 +46,78 @@ export function AlertRoot() {
       if (timerRef.current != null) window.clearTimeout(timerRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, countdown]);
+  }, [visible, countdown]);
 
-  const doAction = async (a: 'allow' | 'cancel' | 'edit' | 'snooze') => {
-    await alertAction(a);
-    if (a === 'allow') {
-      // allow 后提示「再按一次回车」（C-08：危信不代发）
-      setPhase('allow-hint');
-      window.setTimeout(() => setPhase('idle'), 2500);
-    } else {
-      setPhase('idle');
-      setPayload(null);
+  const doAction = async (a: 'snooze' | 'cancel') => {
+    if (timerRef.current != null) window.clearTimeout(timerRef.current);
+    try {
+      await alertAction(a);
+    } catch {
+      // 后端失败也必须关窗（窗口残留比动作失败更干扰用户）
     }
+    setVisible(false);
+    setPayload(null);
+    void getCurrentWindow().hide();
   };
 
-  if (phase === 'idle' || !payload) {
-    // 预渲染骨架（300ms 预算：show 时只填文本）
-    return <div className="h-full w-full bg-background" data-skeleton="alert" />;
+  if (!visible || !payload) {
+    return <div className="h-full w-full bg-[var(--window-bg)]" data-skeleton="alert" />;
   }
 
-  const levelColor =
-    payload.level === 'block'
-      ? { bar: 'bg-rose-500', text: 'text-rose-500' }
-      : { bar: 'bg-amber-500', text: 'text-amber-500' };
+  const isBlock = payload.level === 'block';
+  const accent = isBlock ? 'var(--danger)' : 'var(--warning)';
 
   return (
-    <div className="flex h-full flex-col bg-background text-foreground">
-      {/* 级别色条 */}
-      <div className={cn('h-1 w-full shrink-0', levelColor.bar)} />
-
-      {phase === 'allow-hint' ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 p-4 text-center">
-          <p className="text-sm font-medium">已放行本次发送</p>
-          <p className="text-xs leading-relaxed text-muted-foreground">
-            请<b>再按一次回车</b>完成发送
-            <br />
-            （危信不会代你发送）
-          </p>
-        </div>
-      ) : (
-        <div className="flex min-h-0 flex-1 flex-col p-4">
-          <div className="mb-2 flex items-center justify-between">
-            <span className={cn('text-sm font-semibold', levelColor.text)}>
-              {payload.level === 'block' ? '已阻断发送' : '发送提醒'}
-            </span>
-            <span className="text-[11px] tabular-nums text-muted-foreground">
-              {countdown}s 后自动放行
-            </span>
-          </div>
-
-          {/* 被拦消息（FR-BRG-02） */}
-          <div className="mb-2 max-h-16 overflow-y-auto rounded-md bg-muted/60 px-3 py-2 text-[13px] leading-relaxed">
-            {payload.draft_text || '（空）'}
-          </div>
-
-          {/* 命中原因 */}
-          <ul className="mb-1 space-y-0.5 text-xs text-muted-foreground">
-            {payload.reasons.slice(0, 3).map((r, i) => (
-              <li key={i}>· {r}</li>
-            ))}
-          </ul>
-
-          <p className="mb-3 text-[11px] text-muted-foreground">
-            对象：{payload.chat_target ?? '未识别'}（按正式场景处理）
-          </p>
-
-          {/* 按钮（快捷键 1/2/3/0 由钩子代转） */}
-          <div className="mt-auto grid grid-cols-3 gap-2">
-            <button
-              className="h-9 rounded-md bg-primary text-xs font-medium text-primary-foreground"
-              onClick={() => void doAction('allow')}
-            >
-              仍然发送 <span className="opacity-60">1</span>
-            </button>
-            <button
-              className="h-9 rounded-md border border-border/60 text-xs hover:bg-accent"
-              onClick={() => void doAction('cancel')}
-            >
-              取消发送 <span className="opacity-60">2</span>
-            </button>
-            <button
-              className="h-9 rounded-md border border-border/60 text-xs hover:bg-accent"
-              onClick={() => void doAction('edit')}
-            >
-              返回编辑 <span className="opacity-60">3</span>
-            </button>
-          </div>
-          <button
-            className="mt-1.5 h-7 rounded-md text-[11px] text-muted-foreground hover:bg-accent"
-            onClick={() => void doAction('snooze')}
+    <div
+      className={[
+        'flex h-full flex-col bg-[var(--window-bg)] p-4 text-[var(--text-primary)]',
+        shakeOn ? 'alert-shake alert-flash' : '',
+      ].join(' ')}
+      style={{ ['--alert-accent' as string]: accent }}
+    >
+      {/* 头部 */}
+      <div className="mb-3 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span
+            className="flex size-7 items-center justify-center rounded-lg"
+            style={{ backgroundColor: `color-mix(in oklch, ${accent} 14%, transparent)` }}
           >
-            本次不再提示（按 0）
-          </button>
+            <ShieldAlert className="size-4" style={{ color: accent }} strokeWidth={2} />
+          </span>
+          <span className="text-[13px] font-semibold" style={{ color: accent }}>
+            {isBlock ? '已阻断发送' : '发送提醒'}
+          </span>
         </div>
+        <span className="text-[11px] tabular-nums text-[var(--text-tertiary)]">{countdown}s</span>
+      </div>
+
+      {/* 被拦消息 */}
+      <div className="mb-2.5 max-h-24 flex-1 overflow-y-auto rounded-lg bg-[var(--card-bg)] px-3 py-2.5 text-[13px] leading-relaxed shadow-[var(--shadow-sm)]">
+        {payload.draft_text || '（空）'}
+      </div>
+
+      {/* 命中原因 */}
+      {payload.reasons.length > 0 && (
+        <p className="mb-3 truncate text-[11px] text-[var(--text-secondary)]">
+          {payload.reasons[0]}
+        </p>
       )}
+
+      {/* 两个动作 */}
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          className="h-9 rounded-lg bg-[var(--primary)] text-xs font-medium text-[var(--primary-text)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--primary-hover)]"
+          onClick={() => void doAction('snooze')}
+        >
+          我已知晓
+        </button>
+        <button
+          className="h-9 rounded-lg bg-[var(--card-bg)] text-xs text-[var(--text-secondary)] shadow-[var(--shadow-sm)] transition-colors hover:text-[var(--text-primary)]"
+          onClick={() => void doAction('cancel')}
+        >
+          关闭
+        </button>
+      </div>
     </div>
   );
 }

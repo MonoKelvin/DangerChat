@@ -1,6 +1,11 @@
 {
   "name": "dangerchat",
   "private": true,
-  "scripts": {},
+  "scripts": {
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4"
+  },
   "packageManager": "pnpm@11.9.0"
 }

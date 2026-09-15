@@ -57,6 +57,10 @@ impl Guard {
         target_hwnd: Hwnd,
     ) -> Result<Self, String> {
         let capture = Arc::new(crate::capture::CaptureStage::new(sys));
+        let mctx_log_root = {
+            let mctx = mctx_factory();
+            mctx.log_dir.clone()
+        };
         let (layout, ocr, sem) = {
             let mctx = mctx_factory();
             let mut layout = LayoutStage::new();
@@ -88,7 +92,12 @@ impl Guard {
             PipelineContext::new(
                 run_id.clone(),
                 kind,
-                dc_core::ImageLogSink::new(std::path::PathBuf::from("unused"), run_id, false),
+                // 图片日志（01_capture/02_layout…）：数据目录 logs/images，便于核对检测框位置
+                dc_core::ImageLogSink::new(
+                    mctx_log_root.clone().join("images"),
+                    run_id,
+                    true,
+                ),
                 Arc::clone(&cfg),
             )
         });

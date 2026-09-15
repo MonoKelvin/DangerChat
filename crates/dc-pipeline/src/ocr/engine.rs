@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use rapidocr_core::config::{
     ClsConfig, DetConfig, DetInputLimits, InferenceOptions, LimitType, PipelineConfig,
-    RapidOcrConfig, RecConfig,
+    RapidOcrConfig, RecConfig, ExecutionProvider,
 };
 use rapidocr_core::RapidOcr;
 
@@ -30,11 +30,17 @@ pub struct OcrModelPaths {
 }
 
 /// PP-OCRv4 中文配置（P0 探测验证过的参数；详见 spikes ocr_probe）。
-pub fn ppocr_v4_config(paths: &OcrModelPaths, intra_threads: usize) -> RapidOcrConfig {
+pub fn ppocr_v4_config(paths: &OcrModelPaths, intra_threads: usize, gpu: bool) -> RapidOcrConfig {
     RapidOcrConfig {
-        pipeline: PipelineConfig::full(),
+        // 跳过方向分类：聊天输入文字恒水平，cls 是纯多余的一次推理（快环延迟关键路径）
+        pipeline: PipelineConfig::without_cls(),
         inference: InferenceOptions {
             intra_threads,
+            execution_provider: if gpu {
+                ExecutionProvider::DirectMl
+            } else {
+                ExecutionProvider::Cpu
+            },
             ..Default::default()
         },
         text_score: 0.5,
@@ -77,8 +83,8 @@ pub struct OcrEngine {
 }
 
 impl OcrEngine {
-    pub fn new(paths: &OcrModelPaths, intra_threads: usize) -> Result<Self, String> {
-        let cfg = ppocr_v4_config(paths, intra_threads);
+    pub fn new(paths: &OcrModelPaths, intra_threads: usize, gpu: bool) -> Result<Self, String> {
+        let cfg = ppocr_v4_config(paths, intra_threads, gpu);
         let ocr = RapidOcr::new(cfg).map_err(|e| format!("OCR 引擎初始化失败：{e}"))?;
         Ok(Self {
             ocr: std::sync::Mutex::new(ocr),

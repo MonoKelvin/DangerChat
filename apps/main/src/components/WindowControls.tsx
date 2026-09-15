@@ -27,7 +27,7 @@ export function WindowControls() {
       <IconButton
         size="sm"
         variant="ghost"
-        title="最小化"
+        data-tip="最小化"
         onClick={() => void win.minimize()}
       >
         <Minus className="size-[18px]" strokeWidth={1.5} />
@@ -35,7 +35,7 @@ export function WindowControls() {
       <IconButton
         size="sm"
         variant="ghost"
-        title={maximized ? '还原' : '最大化'}
+        data-tip={maximized ? '还原' : '最大化'}
         onClick={() => void win.toggleMaximize()}
       >
         <Square className="size-[15px]" strokeWidth={1.5} />
@@ -43,7 +43,7 @@ export function WindowControls() {
       <IconButton
         size="sm"
         variant="ghost"
-        title="隐藏到托盘"
+        data-tip="隐藏到托盘"
         className="hover:bg-[var(--danger)] hover:text-white"
         onClick={() => void win.hide()}
       >

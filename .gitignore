@@ -43,3 +43,4 @@ yolo11n.pt
 models/layout-wechat/best.pt
 models/layout-wechat/*.onnx
 resources/training_set/uitag-dataset.zip
+weights/

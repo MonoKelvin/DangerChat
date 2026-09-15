@@ -36,6 +36,8 @@ export interface ConfigFieldDto {
   key: string;
   ty: 'bool' | 'int' | 'float' | 'text' | 'enum' | 'strlist' | 'path';
   default: unknown;
+  /** enum 类型的可选值 */
+  options: string[];
   label: string;
   help: string;
   group: string;

@@ -36,9 +36,24 @@ impl SendKey {
         }
     }
 
-    /// 枚举取值（配置 schema 与前端下拉共用）。
+    /// 枚举取值（配置 schema 与前端下拉共用；parse 接受任意大小写）。
     pub fn options() -> Vec<String> {
-        vec!["enter".to_string(), "ctrl+enter".to_string()]
+        vec!["Enter".to_string(), "Ctrl+Enter".to_string()]
+    }
+
+    /// AtomicU8 编码（钩子路径热更新用）。
+    pub fn encode(self) -> u8 {
+        match self {
+            SendKey::Enter => 0,
+            SendKey::CtrlEnter => 1,
+        }
+    }
+
+    pub fn decode(v: u8) -> Self {
+        match v {
+            1 => SendKey::CtrlEnter,
+            _ => SendKey::Enter,
+        }
     }
 }
 

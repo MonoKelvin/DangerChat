@@ -49,6 +49,7 @@ describe('契约 fixtures 对照（UT-UI-01）', () => {
       key: 'test.k',
       ty: 'bool',
       default: true,
+      options: [],
       label: '测试',
       help: '',
       group: 'general',

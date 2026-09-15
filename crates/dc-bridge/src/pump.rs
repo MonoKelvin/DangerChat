@@ -89,8 +89,9 @@ fn show_alert(app: &AppHandle, payload: &AlertPayload) -> Result<(), String> {
     if let Some(hwnd) = target {
         if let Ok((rect, _)) = SysApi::window_rect(state.sys.as_ref(), hwnd) {
             let (w, h) = (360.0f64, 260.0);
+            // 目标窗口正中（遮挡聊天流中部，避开底部输入框与顶部标题栏）
             let x = rect.x as f64 + (rect.w as f64 - w) / 2.0;
-            let y = rect.y as f64 + 16.0;
+            let y = rect.y as f64 + (rect.h as f64 - h) / 2.0;
             let _ = win.set_position(tauri::PhysicalPosition::new(x as i32, y as i32));
             let _ = win.set_size(tauri::PhysicalSize::new(w as u32, h as u32));
         }

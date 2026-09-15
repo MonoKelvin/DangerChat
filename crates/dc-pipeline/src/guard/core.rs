@@ -303,6 +303,12 @@ where
 
     fn store(&self, verdict: Verdict) {
         let epoch = (self.draft_epoch)();
+        tracing::info!(
+            level = verdict.level.as_str(),
+            score = verdict.score,
+            draft = verdict.draft_text.as_deref().unwrap_or(""),
+            "流水线判定已入槽"
+        );
         self.slot
             .store(verdict.with_epoch(epoch), self.clock.now_ms());
     }
