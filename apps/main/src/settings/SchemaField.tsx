@@ -15,6 +15,14 @@ interface FieldProps {
 const input =
   'h-9 w-full rounded-lg bg-[var(--input-bg)] px-3.5 text-sm text-[var(--text-primary)] outline-none transition-all duration-150 placeholder:text-[var(--text-tertiary)] hover:bg-[var(--active-overlay)] focus:bg-[var(--panel-bg)] focus:shadow-[inset_0_0_0_1.5px_var(--brand)]';
 
+/** 枚举选项展示名：首字母及 + 后一段首字母大写（"ctrl+enter" → "Ctrl+Enter"）；仅显示层，存储值不变 */
+function capitalizeKey(o: string): string {
+  return o
+    .split('+')
+    .map((seg) => (seg ? seg.charAt(0).toUpperCase() + seg.slice(1) : seg))
+    .join('+');
+}
+
 export function SchemaField({ field, value, onChange }: FieldProps) {
   const control = (() => {
     switch (field.ty) {
@@ -42,7 +50,7 @@ export function SchemaField({ field, value, onChange }: FieldProps) {
         return (
           <Combobox
             value={String(value ?? '')}
-            options={field.options.map((o) => ({ value: o, label: o }))}
+            options={field.options.map((o) => ({ value: o, label: capitalizeKey(o) }))}
             onChange={(v) => onChange(v)}
             className="w-52"
           />

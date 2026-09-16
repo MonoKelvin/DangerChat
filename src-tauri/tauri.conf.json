@@ -14,8 +14,8 @@
       {
         "label": "main",
         "title": "危信",
-        "width": 940,
-        "height": 640,
+        "width": 1080,
+        "height": 720,
         "minWidth": 760,
         "minHeight": 520,
         "center": true,

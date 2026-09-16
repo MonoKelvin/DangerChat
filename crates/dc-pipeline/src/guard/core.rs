@@ -73,8 +73,7 @@ impl Pending {
 }
 
 /// 心跳像素探测函数（注入 phash；测试可注入受控序列）。
-pub type HeartbeatProbe =
-    Arc<dyn Fn(&WindowSnapshot, &RegionLayout) -> u64 + Send + Sync>;
+pub type HeartbeatProbe = Arc<dyn Fn(&WindowSnapshot, &RegionLayout) -> u64 + Send + Sync>;
 
 /// 编排器依赖集（泛型注入，测试用 MockStage）。
 pub struct GuardCore<C, L, O, S>
@@ -127,7 +126,11 @@ where
     S: Stage<Input = OcrResult, Output = Verdict>,
 {
     /// 处理一条触发（主入口；worker 循环与测试都调它）。
-    pub fn run_trigger(&self, trigger: Trigger, request: crate::capture::CaptureRequest) -> TickOutcome {
+    pub fn run_trigger(
+        &self,
+        trigger: Trigger,
+        request: crate::capture::CaptureRequest,
+    ) -> TickOutcome {
         if self.fatal.load(std::sync::atomic::Ordering::Relaxed) {
             return TickOutcome::Skipped("fatal");
         }
@@ -231,8 +234,7 @@ where
         };
         let layout = {
             let guard = self.layout_cache.lock().ok();
-            guard
-                .and_then(|c| c.as_ref().map(|c| c.layout.clone()))
+            guard.and_then(|c| c.as_ref().map(|c| c.layout.clone()))
         };
         let Some(layout) = layout else {
             return self.run_slow(request);

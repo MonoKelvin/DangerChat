@@ -43,8 +43,8 @@ pub fn load_tags(path: Option<String>) -> CmdResult<TagsConfig> {
 /// 打开工作目录：图片清单 + 目录下 annotations.json 的标注（无则创建空文件）。
 #[tauri::command]
 pub fn open_workspace(dir: String) -> CmdResult<Workspace> {
-    let (images, autosave) = state::open_workspace(std::path::Path::new(&dir))
-        .map_err(UiTagError::from)?;
+    let (images, autosave) =
+        state::open_workspace(std::path::Path::new(&dir)).map_err(UiTagError::from)?;
     Ok(Workspace { images, autosave })
 }
 
@@ -90,16 +90,24 @@ pub fn propagate_boxes(req: PropagateRequest) -> CmdResult<Vec<PropagateResult>>
 
 /// 在系统文件管理器中定位该文件（Windows 资源管理器选中态）。
 #[tauri::command]
-pub fn reveal_path(path: String) -> CmdResult<()> {    #[cfg(target_os = "windows")]
+pub fn reveal_path(path: String) -> CmdResult<()> {
+    #[cfg(target_os = "windows")]
     let result = std::process::Command::new("explorer")
         .arg(format!("/select,{path}"))
         .spawn()
         .map(|_| ());
     #[cfg(target_os = "macos")]
-    let result = std::process::Command::new("open").args(["-R", &path]).spawn().map(|_| ());
+    let result = std::process::Command::new("open")
+        .args(["-R", &path])
+        .spawn()
+        .map(|_| ());
     #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
     let result = std::process::Command::new("xdg-open")
-        .arg(std::path::Path::new(&path).parent().unwrap_or(std::path::Path::new(".")))
+        .arg(
+            std::path::Path::new(&path)
+                .parent()
+                .unwrap_or(std::path::Path::new(".")),
+        )
         .spawn()
         .map(|_| ());
     result.map_err(|e| UiTagError::State(format!("打开文件管理器失败：{e}")))

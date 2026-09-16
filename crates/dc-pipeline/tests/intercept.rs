@@ -115,7 +115,7 @@ fn ut_int_01_state_machine_full_transition_table() {
     assert!(!S::Active.passes_everything() && !S::Cooldown.passes_everything());
 }
 
-/// UT-INT-01（集成侧）：弹窗关闭 / 仍然发送 / 本次不再提示 三条路径都回到 Active
+/// UT-INT-01（集成侧）：弹窗关闭 / 本次不再提示 两条路径都回到 Active
 #[test]
 fn ut_int_01_alert_paths_return_to_active() {
     let h = Harness::new();
@@ -134,24 +134,6 @@ fn ut_int_01_alert_paths_return_to_active() {
     enter_cooldown(&h);
     h.intercept.apply_alert_action(AlertAction::Cancel);
     assert_eq!(h.intercept.state(), GuardState::Active);
-
-    // 返回编辑
-    enter_cooldown(&h);
-    h.intercept.apply_alert_action(AlertAction::Edit);
-    assert_eq!(h.intercept.state(), GuardState::Active);
-
-    // 仍然发送：先置 allow-once 再退出 Cooldown
-    enter_cooldown(&h);
-    h.intercept.apply_alert_action(AlertAction::Allow);
-    assert_eq!(h.intercept.state(), GuardState::Active);
-    assert!(h.intercept.tracker().allow_once_armed(h.now()));
-    // 危信不代发：由用户自己再按一次回车完成发送（同时消费掉放行标志，C-08）
-    assert_eq!(
-        h.enter(),
-        HookAction::Pass,
-        "allow-once 放行用户自己按下的回车"
-    );
-    assert!(!h.intercept.tracker().allow_once_armed(h.now()));
 
     // 本次不再提示
     enter_cooldown(&h);
@@ -280,36 +262,26 @@ fn ut_int_04_fail_open_branches() {
     assert_eq!(h.enter(), HookAction::Swallow, "恢复后恢复拦截");
 }
 
-/// UT-INT-05 allow-once 标志：置位后下一次发送键放行并失效；超时后失效
+/// UT-INT-05 snooze 语义：静默当前纪元，改稿即恢复守护
+/// （原 allow-once 语义测试已随「仍然发送」链路移除）
 #[test]
-fn ut_int_05_allow_once_semantics() {
+fn ut_int_05_snooze_semantics() {
     let h = Harness::new();
     h.target_foreground();
     let _ = h.press(VK_A);
     h.publish(Verdict::block("命中"));
 
     assert_eq!(h.enter(), HookAction::Swallow);
-    h.intercept.apply_alert_action(AlertAction::Allow);
-    assert!(h.intercept.tracker().allow_once_armed(h.now()));
+    h.intercept.apply_alert_action(AlertAction::Snooze);
 
-    // 第二次按键：消费标志 → 放行（用户自己按下的这一次）
-    assert_eq!(h.enter(), HookAction::Pass, "allow-once 放行一次");
-    assert!(
-        !h.intercept.tracker().allow_once_armed(h.now()),
-        "放行后立即失效"
-    );
+    // 同纪元：静默放行
+    assert_eq!(h.enter(), HookAction::Pass, "snooze 后放行");
 
-    // 标志已失效：同纪元同判定仍然拦截（进入 Cooldown）
-    assert_eq!(h.intercept.state(), GuardState::Active);
-    assert_eq!(h.enter(), HookAction::Swallow, "标志失效后恢复拦截");
-    h.intercept.apply_alert_action(AlertAction::Cancel);
-
-    // 超时后失效
-    h.intercept.apply_alert_action(AlertAction::Allow);
-    h.advance(30_000);
-    assert!(!h.intercept.tracker().allow_once_armed(h.now()));
-    h.publish(Verdict::block("命中")); // 换一份新鲜判定，隔离「超时」这一个变量
-    assert_eq!(h.enter(), HookAction::Swallow, "超时不再放行");
+    // 改稿：纪元 +1 → 自动恢复守护
+    let _ = h.press(VK_A);
+    h.publish(Verdict::block("命中"));
+    assert!(!h.intercept.tracker().is_snoozed(), "改稿即恢复");
+    assert_eq!(h.enter(), HookAction::Swallow, "恢复拦截");
 }
 
 /// UT-INT-06 回调压测：10 万次 mock 按键 p99 < 1ms（CI 基准断言）
@@ -441,7 +413,7 @@ fn ut_int_09_snooze_only_silences_current_epoch() {
     assert_eq!(h.enter(), HookAction::Swallow);
 }
 
-/// UT-INT-10 Cooldown 期间数字键 1/2/3 被截获路由为对应 AlertAction 且 Swallow；其余键不受影响
+/// UT-INT-10 Cooldown 期间数字键 1/2 被截获路由为对应 AlertAction 且 Swallow；其余键不受影响
 #[test]
 fn ut_int_10_cooldown_routes_alert_shortcuts() {
     let h = Harness::new();
@@ -453,10 +425,8 @@ fn ut_int_10_cooldown_routes_alert_shortcuts() {
     assert_eq!(h.intercept.state(), GuardState::Cooldown);
 
     for (vk, want) in [
-        (0x31u16, AlertAction::Allow),
-        (0x32, AlertAction::Cancel),
-        (0x33, AlertAction::Edit),
-        (0x30, AlertAction::Snooze),
+        (0x31u16, AlertAction::Cancel),
+        (0x32, AlertAction::Snooze),
     ] {
         assert_eq!(h.press(vk), HookAction::Swallow, "vk={vk:#X} 必须被截获");
         match h.intercept.alerts().try_recv() {
@@ -595,7 +565,7 @@ fn config_schema_matches_snapshot_parsing() {
         assert!(snapshot.contains(&field.key), "快照缺少 {}", field.key);
         assert_eq!(field.owner, "intercept");
     }
-    assert_eq!(schema.len(), 8);
+    assert_eq!(schema.len(), 5);
     assert!(schema
         .iter()
         .any(|f| matches!(f.ty, ConfigType::Enum { .. }) && f.key == "guard.send_key"));

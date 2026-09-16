@@ -50,10 +50,7 @@ pub struct InterceptConfig {
     pub send_key: SendKey,
     pub target_process: String,
     pub verdict_ttl: Duration,
-    pub fast_debounce: Duration,
-    pub allow_once_timeout: Duration,
     pub foreground_debounce: Duration,
-    pub pause_hotkey: String,
 }
 
 impl Default for InterceptConfig {
@@ -62,11 +59,8 @@ impl Default for InterceptConfig {
             enabled: true,
             send_key: SendKey::Enter,
             target_process: "WeChat.exe".to_string(),
-            verdict_ttl: Duration::from_millis(10_000),
-            fast_debounce: Duration::from_millis(150),
-            allow_once_timeout: Duration::from_millis(30_000),
+            verdict_ttl: Duration::from_millis(2_000),
             foreground_debounce: Duration::from_millis(3000),
-            pause_hotkey: String::new(),
         }
     }
 }
@@ -85,19 +79,10 @@ impl InterceptConfig {
                 "guard.verdict_ttl_ms",
                 default.verdict_ttl.as_millis() as u64,
             )),
-            fast_debounce: Duration::from_millis(snapshot.u64_or(
-                "guard.fast_debounce_ms",
-                default.fast_debounce.as_millis() as u64,
-            )),
-            allow_once_timeout: Duration::from_millis(snapshot.u64_or(
-                "guard.allow_once_timeout_ms",
-                default.allow_once_timeout.as_millis() as u64,
-            )),
             foreground_debounce: Duration::from_millis(snapshot.u64_or(
                 "guard.foreground_debounce_ms",
                 default.foreground_debounce.as_millis() as u64,
             )),
-            pause_hotkey: snapshot.str_or("guard.pause_hotkey", "").to_string(),
         }
     }
 }
@@ -148,25 +133,6 @@ pub fn config_schema() -> Vec<ConfigField> {
         )
         .with_help("超过该时长未续期的判定视为过时，放行"),
         ConfigField::new(
-            "guard.fast_debounce_ms",
-            ConfigType::Int { min: 0, max: 2000 },
-            ConfigValue::Int(default.fast_debounce.as_millis() as i64),
-            "快环防抖（毫秒）",
-            "guard",
-            "intercept",
-        ),
-        ConfigField::new(
-            "guard.allow_once_timeout_ms",
-            ConfigType::Int {
-                min: 1000,
-                max: 300_000,
-            },
-            ConfigValue::Int(default.allow_once_timeout.as_millis() as i64),
-            "「仍然发送」放行有效期（毫秒）",
-            "guard",
-            "intercept",
-        ),
-        ConfigField::new(
             "guard.foreground_debounce_ms",
             ConfigType::Int {
                 min: 0,
@@ -178,15 +144,6 @@ pub fn config_schema() -> Vec<ConfigField> {
             "intercept",
         )
         .with_help("目标切走后多久才判定为挂起，防止 Alt+Tab 抖动导致模型反复装卸"),
-        ConfigField::new(
-            "guard.pause_hotkey",
-            ConfigType::Text { max_len: 64 },
-            ConfigValue::Str(default.pause_hotkey.clone()),
-            "暂停守护快捷键",
-            "guard",
-            "intercept",
-        )
-        .with_help("留空表示不启用（FR-SRC-07，全局热键在 M6 随托盘一起接入）"),
     ]
 }
 
@@ -257,7 +214,7 @@ impl Intercept {
             alert_capacity,
         } = deps;
         let foreground = ForegroundTracker::new(config.foreground_debounce.as_millis() as u64);
-        let tracker = DraftTracker::new(config.allow_once_timeout.as_millis() as u64);
+        let tracker = DraftTracker::new();
         if config.target_process.trim().is_empty() {
             // §5.3 错误矩阵：目标进程名配置为空必须在装配期被拒绝（调用方检查 config）
             tracing::error!("target.process_name 为空：守护不会生效");
@@ -304,7 +261,8 @@ impl Intercept {
 
     /// 热更新判定有效期。
     pub fn set_verdict_ttl_ms(&self, ms: u64) {
-        self.verdict_ttl_ms.store(ms.clamp(100, 60_000), Ordering::SeqCst);
+        self.verdict_ttl_ms
+            .store(ms.clamp(100, 60_000), Ordering::SeqCst);
     }
 
     fn current_send_key(&self) -> SendKey {
@@ -411,7 +369,8 @@ impl Intercept {
         // 注意：组合态优先于 Cooldown 分支，因此组合期间数字键 1/2/3 会被输入法吃掉、
         // 不会路由为弹窗动作——此时用鼠标点弹窗按钮即可（弹窗本身不夺焦点）。
         if self.sys.ime_composing() {
-            if ev.is_key_down && (is_send_key(ev, self.current_send_key()) || ev.is_ime_consumed()) {
+            if ev.is_key_down && (is_send_key(ev, self.current_send_key()) || ev.is_ime_consumed())
+            {
                 self.tracker.bump();
                 let _ = self.triggers.offer_fast();
             }
@@ -450,17 +409,13 @@ impl Intercept {
             if !ev.is_key_down {
                 return HookAction::Pass;
             }
-            if self.tracker.take_allow_once(now) {
-                tracing::debug!("allow-once 生效：放行用户本次发送键（不代发）");
-                return HookAction::Pass;
-            }
             if self.tracker.is_snoozed() {
                 return HookAction::Pass;
             }
             let Some(verdict) = self.slot.load_fresh(
-                    Duration::from_millis(self.verdict_ttl_ms.load(Ordering::SeqCst)),
-                    now,
-                ) else {
+                Duration::from_millis(self.verdict_ttl_ms.load(Ordering::SeqCst)),
+                now,
+            ) else {
                 tracing::info!("fail-open：无新鲜判定");
                 return HookAction::Pass;
             };
@@ -524,18 +479,10 @@ impl Intercept {
     }
 
     /// 应用弹窗动作（dc-alert → dc-bridge → 这里）。
-    ///
-    /// §5.9 顺序要求：`allow` 必须**先置 allow-once 再退出 Cooldown**——否则钩子可能在标志写入前
-    /// 吞掉用户的下一次发送键。
     pub fn apply_alert_action(&self, action: AlertAction) {
         let now = self.clock.now_ms();
         match action {
-            AlertAction::Allow => {
-                self.tracker.arm_allow_once(now);
-                self.transition(GuardEvent::AlertResolved, now);
-                tracing::info!("用户选择「仍然发送」：已置 allow-once，等待用户自行再按一次回车");
-            }
-            AlertAction::Cancel | AlertAction::Edit => {
+            AlertAction::Cancel => {
                 self.transition(GuardEvent::AlertResolved, now);
             }
             AlertAction::Snooze => {

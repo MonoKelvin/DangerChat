@@ -10,8 +10,8 @@
 use std::path::{Path, PathBuf};
 
 use rapidocr_core::config::{
-    ClsConfig, DetConfig, DetInputLimits, InferenceOptions, LimitType, PipelineConfig,
-    RapidOcrConfig, RecConfig, ExecutionProvider,
+    ClsConfig, DetConfig, DetInputLimits, ExecutionProvider, InferenceOptions, LimitType,
+    PipelineConfig, RapidOcrConfig, RecConfig,
 };
 use rapidocr_core::RapidOcr;
 
@@ -112,8 +112,18 @@ impl OcrEngine {
             .lines
             .into_iter()
             .map(|l| {
-                let xs = [l.bbox.points[0][0], l.bbox.points[1][0], l.bbox.points[2][0], l.bbox.points[3][0]];
-                let ys = [l.bbox.points[0][1], l.bbox.points[1][1], l.bbox.points[2][1], l.bbox.points[3][1]];
+                let xs = [
+                    l.bbox.points[0][0],
+                    l.bbox.points[1][0],
+                    l.bbox.points[2][0],
+                    l.bbox.points[3][0],
+                ];
+                let ys = [
+                    l.bbox.points[0][1],
+                    l.bbox.points[1][1],
+                    l.bbox.points[2][1],
+                    l.bbox.points[3][1],
+                ];
                 let x1 = xs.iter().cloned().fold(f32::INFINITY, f32::min).floor() as i32;
                 let y1 = ys.iter().cloned().fold(f32::INFINITY, f32::min).floor() as i32;
                 let x2 = xs.iter().cloned().fold(f32::NEG_INFINITY, f32::max).ceil() as i32;
@@ -129,12 +139,20 @@ impl OcrEngine {
 }
 
 /// 从 ModelStore 的三个模型目录解析三件套路径。
-pub fn resolve_paths(det_dir: &Path, cls_dir: &Path, rec_dir: &Path) -> Result<OcrModelPaths, String> {
+pub fn resolve_paths(
+    det_dir: &Path,
+    cls_dir: &Path,
+    rec_dir: &Path,
+) -> Result<OcrModelPaths, String> {
     let pick = |dir: &Path, exts: &[&str]| -> Result<PathBuf, String> {
-        let entries = std::fs::read_dir(dir).map_err(|e| format!("读模型目录失败 {}: {e}", dir.display()))?;
+        let entries =
+            std::fs::read_dir(dir).map_err(|e| format!("读模型目录失败 {}: {e}", dir.display()))?;
         for e in entries.flatten() {
             let p = e.path();
-            if p.extension().and_then(|x| x.to_str()).is_some_and(|x| exts.contains(&x)) {
+            if p.extension()
+                .and_then(|x| x.to_str())
+                .is_some_and(|x| exts.contains(&x))
+            {
                 return Ok(p);
             }
         }

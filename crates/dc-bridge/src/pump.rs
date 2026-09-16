@@ -33,11 +33,19 @@ fn pump_loop(app: AppHandle) {
     let mut last_stats_emit = std::time::Instant::now() - Duration::from_secs(10);
 
     loop {
+        // 退出信号：托盘「退出」后收敛本线程（非分离线程不结束会卡住进程终止）
+        if state.is_shutting_down() {
+            tracing::info!("bridge-pump 收到退出信号，线程结束");
+            return;
+        }
         // 双通道 select：AlertBus 事件（100ms 超时）+ 统计心跳节流
         match alerts.recv_timeout(Duration::from_millis(100)) {
             Some(AlertMessage::Show(verdict)) => {
                 state.stats.record_block();
-                let countdown = *state.countdown_secs.lock().unwrap_or_else(|e| e.into_inner());
+                let countdown = *state
+                    .countdown_secs
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
                 let payload = AlertPayload::from_verdict(&verdict, countdown);
                 let t0 = std::time::Instant::now();
                 if let Err(e) = show_alert(&app, &payload) {
@@ -55,9 +63,7 @@ fn pump_loop(app: AppHandle) {
                 state.intercept.apply_alert_action(a);
                 // UI 提示事件（前端可闪高亮；失败不影响已执行的动作）
                 let name = match a {
-                    AlertAction::Allow => "allow",
                     AlertAction::Cancel => "cancel",
-                    AlertAction::Edit => "edit",
                     AlertAction::Snooze => "snooze",
                 };
                 let _ = app.emit("alert://action", name);
@@ -75,9 +81,7 @@ fn pump_loop(app: AppHandle) {
 /// 弹窗显示：定位到目标窗口顶部居中 + show（不 set_focus，FR-BRG-04）。
 fn show_alert(app: &AppHandle, payload: &AlertPayload) -> Result<(), String> {
     let state = app.state::<Arc<AppState>>();
-    let win = app
-        .get_webview_window("alert")
-        .ok_or("alert 窗口未预建")?;
+    let win = app.get_webview_window("alert").ok_or("alert 窗口未预建")?;
 
     // 定位：目标窗口顶部居中（拿不到 rect 就居屏）
     let target: Option<Hwnd> = state

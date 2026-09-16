@@ -36,9 +36,17 @@ impl SendKey {
         }
     }
 
-    /// 枚举取值（配置 schema 与前端下拉共用；parse 接受任意大小写）。
+    /// 枚举取值（配置 schema 与前端下拉共用）。
+    ///
+    /// **必须与 `as_str()` 同为规范形式**：配置中心用本列表做白名单校验，
+    /// 而 `InterceptConfig::from_snapshot` 读的是字符串、经 `parse` 归一。
+    /// 若此处返回展示名（`"Ctrl+Enter"`）而 `as_str()` 返回 `"ctrl+enter"`，
+    /// 则「用 as_str 写配置」必被校验拒绝 —— 校验与解析就成了两套表示。
     pub fn options() -> Vec<String> {
-        vec!["Enter".to_string(), "Ctrl+Enter".to_string()]
+        vec![
+            SendKey::Enter.as_str().to_string(),
+            SendKey::CtrlEnter.as_str().to_string(),
+        ]
     }
 
     /// AtomicU8 编码（钩子路径热更新用）。
@@ -88,15 +96,11 @@ pub fn is_content_key(vk: u16) -> bool {
     }
 }
 
-/// 弹窗动作（FR-BRG-02 + §5.10：数字键 1/2/3 对应前三个按钮，0 对应「本次不再提示」）。
+/// 弹窗动作（FR-BRG-02 + §5.10：数字键 1/2 对应两个按钮）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AlertAction {
-    /// 仍然发送：置 allow-once 放行标志（**不代发**，红线 C-08）
-    Allow,
     /// 取消发送
     Cancel,
-    /// 返回编辑
-    Edit,
     /// 本次不再提示（只静默当前草稿纪元，改稿即恢复）
     Snooze,
 }
@@ -104,18 +108,14 @@ pub enum AlertAction {
 impl AlertAction {
     pub fn as_str(self) -> &'static str {
         match self {
-            AlertAction::Allow => "allow",
             AlertAction::Cancel => "cancel",
-            AlertAction::Edit => "edit",
             AlertAction::Snooze => "snooze",
         }
     }
 
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
-            "allow" => Some(AlertAction::Allow),
             "cancel" => Some(AlertAction::Cancel),
-            "edit" => Some(AlertAction::Edit),
             "snooze" => Some(AlertAction::Snooze),
             _ => None,
         }
@@ -128,10 +128,8 @@ pub fn alert_shortcut(ev: &KeyEvent) -> Option<AlertAction> {
         return None;
     }
     match ev.vk {
-        0x31 => Some(AlertAction::Allow),
-        0x32 => Some(AlertAction::Cancel),
-        0x33 => Some(AlertAction::Edit),
-        0x30 => Some(AlertAction::Snooze),
+        0x31 => Some(AlertAction::Cancel),
+        0x32 => Some(AlertAction::Snooze),
         _ => None,
     }
 }

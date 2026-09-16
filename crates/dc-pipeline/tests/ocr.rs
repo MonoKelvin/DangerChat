@@ -9,9 +9,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
-use dc_core::{
-    ConfigSnapshot, ConfigValue, ImageLogSink, ModelStore, ModuleContext, RunId,
-};
+use dc_core::{ConfigSnapshot, ConfigValue, ImageLogSink, ModelStore, ModuleContext, RunId};
 use dc_pipeline::contract::{LoopKind, PipelineContext, Region, RegionLayout};
 use dc_pipeline::{Module, OcrStage, Stage, WindowSnapshot};
 use dc_sys::Rect;
@@ -22,9 +20,14 @@ const MODELS_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../models");
 
 fn models_ready() -> bool {
     let root = Path::new(MODELS_ROOT);
-    root.join("ocr-det-ppocrv4/ch_PP-OCRv4_det_mobile.onnx").is_file()
-        && root.join("ocr-cls-ppocrv20/ch_ppocr_mobile_v2.0_cls_mobile.onnx").is_file()
-        && root.join("ocr-rec-ppocrv4/ch_PP-OCRv4_rec_mobile.onnx").is_file()
+    root.join("ocr-det-ppocrv4/ch_PP-OCRv4_det_mobile.onnx")
+        .is_file()
+        && root
+            .join("ocr-cls-ppocrv20/ch_ppocr_mobile_v2.0_cls_mobile.onnx")
+            .is_file()
+        && root
+            .join("ocr-rec-ppocrv4/ch_PP-OCRv4_rec_mobile.onnx")
+            .is_file()
         && root.join("ocr-rec-ppocrv4/ppocr_keys_v1.txt").is_file()
 }
 

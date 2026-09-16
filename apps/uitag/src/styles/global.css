@@ -15,57 +15,57 @@
   --font-mono:
     "Cascadia Mono", "JetBrains Mono", ui-monospace, Consolas, monospace;
 
-  /* 浅色：面板白、画布浅灰网格 */
-  --canvas: oklch(0.952 0.004 254);
-  --canvas-grid: oklch(0.903 0.005 254);
-  --sidebar: oklch(0.982 0.003 254);
-  --background: oklch(0.995 0.001 254);
-  --card: oklch(0.985 0.002 254);
+  /* 浅色：面板白、画布浅灰网格（中性色一律无色相，只留 primary 蓝） */
+  --canvas: oklch(0.952 0 0);
+  --canvas-grid: oklch(0.903 0 0);
+  --sidebar: oklch(0.982 0 0);
+  --background: oklch(0.995 0 0);
+  --card: oklch(0.985 0 0);
   --popover: oklch(1 0 0);
 
-  --foreground: oklch(0.215 0.02 255);
-  --card-foreground: oklch(0.215 0.02 255);
-  --popover-foreground: oklch(0.215 0.02 255);
+  --foreground: oklch(0.215 0 0);
+  --card-foreground: oklch(0.215 0 0);
+  --popover-foreground: oklch(0.215 0 0);
 
   /* 强调色：蓝（深一档保证浅底对比度） */
   --primary: oklch(0.55 0.17 255);
-  --primary-foreground: oklch(0.985 0.002 248);
+  --primary-foreground: oklch(0.985 0 0);
 
-  --secondary: oklch(0.955 0.004 254);
-  --secondary-foreground: oklch(0.215 0.02 255);
-  --muted: oklch(0.958 0.004 254);
-  --muted-foreground: oklch(0.5 0.02 255);
-  --accent: oklch(0.938 0.008 255);
-  --accent-foreground: oklch(0.215 0.02 255);
+  --secondary: oklch(0.955 0 0);
+  --secondary-foreground: oklch(0.215 0 0);
+  --muted: oklch(0.958 0 0);
+  --muted-foreground: oklch(0.5 0 0);
+  --accent: oklch(0.938 0 0);
+  --accent-foreground: oklch(0.215 0 0);
   --destructive: oklch(0.55 0.2 25);
 
-  --border: oklch(0.215 0.02 255 / 10%);
-  --input: oklch(0.215 0.02 255 / 14%);
+  --border: oklch(0.215 0 0 / 10%);
+  --input: oklch(0.215 0 0 / 14%);
   --ring: oklch(0.55 0.17 255);
 }
 
 .dark {
-  /* 表面三级：画布最暗 < 侧栏 < 内容面板 < 弹层 */
-  --canvas: oklch(0.152 0.012 254);
-  --canvas-grid: oklch(0.196 0.012 254);
-  --sidebar: oklch(0.185 0.014 254);
-  --background: oklch(0.208 0.014 254);
-  --card: oklch(0.232 0.015 254);
-  --popover: oklch(0.262 0.016 254);
+  /* 表面三级：画布最暗 < 侧栏 < 内容面板 < 弹层（中性无色相） */
+  --canvas: oklch(0.152 0 0);
+  --canvas-grid: oklch(0.196 0 0);
+  --sidebar: oklch(0.185 0 0);
+  --background: oklch(0.208 0 0);
+  --card: oklch(0.232 0 0);
+  --popover: oklch(0.262 0 0);
 
-  --foreground: oklch(0.955 0.003 248);
-  --card-foreground: oklch(0.955 0.003 248);
-  --popover-foreground: oklch(0.955 0.003 248);
+  --foreground: oklch(0.955 0 0);
+  --card-foreground: oklch(0.955 0 0);
+  --popover-foreground: oklch(0.955 0 0);
 
   --primary: oklch(0.62 0.16 255);
-  --primary-foreground: oklch(0.985 0.002 248);
+  --primary-foreground: oklch(0.985 0 0);
 
-  --secondary: oklch(0.279 0.014 254);
-  --secondary-foreground: oklch(0.955 0.003 248);
-  --muted: oklch(0.258 0.014 254);
-  --muted-foreground: oklch(0.685 0.018 252);
-  --accent: oklch(0.295 0.016 254);
-  --accent-foreground: oklch(0.975 0.003 248);
+  --secondary: oklch(0.279 0 0);
+  --secondary-foreground: oklch(0.955 0 0);
+  --muted: oklch(0.258 0 0);
+  --muted-foreground: oklch(0.685 0 0);
+  --accent: oklch(0.295 0 0);
+  --accent-foreground: oklch(0.975 0 0);
   --destructive: oklch(0.63 0.19 25);
 
   --border: oklch(1 0 0 / 8%);

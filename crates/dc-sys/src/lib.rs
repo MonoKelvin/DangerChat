@@ -19,6 +19,7 @@ mod api;
 mod mock;
 #[cfg(windows)]
 mod real;
+pub mod single_instance;
 
 pub use api::{
     dpi_scale_from_dpi, to_physical, ForegroundCallback, ForegroundInfo, HookAction, HookGuard,
@@ -27,6 +28,7 @@ pub use api::{
 pub use mock::{MockSys, MockWindow};
 #[cfg(windows)]
 pub use real::{local_utc_offset_minutes, local_ymd, RealSys};
+pub use single_instance::{acquire as acquire_instance_lock, InstanceLock};
 
 /// 构造函数：当前平台的真实实现。
 #[cfg(windows)]

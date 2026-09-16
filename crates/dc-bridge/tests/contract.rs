@@ -63,10 +63,11 @@ fn ut_brg_01_write_contract_fixtures() {
     assert_eq!(reread.draft_epoch, 3);
 }
 
-/// UT-BRG-02：allow 链路——apply_alert_action(Allow) 只置内部标志，
+/// UT-BRG-02：弹窗动作链路——apply_alert_action 只改内部状态，
 /// 全程无任何按键注入（MockSys 的按键投递计数为 0；红线扫描在 CI 另行断言）。
+/// （原 allow 链路测试已随「仍然发送」按钮移除；零注入红线对现存动作同样成立）
 #[test]
-fn ut_brg_02_allow_sets_flag_without_injection() {
+fn ut_brg_02_alert_action_without_injection() {
     use dc_pipeline::clock::TestClock;
     use dc_pipeline::intercept::{Intercept, InterceptConfig, InterceptDeps};
     use dc_pipeline::testing::Harness;
@@ -76,8 +77,7 @@ fn ut_brg_02_allow_sets_flag_without_injection() {
     let clock = Arc::new(TestClock::new(1_000));
     let sys = MockSys::new();
 
-    // 观察者钩子：记录放行的按键（allow 链路应只放行「用户自己的下一次按键」，
-    // 不产生任何新按键）
+    // 观察者钩子：记录放行的按键（动作链路不产生任何新按键）
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let seen_hook = Arc::clone(&seen);
     SysApi::install_keyboard_hook(
@@ -89,7 +89,7 @@ fn ut_brg_02_allow_sets_flag_without_injection() {
     )
     .unwrap();
 
-    // 独立 Intercept（Harness 的已装钩子，这里只用它的 MockSys 模式验证 allow 语义）
+    // 独立 Intercept（Harness 的已装钩子，这里只用它的 MockSys 模式验证动作语义）
     let deps = InterceptDeps::new(
         Arc::new(sys.clone()) as Arc<dyn SysApi>,
         InterceptConfig::default(),
@@ -97,14 +97,18 @@ fn ut_brg_02_allow_sets_flag_without_injection() {
     .with_clock(Arc::clone(&clock) as Arc<dyn dc_pipeline::clock::Clock>);
     let intercept = Arc::new(Intercept::new(deps));
 
-    // apply_alert_action(Allow) 的语义验证：不 panic、不注入（seen 为空）。
-    // （Cooldown 进入路径由 tests/intercept.rs 的 it-int 系列覆盖，此处聚焦零注入断言）
-    intercept.apply_alert_action(dc_pipeline::intercept::AlertAction::Allow);
+    // 全部现存动作逐一执行：不 panic、不注入（seen 为空）。
+    for a in [
+        dc_pipeline::intercept::AlertAction::Cancel,
+        dc_pipeline::intercept::AlertAction::Snooze,
+    ] {
+        intercept.apply_alert_action(a);
+    }
 
-    // 关键断言：allow 之后系统里没有任何新按键被投递
+    // 关键断言：动作执行后系统里没有任何新按键被投递
     assert!(
         seen.lock().unwrap().is_empty(),
-        "allow 链路不得注入任何按键（红线 C-08）"
+        "弹窗动作链路不得注入任何按键（红线 C-08）"
     );
     let _ = harness; // 保持钩子存活到断言之后
 }

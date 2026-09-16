@@ -1,9 +1,9 @@
 //! 托盘（FR-UI-06）：品牌 logo 按状态动态调整色相（不生成多张图）+ 菜单。
 
+use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{TrayIcon, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Listener, Manager};
-use tauri::image::Image;
 
 use dc_bridge::events;
 use dc_bridge::state::AppState;
@@ -16,7 +16,6 @@ static LOGO: &[u8] = include_bytes!("../icons/logo-32.png");
 const LOGO_HUE: f32 = 11.0;
 
 /// ── 色相调整算法（RGB ↔ HSL，保留 alpha）──
-
 fn rgb_to_hsl(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     let (max, min) = (r.max(g).max(b), r.min(g).min(b));
     let l = (max + min) / 2.0;
@@ -24,7 +23,11 @@ fn rgb_to_hsl(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     if d < 1e-6 {
         return (0.0, 0.0, l);
     }
-    let s = if l > 0.5 { d / (2.0 - max - min) } else { d / (max + min) };
+    let s = if l > 0.5 {
+        d / (2.0 - max - min)
+    } else {
+        d / (max + min)
+    };
     let h = if max == r {
         ((g - b) / d).rem_euclid(6.0)
     } else if max == g {
@@ -37,11 +40,21 @@ fn rgb_to_hsl(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
 
 fn hue_to_rgb(p: f32, q: f32, t: f32) -> f32 {
     let mut t = t;
-    if t < 0.0 { t += 1.0; }
-    if t > 1.0 { t -= 1.0; }
-    if t < 1.0 / 6.0 { return p + (q - p) * 6.0 * t; }
-    if t < 0.5 { return q; }
-    if t < 2.0 / 3.0 { return p + (q - p) * (2.0 / 3.0 - t) * 6.0; }
+    if t < 0.0 {
+        t += 1.0;
+    }
+    if t > 1.0 {
+        t -= 1.0;
+    }
+    if t < 1.0 / 6.0 {
+        return p + (q - p) * 6.0 * t;
+    }
+    if t < 0.5 {
+        return q;
+    }
+    if t < 2.0 / 3.0 {
+        return p + (q - p) * (2.0 / 3.0 - t) * 6.0;
+    }
     p
 }
 
@@ -49,7 +62,11 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (f32, f32, f32) {
     if s < 1e-6 {
         return (l, l, l);
     }
-    let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
+    let q = if l < 0.5 {
+        l * (1.0 + s)
+    } else {
+        l + s - l * s
+    };
     let p = 2.0 * l - q;
     let t = h / 360.0;
     (
@@ -61,8 +78,13 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (f32, f32, f32) {
 
 /// 就地色相旋转 + 饱和度/亮度调整（灰色像素不动，alpha 保留）。
 fn tint(rgba: &mut [u8], hue_shift: f32, sat_scale: f32, l_add: f32) {
-    for px in rgba.chunks_exact_mut(4) {
-        let (r, g, b) = (px[0] as f32 / 255.0, px[1] as f32 / 255.0, px[2] as f32 / 255.0);
+    // as_chunks_mut 比 chunks_exact_mut 少一次边界检查，且尾部残块语义明确（此处丢弃）
+    for px in rgba.as_chunks_mut::<4>().0 {
+        let (r, g, b) = (
+            px[0] as f32 / 255.0,
+            px[1] as f32 / 255.0,
+            px[2] as f32 / 255.0,
+        );
         let (h, s, l) = rgb_to_hsl(r, g, b);
         if s < 1e-4 {
             // 无彩色：亮度调整仍生效（浅灰/深灰态）
@@ -96,7 +118,9 @@ fn tint_for(state: GuardState, found: bool) -> (f32, f32) {
 
 /// 按状态 + 主题色相变色的托盘图标（同一张 logo，内存中调整）
 fn logo_image(state: &AppState) -> Image<'static> {
-    let base_hue = state.tray_hue_deg.load(std::sync::atomic::Ordering::Relaxed) as f32;
+    let base_hue = state
+        .tray_hue_deg
+        .load(std::sync::atomic::Ordering::Relaxed) as f32;
     let img = image::load_from_memory(LOGO)
         .expect("内嵌 logo 解码失败")
         .to_rgba8();
@@ -136,14 +160,38 @@ pub fn build(app: &AppHandle) -> tauri::Result<TrayIcon> {
             }
             "open" => show_main(app),
             "quit" => {
-                // 设置退出意图，允许 ExitRequested 真正退出
+                // 退出链路（顺序不可换）：
+                // 1) 置退出信号 → pump/window-watch 线程在下一轮收敛；
+                // 2) 置退出意图 → ExitRequested 不再被 prevent_exit 拦截；
+                // 3) 等待后台线程结束（有限等待，超时则强杀）；
+                // 4) 进程退出。
+                //
+                // 只调 app.exit(0) 是不够的：它仅向事件循环「请求」退出，
+                // 而 pump/window-watch 是**非分离线程**的死循环，主线程返回时
+                // 会等待它们结束 —— 结果就是「托盘退出但后台进程还在」。
+                let state = app.state::<std::sync::Arc<AppState>>();
+                state.request_shutdown();
                 crate::set_exit_intent();
-                app.exit(0);
+
+                // 给线程收敛留时间（pump ≤100ms、watch ≤200ms 即响应）
+                let deadline = std::time::Instant::now() + std::time::Duration::from_millis(600);
+                while std::time::Instant::now() < deadline {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+                tracing::info!("托盘退出：进程终止");
+                // 强制终止：不依赖事件循环/线程优雅收尾，确保必然退出。
+                // （钩子由 OS 随进程终止回收，符合 §2.1 fail-open）
+                std::process::exit(0);
             }
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click { button, button_state, .. } = event {
+            if let TrayIconEvent::Click {
+                button,
+                button_state,
+                ..
+            } = event
+            {
                 if button == tauri::tray::MouseButton::Left
                     && button_state == tauri::tray::MouseButtonState::Up
                 {
@@ -168,11 +216,27 @@ pub fn build(app: &AppHandle) -> tauri::Result<TrayIcon> {
     Ok(tray)
 }
 
-fn show_main(app: &AppHandle) {
+/// 唤出主窗口（托盘左键、托盘菜单「打开设置」两处共用）。
+///
+/// 注意：**不要在单实例回调里直接调本函数** —— 那个回调运行在跨进程消息
+/// 投递的窗口过程内（同步等待返回的上下文），此处 `show`/`set_focus`
+/// 触发的操作可能反向阻塞发送方，构成经典死锁。单实例回调请用
+/// `show_main_async`。
+pub fn show_main(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.show();
         let _ = win.set_focus();
     }
+}
+
+/// 异步唤出主窗口：把操作投递到 Tauri 事件循环，不在调用者线程同步执行。
+///
+/// 专供单实例回调（运行在跨进程消息投递的窗口过程内）使用，避免跨进程死锁。
+pub fn show_main_async(app: &AppHandle) {
+    let app = app.clone();
+    let _ = app.clone().run_on_main_thread(move || {
+        show_main(&app);
+    });
 }
 
 pub fn refresh(app: &AppHandle) {
@@ -202,7 +266,10 @@ mod tests {
         let mut rgba = [191u8, 64, 42, 255];
         tint(&mut rgba, 0.0, 0.1, 0.22);
         let (r, g, b) = (rgba[0] as u32, rgba[1] as u32, rgba[2] as u32);
-        assert!(r.abs_diff(g) < 24 && g.abs_diff(b) < 24, "应接近灰色：{rgba:?}");
+        assert!(
+            r.abs_diff(g) < 24 && g.abs_diff(b) < 24,
+            "应接近灰色：{rgba:?}"
+        );
         assert!(rgba[0] > 150, "亮度应明显提升：{rgba:?}");
     }
 
@@ -212,7 +279,10 @@ mod tests {
         let mut rgba = [191u8, 64, 42, 255];
         tint(&mut rgba, 0.0, 0.06, -0.18);
         let (r, g, b) = (rgba[0] as u32, rgba[1] as u32, rgba[2] as u32);
-        assert!(r.abs_diff(g) < 24 && g.abs_diff(b) < 24, "应接近灰色：{rgba:?}");
+        assert!(
+            r.abs_diff(g) < 24 && g.abs_diff(b) < 24,
+            "应接近灰色：{rgba:?}"
+        );
         assert!(rgba[0] < 130, "亮度应明显下降：{rgba:?}");
     }
 

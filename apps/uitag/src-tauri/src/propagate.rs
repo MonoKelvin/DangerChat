@@ -74,7 +74,11 @@ fn diff(a: [u8; 3], b: [u8; 3]) -> u32 {
 fn detect_anchors(img: &DynamicImage) -> Anchors {
     let (w, h) = img.dimensions();
     if w < 50 || h < 50 {
-        return Anchors { win_r: w as f64, sb_r: None, win_b: h as f64 - 6.0 };
+        return Anchors {
+            win_r: w as f64,
+            sb_r: None,
+            win_b: h as f64 - 6.0,
+        };
     }
     let rgb = img.to_rgb8();
     let px = |x: u32, y: u32| -> [u8; 3] {
@@ -139,7 +143,11 @@ fn detect_anchors(img: &DynamicImage) -> Anchors {
     while yy as f64 > (h as f64) * 0.6 {
         let mut n = 0u32;
         for &xx in &xs {
-            let below = if yy + 1 < h { px(xx, yy + 1) } else { px(xx, yy) };
+            let below = if yy + 1 < h {
+                px(xx, yy + 1)
+            } else {
+                px(xx, yy)
+            };
             if diff(px(xx, yy), below) > 10 {
                 n += 1;
             }
@@ -165,7 +173,13 @@ fn map_box(b: &AnnoBox, src: &TmplAnchors, dst: &Anchors) -> Option<AnnoBox> {
 
     let mapped = match b.tag.as_str() {
         // 底锚：贴窗口底，高度不变
-        "msg_input" => AnnoBox { tag: b.tag.clone(), x, y: bottom - b.h, w, h: b.h },
+        "msg_input" => AnnoBox {
+            tag: b.tag.clone(),
+            x,
+            y: bottom - b.h,
+            w,
+            h: b.h,
+        },
         // 顶锚（标题栏高度恒定）；高度自适应到输入框顶
         "chat_window" => AnnoBox {
             tag: b.tag.clone(),
@@ -183,10 +197,22 @@ fn map_box(b: &AnnoBox, src: &TmplAnchors, dst: &Anchors) -> Option<AnnoBox> {
             if h < 100.0 || dst.sb_r.unwrap() - b.x < 20.0 {
                 return None;
             }
-            AnnoBox { tag: b.tag.clone(), x: b.x, y: src.title_b, w: dst.sb_r.unwrap() - b.x, h }
+            AnnoBox {
+                tag: b.tag.clone(),
+                x: b.x,
+                y: src.title_b,
+                w: dst.sb_r.unwrap() - b.x,
+                h,
+            }
         }
         // chat_target 等：顶锚，高度不变
-        _ => AnnoBox { tag: b.tag.clone(), x, y: b.y, w, h: b.h },
+        _ => AnnoBox {
+            tag: b.tag.clone(),
+            x,
+            y: b.y,
+            w,
+            h: b.h,
+        },
     };
     Some(mapped)
 }
@@ -234,10 +260,7 @@ fn confidence(mapped: &[AnnoBox], img: &DynamicImage) -> f64 {
         med[c] = v[v.len() / 2];
     }
     // 与中位色的偏差
-    let ok = samples
-        .iter()
-        .filter(|s| diff(**s, med) < 60)
-        .count();
+    let ok = samples.iter().filter(|s| diff(**s, med) < 60).count();
     ok as f64 / samples.len() as f64
 }
 
@@ -282,10 +305,16 @@ pub fn propagate(req: &PropagateRequest) -> Result<Vec<PropagateResult>, String>
             {
                 continue;
             }
-            boxes.push(PropagatedBox { box_: mapped, confidence: 1.0 });
+            boxes.push(PropagatedBox {
+                box_: mapped,
+                confidence: 1.0,
+            });
         }
         // 结构自检：底部区域杂乱（非微信截图）→ 整图降权
-        let conf = confidence(&boxes.iter().map(|p| p.box_.clone()).collect::<Vec<_>>(), &target);
+        let conf = confidence(
+            &boxes.iter().map(|p| p.box_.clone()).collect::<Vec<_>>(),
+            &target,
+        );
         if conf < 0.5 {
             boxes.clear(); // 结构不认识，宁缺勿错
         } else {
@@ -295,7 +324,10 @@ pub fn propagate(req: &PropagateRequest) -> Result<Vec<PropagateResult>, String>
         }
         let keep = |pb: &PropagatedBox| pb.confidence >= req.min_confidence;
         boxes.retain(keep);
-        out.push(PropagateResult { path: t.clone(), boxes });
+        out.push(PropagateResult {
+            path: t.clone(),
+            boxes,
+        });
     }
     Ok(out)
 }
@@ -316,7 +348,12 @@ mod tests {
         input_h: u32,
     ) {
         let mut img = ImageBuffer::from_pixel(win_w, win_h, Rgb([47, 47, 48])); // 头像栏
-        let paint = |img: &mut ImageBuffer<Rgb<u8>, Vec<u8>>, x0: u32, y0: u32, x1: u32, y1: u32, c: Rgb<u8>| {
+        let paint = |img: &mut ImageBuffer<Rgb<u8>, Vec<u8>>,
+                     x0: u32,
+                     y0: u32,
+                     x1: u32,
+                     y1: u32,
+                     c: Rgb<u8>| {
             for y in y0..y1.min(win_h) {
                 for x in x0..x1.min(win_w) {
                     img.put_pixel(x, y, c);
@@ -325,8 +362,22 @@ mod tests {
         };
         paint(&mut img, 0, 0, win_w, title_h, Rgb([28, 28, 29])); // 标题栏
         paint(&mut img, 90, title_h, sidebar_w, win_h, Rgb([80, 80, 81])); // 侧栏
-        paint(&mut img, sidebar_w, title_h, win_w, win_h, Rgb([30, 30, 31])); // 聊天区
-        paint(&mut img, sidebar_w, win_h - input_h - 6, win_w, win_h, Rgb([33, 33, 34])); // 输入框
+        paint(
+            &mut img,
+            sidebar_w,
+            title_h,
+            win_w,
+            win_h,
+            Rgb([30, 30, 31]),
+        ); // 聊天区
+        paint(
+            &mut img,
+            sidebar_w,
+            win_h - input_h - 6,
+            win_w,
+            win_h,
+            Rgb([33, 33, 34]),
+        ); // 输入框
         paint(&mut img, win_w - 1, 0, win_w, win_h, Rgb([41, 41, 42])); // 窗口右边框
         paint(&mut img, 0, win_h - 1, win_w, win_h, Rgb([41, 41, 42])); // 窗口底边框
         for i in 0..20u32 {
@@ -338,13 +389,43 @@ mod tests {
         DynamicImage::ImageRgb8(img).save(path).unwrap();
     }
 
-    fn tmpl_boxes(sidebar_w: f64, title_h: f64, win_h: f64, input_h: f64, win_w: f64) -> Vec<AnnoBox> {
+    fn tmpl_boxes(
+        sidebar_w: f64,
+        title_h: f64,
+        win_h: f64,
+        input_h: f64,
+        win_w: f64,
+    ) -> Vec<AnnoBox> {
         let chat_w = win_w - sidebar_w - 1.0;
         vec![
-            AnnoBox { tag: "chat_list".into(), x: 92.0, y: title_h, w: sidebar_w - 92.0, h: win_h - title_h - 1.0 },
-            AnnoBox { tag: "chat_target".into(), x: sidebar_w + 1.0, y: 36.0, w: chat_w - 6.0, h: 55.0 },
-            AnnoBox { tag: "msg_input".into(), x: sidebar_w + 3.0, y: win_h - input_h - 7.0, w: chat_w - 8.0, h: input_h },
-            AnnoBox { tag: "chat_window".into(), x: sidebar_w, y: title_h, w: chat_w, h: win_h - input_h - 7.0 - title_h },
+            AnnoBox {
+                tag: "chat_list".into(),
+                x: 92.0,
+                y: title_h,
+                w: sidebar_w - 92.0,
+                h: win_h - title_h - 1.0,
+            },
+            AnnoBox {
+                tag: "chat_target".into(),
+                x: sidebar_w + 1.0,
+                y: 36.0,
+                w: chat_w - 6.0,
+                h: 55.0,
+            },
+            AnnoBox {
+                tag: "msg_input".into(),
+                x: sidebar_w + 3.0,
+                y: win_h - input_h - 7.0,
+                w: chat_w - 8.0,
+                h: input_h,
+            },
+            AnnoBox {
+                tag: "chat_window".into(),
+                x: sidebar_w,
+                y: title_h,
+                w: chat_w,
+                h: win_h - input_h - 7.0 - title_h,
+            },
         ]
     }
 
@@ -355,10 +436,19 @@ mod tests {
         let y2 = (a.y + a.h).min(b.y + b.h);
         let inter = (x2 - x1).max(0.0) * (y2 - y1).max(0.0);
         let uni = a.w * a.h + b.w * b.h - inter;
-        if uni <= 0.0 { 0.0 } else { inter / uni }
+        if uni <= 0.0 {
+            0.0
+        } else {
+            inter / uni
+        }
     }
 
-    fn req_for(a: &std::path::Path, b: &std::path::Path, boxes: Vec<AnnoBox>, min_conf: f64) -> PropagateRequest {
+    fn req_for(
+        a: &std::path::Path,
+        b: &std::path::Path,
+        boxes: Vec<AnnoBox>,
+        min_conf: f64,
+    ) -> PropagateRequest {
         PropagateRequest {
             src_path: a.to_string_lossy().into_owned(),
             boxes,
@@ -398,8 +488,20 @@ mod tests {
         for pb in &results[0].boxes {
             let t = truth.iter().find(|t| t.tag == pb.box_.tag).unwrap();
             let v = iou(&pb.box_, t);
-            assert!(v > 0.8, "{} iou={} got=({:.0},{:.0},{:.0},{:.0}) want=({:.0},{:.0},{:.0},{:.0})",
-                pb.box_.tag, v, pb.box_.x, pb.box_.y, pb.box_.w, pb.box_.h, t.x, t.y, t.w, t.h);
+            assert!(
+                v > 0.8,
+                "{} iou={} got=({:.0},{:.0},{:.0},{:.0}) want=({:.0},{:.0},{:.0},{:.0})",
+                pb.box_.tag,
+                v,
+                pb.box_.x,
+                pb.box_.y,
+                pb.box_.w,
+                pb.box_.h,
+                t.x,
+                t.y,
+                t.w,
+                t.h
+            );
         }
     }
 
@@ -412,19 +514,29 @@ mod tests {
         // 独立聊天窗：无头像栏无侧栏，聊天区贴左
         let mut img = ImageBuffer::from_pixel(900, 700, Rgb([45, 45, 46]));
         for y in 0..97 {
-            for x in 0..900 { img.put_pixel(x, y, Rgb([28, 28, 29])); }
+            for x in 0..900 {
+                img.put_pixel(x, y, Rgb([28, 28, 29]));
+            }
         }
         for y in 97..530 {
-            for x in 0..900 { img.put_pixel(x, y, Rgb([30, 30, 31])); }
+            for x in 0..900 {
+                img.put_pixel(x, y, Rgb([30, 30, 31]));
+            }
         }
         for y in 530..700 {
-            for x in 0..900 { img.put_pixel(x, y, Rgb([33, 33, 34])); }
+            for x in 0..900 {
+                img.put_pixel(x, y, Rgb([33, 33, 34]));
+            }
         }
         DynamicImage::ImageRgb8(img).save(&b).unwrap();
 
         let boxes = tmpl_boxes(300.0, 97.0, 600.0, 170.0, 800.0);
         let results = propagate(&req_for(&a, &b, boxes, 0.0)).unwrap();
-        let tags: Vec<&str> = results[0].boxes.iter().map(|b| b.box_.tag.as_str()).collect();
+        let tags: Vec<&str> = results[0]
+            .boxes
+            .iter()
+            .map(|b| b.box_.tag.as_str())
+            .collect();
         assert!(!tags.contains(&"chat_list"), "{tags:?}");
         assert_eq!(tags.len(), 3, "{tags:?}");
     }
@@ -454,7 +566,13 @@ mod tests {
         synth_wechat(&a, 800, 600, 300, 97, 170);
         let req = PropagateRequest {
             src_path: a.to_string_lossy().into_owned(),
-            boxes: vec![AnnoBox { tag: "msg_input".into(), x: 303.0, y: 430.0, w: 489.0, h: 170.0 }],
+            boxes: vec![AnnoBox {
+                tag: "msg_input".into(),
+                x: 303.0,
+                y: 430.0,
+                w: 489.0,
+                h: 170.0,
+            }],
             targets: vec![a.to_string_lossy().into_owned()],
             min_confidence: 0.0,
             allow_rescale: true,

@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState, useRef } from 'react';
-import { Shield, ShieldAlert, ShieldOff, Plus, Trash2, FolderOpen, FolderCog, Moon, Sun, Monitor } from 'lucide-react';
+import { useEffect, useMemo, useState, useRef, type ReactNode } from 'react';
+import { Shield, ShieldAlert, ShieldOff, Plus, Trash2, Pencil, FolderOpen, FolderCog, Loader2, Moon, Sun, Monitor } from 'lucide-react';
 import { cn } from '../lib/utils';
-import type { ConfigFieldDto, StatusPayload } from '../lib/types';
+import type { ConfigFieldDto, ScenarioDto, StatusPayload } from '../lib/types';
 import * as api from '../lib/commands';
 import { onStats, onStatus } from '../lib/events';
 import { SchemaField } from './SchemaField';
 import { Switch } from '../components/Switch';
+import { Checkbox } from '../components/Checkbox';
+import { Modal, ModalButton } from '../components/Modal';
 import { IconButton } from '../components/IconButton';
 import { Combobox, type ComboOption } from '../components/Combobox';
 import { SettingsGroup, SettingsRow, SettingsSection } from '../components/SettingsGroup';
@@ -21,18 +23,15 @@ import {
   type Theme,
 } from '../lib/theme';
 
-/** 分类导航（FR-UI-03）：按用户视角归组——围绕微信的日常开关 + 独立词库 +
+/** 分类导航（FR-UI-03）：按用户视角归组——日常防护开关 + 场景与词库 +
  *  面向开发者的技术参数（高级设置）。 */
-const CATEGORY_ORDER = ['通用', '微信防护', '违禁词库', '高级设置', '关于'] as const;
+const CATEGORY_ORDER = ['通用', '消息防护', '场景管理', '高级设置', '关于'] as const;
 type Category = (typeof CATEGORY_ORDER)[number];
 
-/** 技术参数键（判定有效期/防抖/模型阈值等一般人无需关心的）→ 高级设置 */
+/** 技术参数键（判定有效期/防抖等一般人无需关心的）→ 高级设置 */
 const ADVANCED_KEYS = new Set([
   'guard.verdict_ttl_ms',
-  'guard.fast_debounce_ms',
-  'guard.allow_once_timeout_ms',
   'guard.foreground_debounce_ms',
-  'pipeline.heartbeat_ms',
 ]);
 
 /** 内置目标程序（下拉选择，不允许输入） */
@@ -41,10 +40,10 @@ const TARGET_APPS: ComboOption[] = [
   { value: 'notepad.exe', label: '记事本', hint: '验证用' },
 ];
 
-/** 微信防护页的分组顺序与标题 */
+/** 消息防护页的分组顺序与标题 */
 const WECHAT_GROUPS: { title: string; keys: string[] }[] = [
   { title: '目标程序', keys: ['target.process_name'] },
-  { title: '拦截行为', keys: ['guard.enabled', 'guard.send_key', 'guard.pause_hotkey', 'alert.timeout_secs'] },
+  { title: '拦截行为', keys: ['guard.enabled', 'guard.send_key', 'alert.timeout_secs'] },
   { title: '语义判定', keys: ['sem.l2_enabled', 'sem.threshold.formal', 'sem.threshold.casual'] },
 ];
 
@@ -175,15 +174,15 @@ export function SettingsRoot() {
           </div>
         </div>
 
-        <div className="space-y-0.5">
+        <div className="space-y-1.5">
           {CATEGORY_ORDER.map((c) => (
             <button
               key={c}
               onClick={() => setActive(c)}
               className={cn(
-                'w-full rounded-lg px-3 py-2 text-left text-sm font-medium transition-all duration-150',
+                'w-full rounded-lg px-3 py-2.5 text-left text-sm font-medium transition-all duration-150',
                 active === c
-                  ? 'bg-[var(--panel-bg)] text-[var(--text-primary)] shadow-[var(--shadow-md)]'
+                  ? 'bg-[var(--brand)] text-[var(--brand-text)] shadow-[var(--shadow-sm)]'
                   : 'text-[var(--text-secondary)] hover:bg-[var(--hover-overlay)] hover:text-[var(--text-primary)]',
               )}
             >
@@ -208,9 +207,9 @@ export function SettingsRoot() {
       {/* 右侧设置区：提亮一档（Win11：左导航灰、右内容白） */}
       <div className="min-w-0 flex-1 overflow-y-auto rounded-tl-xl bg-[var(--panel-bg)] px-8 py-6">
         {active === '通用' && <GeneralPage />}
-        {active === '微信防护' && (
+        {active === '消息防护' && (
           <div className="mx-auto max-w-2xl">
-            <h2 className="mb-5 text-xl font-semibold tracking-tight text-[var(--text-primary)]">微信防护</h2>
+            <h2 className="mb-5 text-xl font-semibold tracking-tight text-[var(--text-primary)]">消息防护</h2>
             <SettingsSection>
               {WECHAT_GROUPS.map((g) => (
                 <SettingsGroup key={g.title} label={g.title}>
@@ -221,7 +220,7 @@ export function SettingsRoot() {
             </SettingsSection>
           </div>
         )}
-        {active === '违禁词库' && <RulesEditor />}
+        {active === '场景管理' && <ScenariosPage />}
         {active === '高级设置' && (
           <div className="mx-auto max-w-2xl">
             <h2 className="mb-1 text-xl font-semibold tracking-tight text-[var(--text-primary)]">高级设置</h2>
@@ -300,7 +299,7 @@ function AppearanceGroup() {
               className={cn(
                 'flex h-7 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium transition-all',
                 theme === value
-                  ? 'bg-[var(--panel-bg)] text-[var(--text-primary)] shadow-[var(--shadow-sm)]'
+                  ? 'bg-[var(--brand)] text-[var(--brand-text)] shadow-[var(--shadow-sm)]'
                   : 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]',
               )}
             >
@@ -363,33 +362,55 @@ function AutostartRow() {
   );
 }
 
-/** 数据目录：显示当前位置、打开、更改（重启生效） */
+/** 字节数 → 人类可读（迁移回执用） */
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  const units = ['KB', 'MB', 'GB'];
+  let v = n / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  return `${v.toFixed(v >= 10 ? 0 : 1)} ${units[i]}`;
+}
+
+/** 数据目录：显示当前位置、打开、一键迁移到新位置（重启生效） */
 function DataDirRow() {
   const [info, setInfo] = useState<import('../lib/commands').DataDirInfo | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  /** 行内通知：仅承载错误（成功走弹窗，避免长文案挤压行布局） */
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  /** 迁移成功回执；非 null 即弹窗打开 */
+  const [report, setReport] = useState<import('../lib/commands').MigrateReport | null>(null);
 
   const load = () =>
     void api
       .getDataDir()
       .then(setInfo)
-      .catch((e: Error) => setNotice(`数据目录读取失败：${e.message || e}`));
+      .catch((e: Error) => setError(`数据目录读取失败：${e.message || e}`));
   useEffect(load, []);
 
-  const change = async () => {
+  /** 选目录 → 复制全部数据 → 写指针。旧目录去留由结果弹窗决定。 */
+  const migrate = async () => {
     const picked = await api.pickDataDir();
     if (!picked) return;
+    setBusy(true);
+    setError(null);
     try {
-      await api.setDataDir(picked);
-      setInfo({ current: picked, custom: true });
-      setNotice('数据目录已设置，重启危信后生效（旧数据需手动迁移）');
+      const r = await api.migrateDataDir(picked);
+      setInfo({ current: r.target, custom: true });
+      setReport(r);
     } catch (e) {
-      setNotice(e instanceof Error ? e.message : '设置失败');
+      setError(e instanceof Error ? e.message : '迁移失败');
+    } finally {
+      setBusy(false);
     }
   };
 
   return (
     <SettingsRow
-      label="数据保存目录"
+      label="数据目录"
       subtitle={info ? (info.custom ? `${info.current}（自定义）` : info.current) : '读取中…'}
     >
       <div className="flex gap-1.5">
@@ -397,20 +418,132 @@ function DataDirRow() {
           variant="ghost"
           size="sm"
           data-tip="打开目录"
-          onClick={() => void api.openDataDir().catch((e: Error) => setNotice(`打开失败：${e.message || e}`))}
+          onClick={() => void api.openDataDir().catch((e: Error) => setError(`打开失败：${e.message || e}`))}
         >
           <FolderOpen className="size-4" />
         </IconButton>
-        <IconButton variant="ghost" size="sm" data-tip="更改数据目录" onClick={() => void change()}>
-          <FolderCog className="size-4" />
+        <IconButton
+          variant="ghost"
+          size="sm"
+          disabled={busy}
+          data-tip={busy ? '迁移中…' : '一键迁移到新位置'}
+          onClick={() => void migrate()}
+        >
+          {busy ? <Loader2 className="size-4 animate-spin" /> : <FolderCog className="size-4" />}
         </IconButton>
       </div>
-      {notice && <p className="text-xs text-[var(--warning)]">{notice}</p>}
+      {error && <p className="text-xs text-[var(--warning)]">{error}</p>}
+      {report && <MigrateResultDialog report={report} onClose={() => setReport(null)} />}
     </SettingsRow>
   );
 }
 
-/* ── 微信防护：目标程序下拉 + 画像 ── */
+/**
+ * 迁移结果对话框：告知重启生效 + 询问旧目录去留。
+ *
+ * 三个出口（重启软件 / 稍后重启 / 关闭）**都在关闭时执行清理** —— 勾选即时生效，
+ * 不依赖是否重启（清理的是已迁移走的旧目录，与当前进程运行无关）。
+ */
+function MigrateResultDialog({
+  report,
+  onClose,
+}: {
+  report: import('../lib/commands').MigrateReport;
+  onClose: () => void;
+}) {
+  /** 默认勾选：迁移后旧目录通常是冗余的，让用户顺手清掉 */
+  const [removeOld, setRemoveOld] = useState(true);
+  const [cleanupError, setCleanupError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  /** 防重入：清理/重启进行中不再接受关闭（避免并发删除） */
+  const closingRef = useRef(false);
+
+  /** 依勾选清理旧目录；返回错误消息（null = 成功或无需清理） */
+  const cleanupIfNeeded = async (): Promise<string | null> => {
+    if (!removeOld) return null;
+    try {
+      await api.deleteOldDataDir(report.previous);
+      return null;
+    } catch (e) {
+      return e instanceof Error ? e.message : '旧目录删除失败';
+    }
+  };
+
+  /** 统一关闭流程：清理 → （失败则留窗示错）/（成功则关闭） */
+  const closeWithCleanup = async (after?: () => Promise<void>) => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    setBusy(true);
+    setCleanupError(null);
+
+    const failed = await cleanupIfNeeded();
+    if (failed) {
+      setCleanupError(failed);
+      setBusy(false);
+      closingRef.current = false;
+      return;
+    }
+    if (after) {
+      try {
+        await after();
+      } catch (e) {
+        setCleanupError(e instanceof Error ? e.message : '操作失败');
+        setBusy(false);
+        closingRef.current = false;
+        return;
+      }
+    }
+    onClose();
+  };
+
+  return (
+    <Modal
+      open
+      title="数据已迁移"
+      // 点遮罩 / Esc：等同「关闭」
+      onClose={() => void closeWithCleanup()}
+      footer={
+        <>
+          {busy && (
+            <span className="mr-auto flex items-center gap-1.5 text-xs text-[var(--text-tertiary)]">
+              <Loader2 className="size-3.5 animate-spin" />
+              处理中…
+            </span>
+          )}
+          <ModalButton
+            variant="primary"
+            disabled={busy}
+            onClick={() => void closeWithCleanup(() => api.restartApp())}
+          >
+            重启软件
+          </ModalButton>
+          <ModalButton disabled={busy} onClick={() => void closeWithCleanup()}>
+            稍后重启
+          </ModalButton>
+          <ModalButton disabled={busy} onClick={() => void closeWithCleanup()}>
+            关闭
+          </ModalButton>
+        </>
+      }
+    >
+      <p>
+        已迁移 {report.files} 个文件（{formatBytes(report.bytes)}），重启软件后生效。
+      </p>
+      <div className="mt-3.5 border-t border-[var(--divider)] pt-3">
+        <Checkbox
+          checked={removeOld}
+          onChange={setRemoveOld}
+          label={`删除旧目录（${report.previous}）`}
+        />
+      </div>
+      {cleanupError && (
+        <p className="mt-2.5 text-xs text-[var(--warning)]">旧目录清理失败：{cleanupError}</p>
+      )}
+    </Modal>
+  );
+}
+
+/* ── 消息防护：目标程序下拉 + 画像 ── */
 
 /** 目标程序行：内置应用下拉（不允许输入），替代 SchemaField 的自由文本框 */
 function TargetAppRow({
@@ -430,14 +563,17 @@ function TargetAppRow({
 
 function ContactsGroup() {
   const [contacts, setContacts] = useState<import('../lib/types').ContactDto[]>([]);
+  const [scenarios, setScenarios] = useState<ScenarioDto[]>([]);
   const [name, setName] = useState('');
+  const [profile, setProfile] = useState('casual');
   const [saving, setSaving] = useState<string | null>(null);
 
   useEffect(() => {
     void api.listContacts().then(setContacts);
+    void api.listScenarios().then(setScenarios);
   }, []);
 
-  const setProfile = (n: string, p: string) => {
+  const setProfileOf = (n: string, p: string) => {
     setSaving(n);
     void api
       .setContactProfile(n, p)
@@ -448,9 +584,15 @@ function ContactsGroup() {
 
   const addContact = () => {
     if (!name.trim()) return;
-    setProfile(name.trim(), 'casual');
+    setProfileOf(name.trim(), profile);
     setName('');
   };
+
+  /** 画像下拉：未标记（删除条目，回落正式）+ 全部场景 */
+  const profileOptions: ComboOption[] = [
+    { value: 'none', label: '未标记', hint: '按正式处理' },
+    ...scenarios.map((s) => ({ value: s.id, label: s.name })),
+  ];
 
   return (
     <SettingsGroup label="聊天对象画像">
@@ -467,44 +609,243 @@ function ContactsGroup() {
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && addContact()}
           />
+          <Combobox
+            value={profile}
+            options={scenarios.map((s) => ({ value: s.id, label: s.name }))}
+            onChange={setProfile}
+            className="w-32"
+          />
           <button
             className="shrink-0 rounded-lg bg-[var(--brand)] px-4 text-sm font-medium text-[var(--brand-text)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--brand-hover)] disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
             disabled={!name.trim()}
             onClick={addContact}
           >
-            标记为随意
+            标记
           </button>
         </div>
       </SettingsRow>
       {contacts.map((c) => (
         <SettingsRow key={c.name} label={c.name}>
-          <div className="flex gap-1.5">
-            {(['formal', 'casual'] as const).map((p) => (
-              <button
-                key={p}
-                disabled={saving === c.name}
-                onClick={() => setProfile(c.name, c.profile === p ? 'none' : p)}
-                className={cn(
-                  'h-8 rounded-lg px-3.5 text-[13px] font-medium transition-all disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]',
-                  c.profile === p
-                    ? 'bg-[var(--brand)] text-[var(--brand-text)] shadow-[var(--shadow-sm)]'
-                    : 'bg-[var(--input-bg)] text-[var(--text-secondary)] hover:bg-[var(--active-overlay)] hover:text-[var(--text-primary)]',
-                )}
-              >
-                {p === 'formal' ? '正式' : '随意'}
-              </button>
-            ))}
-          </div>
+          <Combobox
+            value={c.profile}
+            options={profileOptions}
+            disabled={saving === c.name}
+            onChange={(v) => setProfileOf(c.name, v)}
+            className="w-40"
+          />
         </SettingsRow>
       ))}
     </SettingsGroup>
   );
 }
 
-/* ── 违禁词库 ── */
+/* ── 场景管理：场景列表 + 词库 ── */
 
-/** 违禁词编辑器（即时保存，移除显式保存按钮） */
-function RulesEditor() {
+/** 判定基线选项（L2 阈值与模型头按基线复用；对应高级设置的基线阈值配置） */
+const BASE_OPTIONS: ComboOption[] = [
+  { value: 'formal', label: '正式', hint: '较严' },
+  { value: 'casual', label: '个人', hint: '较宽' },
+];
+
+const BASE_LABEL: Record<string, string> = { formal: '正式基线', casual: '个人基线' };
+
+/** 场景管理页：上方场景列表（内置「正式」「个人」+ 自定义，共 ≤10），下方词库子分类 */
+function ScenariosPage() {
+  const [scenarios, setScenarios] = useState<ScenarioDto[]>([]);
+  useEffect(() => {
+    void api.listScenarios().then(setScenarios);
+  }, []);
+  return (
+    <div className="mx-auto max-w-3xl">
+      <h2 className="mb-1 text-xl font-semibold tracking-tight text-[var(--text-primary)]">场景管理</h2>
+      <p className="mb-5 text-[13px] text-[var(--text-tertiary)]">
+        场景决定对聊天对象的判定尺度；词库规则与对象画像均按场景生效。「正式」「个人」为内置场景。
+      </p>
+      <ScenarioList scenarios={scenarios} onChange={setScenarios} />
+      <RulesEditor scenarios={scenarios} />
+    </div>
+  );
+}
+
+function ScenarioList({
+  scenarios,
+  onChange,
+}: {
+  scenarios: ScenarioDto[];
+  onChange: (s: ScenarioDto[]) => void;
+}) {
+  const [dialog, setDialog] = useState<{ mode: 'add' } | { mode: 'edit'; target: ScenarioDto } | null>(null);
+  const [confirming, setConfirming] = useState<ScenarioDto | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = () =>
+    void api
+      .listScenarios()
+      .then(onChange)
+      .catch((e: Error) => setError(e.message || '场景加载失败'));
+
+  const remove = (s: ScenarioDto) => {
+    void api
+      .removeScenario(s.id)
+      .then(refresh)
+      .catch((e: Error) => setError(e.message || '删除失败'))
+      .finally(() => setConfirming(null));
+  };
+
+  return (
+    <section className="mb-8">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-[15px] font-semibold tracking-tight text-[var(--text-primary)]">场景</h3>
+        <span className="text-xs text-[var(--text-tertiary)]">{scenarios.length}/10</span>
+        <button
+          className="flex items-center gap-1.5 rounded-lg bg-[var(--brand)] px-3.5 py-2 text-sm font-medium text-[var(--brand-text)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--brand-hover)] disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+          disabled={scenarios.length >= 10}
+          onClick={() => setDialog({ mode: 'add' })}
+        >
+          <Plus className="size-4" />
+          新增场景
+        </button>
+      </div>
+
+      {error && (
+        <div className="mb-3 rounded-lg bg-[var(--danger-soft)] px-4 py-2 text-sm text-[var(--danger)]">
+          {error}
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {scenarios.map((s) => (
+          <div key={s.id} className="flex h-12 items-center gap-2.5 rounded-xl bg-[var(--group-bg)] px-4">
+            <span className="text-sm font-medium text-[var(--text-primary)]">{s.name}</span>
+            <span className="rounded-md bg-[var(--input-bg)] px-1.5 py-0.5 text-xs text-[var(--text-tertiary)]">
+              {s.fixed ? '内置' : BASE_LABEL[s.base] ?? s.base}
+            </span>
+            {!s.fixed && (
+              <div className="ml-auto flex gap-1">
+                <IconButton variant="ghost" size="sm" data-tip="编辑" onClick={() => setDialog({ mode: 'edit', target: s })}>
+                  <Pencil className="size-4" />
+                </IconButton>
+                <IconButton variant="ghost" size="sm" data-tip="删除" onClick={() => setConfirming(s)}>
+                  <Trash2 className="size-4 text-[var(--danger)]" />
+                </IconButton>
+              </div>
+            )}
+            {s.fixed && <span className="ml-auto text-xs text-[var(--text-tertiary)]">不可修改</span>}
+          </div>
+        ))}
+        {scenarios.length === 0 && (
+          <p className="py-8 text-center text-sm text-[var(--text-tertiary)]">场景加载中…</p>
+        )}
+      </div>
+
+      {dialog && (
+        <ScenarioDialog
+          initial={dialog.mode === 'edit' ? dialog.target : null}
+          onClose={() => setDialog(null)}
+          onSaved={refresh}
+        />
+      )}
+      {confirming && (
+        <Modal
+          open
+          title="删除场景"
+          onClose={() => setConfirming(null)}
+          footer={
+            <>
+              <ModalButton
+                className="bg-[var(--danger)] text-white hover:opacity-90"
+                onClick={() => remove(confirming)}
+              >
+                删除
+              </ModalButton>
+              <ModalButton onClick={() => setConfirming(null)}>取消</ModalButton>
+            </>
+          }
+        >
+          <p>
+            删除「{confirming.name}」后，适用该场景的词库规则将不再生效，标记为该场景的聊天对象一律按「正式」处理。
+          </p>
+        </Modal>
+      )}
+    </section>
+  );
+}
+
+/** 新增/编辑场景对话框 */
+function ScenarioDialog({
+  initial,
+  onClose,
+  onSaved,
+}: {
+  /** null = 新增 */
+  initial: ScenarioDto | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [name, setName] = useState(initial?.name ?? '');
+  const [base, setBase] = useState<'formal' | 'casual'>(initial?.base ?? 'formal');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const save = () => {
+    setBusy(true);
+    setError(null);
+    const p = initial ? api.updateScenario(initial.id, name, base) : api.addScenario(name, base);
+    void p
+      .then(() => {
+        onSaved();
+        onClose();
+      })
+      .catch((e: Error) => setError(e.message || '保存失败'))
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <Modal
+      open
+      title={initial ? '编辑场景' : '新增场景'}
+      onClose={onClose}
+      footer={
+        <>
+          <ModalButton variant="primary" disabled={busy || !name.trim()} onClick={save}>
+            保存
+          </ModalButton>
+          <ModalButton disabled={busy} onClick={onClose}>
+            取消
+          </ModalButton>
+        </>
+      }
+    >
+      <label className="mb-1.5 block text-[13px] font-medium text-[var(--text-secondary)]">场景名</label>
+      <input
+        autoFocus
+        className="h-9 w-full rounded-lg bg-[var(--input-bg)] px-3.5 text-sm text-[var(--text-primary)] outline-none transition-all duration-150 hover:bg-[var(--active-overlay)] focus:bg-[var(--panel-bg)] focus:shadow-[inset_0_0_0_1.5px_var(--brand)]"
+        value={name}
+        placeholder="如：工作群、家人"
+        maxLength={12}
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && name.trim() && save()}
+      />
+      <div className="mt-4 flex items-center gap-3">
+        <label className="shrink-0 text-[13px] font-medium text-[var(--text-secondary)]">判定基线</label>
+        <Combobox value={base} options={BASE_OPTIONS} onChange={(v) => setBase(v as 'formal' | 'casual')} className="w-44" />
+      </div>
+      <p className="mt-3 text-xs leading-relaxed text-[var(--text-tertiary)]">
+        基线决定语义模型的判定阈值（正式较严、个人较宽），词库规则始终按场景本身生效。
+      </p>
+      {error && <p className="mt-2.5 text-xs text-[var(--warning)]">{error}</p>}
+    </Modal>
+  );
+}
+
+const MATCH_OPTIONS: ComboOption[] = [
+  { value: 'word', label: '整词' },
+  { value: 'substring', label: '包含' },
+  { value: 'regex', label: '正则' },
+];
+
+/** 词库编辑器（即时保存，移除显式保存按钮）。场景管理页的子分类。 */
+function RulesEditor({ scenarios }: { scenarios: ScenarioDto[] }) {
   const [rules, setRules] = useState<import('../lib/types').RuleDto[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -538,7 +879,7 @@ function RulesEditor() {
   const add = () => {
     const updated = [
       ...rules,
-      { pattern: '', match: 'substring', severity: 'warn', applies_to: ['all'] },
+      { pattern: '', match: 'substring', applies_to: ['all'] },
     ];
     setRules(updated);
   };
@@ -549,15 +890,21 @@ function RulesEditor() {
     save(updated);
   };
 
+  /** 适用场景选项：全部 + 各场景（动态取自场景管理） */
+  const appliesOptions: ComboOption[] = [
+    { value: 'all', label: '全部场景' },
+    ...scenarios.map((s) => ({ value: s.id, label: s.name })),
+  ];
+
   const inputCls =
     'h-9 min-w-0 rounded-lg bg-[var(--input-bg)] px-3 text-sm text-[var(--text-primary)] outline-none transition-all duration-150 hover:bg-[var(--active-overlay)] focus:bg-[var(--panel-bg)] focus:shadow-[inset_0_0_0_1.5px_var(--brand)]';
 
   return (
-    <div className="mx-auto max-w-3xl">
-      <div className="mb-5 flex items-center justify-between">
+    <section>
+      <div className="mb-3 flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-semibold text-[var(--text-primary)]">违禁词库</h2>
-          <p className="mt-1 text-[13px] text-[var(--text-tertiary)]">
+          <h3 className="text-[15px] font-semibold tracking-tight text-[var(--text-primary)]">词库</h3>
+          <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">
             修改后自动保存 {saving && <span className="text-[var(--brand)]">· 保存中...</span>}
           </p>
         </div>
@@ -585,32 +932,18 @@ function RulesEditor() {
               placeholder="词/正则"
               onChange={(e) => update(i, { pattern: e.target.value })}
             />
-            <select
-              className={cn(inputCls, 'w-24 cursor-pointer')}
+            <Combobox
               value={r.match}
-              onChange={(e) => update(i, { match: e.target.value })}
-            >
-              <option value="word">整词</option>
-              <option value="substring">包含</option>
-              <option value="regex">正则</option>
-            </select>
-            <select
-              className={cn(inputCls, 'w-24 cursor-pointer')}
-              value={r.severity}
-              onChange={(e) => update(i, { severity: e.target.value })}
-            >
-              <option value="warn">警告</option>
-              <option value="block">阻断</option>
-            </select>
-            <select
-              className={cn(inputCls, 'w-28 cursor-pointer')}
+              options={MATCH_OPTIONS}
+              onChange={(v) => update(i, { match: v })}
+              className="w-24"
+            />
+            <Combobox
               value={r.applies_to[0] ?? 'all'}
-              onChange={(e) => update(i, { applies_to: [e.target.value] })}
-            >
-              <option value="all">全部场景</option>
-              <option value="formal">正式</option>
-              <option value="casual">随意</option>
-            </select>
+              options={appliesOptions}
+              onChange={(v) => update(i, { applies_to: [v] })}
+              className="w-32"
+            />
             <IconButton variant="ghost" onClick={() => remove(i)} data-tip="删除规则">
               <Trash2 className="size-4 text-[var(--danger)]" />
             </IconButton>
@@ -622,7 +955,7 @@ function RulesEditor() {
           </p>
         )}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -677,31 +1010,77 @@ function LogsGroup() {
 
 /* ── 关于 ── */
 
+/** 外部链接（主题色文字，点击经后端在外部浏览器打开；后端仅放行 https） */
+function ExtLink({ url, children }: { url: string; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={() => void api.openExternal(url).catch(() => {})}
+      className="font-medium text-[var(--brand)] underline underline-offset-2 transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+    >
+      {children}
+    </button>
+  );
+}
+
+/** 微信官方协议（腾讯发布；出处见 docs/合规与风险说明.md §2.1/§2.2） */
+const WECHAT_AGREEMENT =
+  'https://weixin.qq.com/cgi-bin/readtemplate?lang=zh_CN&t=weixin_agreement&s=default';
+const WECHAT_PERSONAL_RULES = 'https://weixin.qq.com/agreement/personal_account?lang=zh_CN';
+const REPO_URL = 'https://github.com/MonoKelvin/DangerChat';
+
 function AboutPage() {
   return (
     <div className="mx-auto max-w-2xl">
       <AboutHero name="危信" version="0.1.0" />
       <SettingsSection>
-        <SettingsGroup label="软件简介">
-          <SettingsRow label="做什么" stacked>
+        <SettingsGroup label="简介">
+          <SettingsRow stacked>
             <p className="text-sm leading-relaxed text-[var(--text-secondary)]">
-              危险言语提前拦截工具。截取屏幕画面在本机识别文字，在消息发出前提醒你。
+              危信是一款危险言语提前拦截工具：在消息发出前截取屏幕画面、在本机识别文字，
+              发现可能引发风险的措辞时弹窗提醒，帮你避免一时冲动发出不当言论。
+              全程纯本地运行，不依赖任何网络服务。
             </p>
           </SettingsRow>
-          <SettingsRow label="不做什么" stacked>
-            <ul className="space-y-1 text-sm text-[var(--text-secondary)]">
+        </SettingsGroup>
+
+        <SettingsGroup label="风险提示">
+          {/* 重点条款：主题色左边线 + 主题色强调，阅读时不可错过 */}
+          <SettingsRow stacked>
+            <div className="rounded-xl border-l-[3px] border-[var(--brand)] bg-[var(--brand-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--text-secondary)]">
+              <p>
+                本软件通过
+                <span className="font-semibold text-[var(--brand)]">截取屏幕画面并识别文字</span>
+                的方式工作，可能涉及第三方平台关于自动化操作与屏幕内容采集的相关条款，
+                由此产生的账号风险由使用者自行承担。使用前请阅读
+                <ExtLink url={WECHAT_AGREEMENT}>《微信软件许可及服务协议》</ExtLink>
+                与
+                <ExtLink url={WECHAT_PERSONAL_RULES}>《微信个人账号使用规范》</ExtLink>
+                并自行评估。
+              </p>
+            </div>
+          </SettingsRow>
+          <SettingsRow label="原则和底线" stacked>
+            <ul className="space-y-1 text-sm leading-relaxed text-[var(--text-secondary)]">
               <li>· 不注入或修改微信程序</li>
               <li>· 不读取或解密微信聊天记录文件</li>
               <li>· 不替你发送任何消息</li>
               <li>· 不把聊天内容上传到任何服务器（纯本地方案）</li>
+              <li>· 绝不触碰法律法规底线：不开发、不内置任何绕过监管或对抗审查的功能</li>
+              <li>· 绝不采集与拦截无关的数据：识别仅在内存中进行，落盘内容不包含消息原文</li>
             </ul>
           </SettingsRow>
-          <SettingsRow label="自行验证" stacked>
-            <ul className="space-y-1 text-sm text-[var(--text-secondary)]">
-              <li>· 用 Wireshark 抓包——默认配置下不发起任何网络连接</li>
-              <li>· 用 Process Monitor 观察——从不读取微信目录、不访问微信进程内存</li>
-              <li>· 源码完全公开，可自行审计与构建</li>
-            </ul>
+        </SettingsGroup>
+
+        <SettingsGroup label="开源信息">
+          <SettingsRow label="源码地址">
+            <ExtLink url={REPO_URL}>{REPO_URL.replace('https://', '')}</ExtLink>
+          </SettingsRow>
+          <SettingsRow label="作者">
+            <ExtLink url="https://github.com/MonoKelvin">Mono Kelvin</ExtLink>
+          </SettingsRow>
+          <SettingsRow label="许可证">
+            <ExtLink url={`${REPO_URL}/blob/main/LICENSE`}>MIT License</ExtLink>
           </SettingsRow>
         </SettingsGroup>
       </SettingsSection>

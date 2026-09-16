@@ -79,9 +79,7 @@ fn main() {
 
     let rgb = img.to_rgb8();
     let t1 = std::time::Instant::now();
-    let timed = ocr
-        .run_image_timed(&rgb)
-        .expect("OCR 推理失败");
+    let timed = ocr.run_image_timed(&rgb).expect("OCR 推理失败");
     let infer_ms = t1.elapsed().as_millis();
 
     println!(

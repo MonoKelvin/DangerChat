@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "dc_uitag",
+  "productName": "UiTag",
   "version": "0.1.0",
   "identifier": "com.dangerchat.uitag",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "dc_uitag 截图打标",
+        "title": "UiTag 截图打标",
         "width": 1180,
         "height": 760,
         "minWidth": 900,

@@ -68,14 +68,20 @@ struct Fixture {
 
 fn fixture() -> Fixture {
     let capture = Arc::new(MockStage::new("capture", vec![Ok(snapshot(640, 480))]));
-    let layout = Arc::new(MockStage::new("layout", vec![Ok(layout_with(vec![
-        ("msg_input", 10, 400, 600, 60),
-        ("chat_target", 10, 10, 300, 40),
-    ]))]));
+    let layout = Arc::new(MockStage::new(
+        "layout",
+        vec![Ok(layout_with(vec![
+            ("msg_input", 10, 400, 600, 60),
+            ("chat_target", 10, 10, 300, 40),
+        ]))],
+    ));
     let ocr = Arc::new(MockStage::new("ocr", vec![Ok(ocr_result("你好世界"))]));
-    let sem = Arc::new(MockStage::new("sem", vec![Ok(
-        Verdict::warn("测试判定").with_draft("你好世界", 42).with_target("测试对象"),
-    )]));
+    let sem = Arc::new(MockStage::new(
+        "sem",
+        vec![Ok(Verdict::warn("测试判定")
+            .with_draft("你好世界", 42)
+            .with_target("测试对象"))],
+    ));
     let slot = Arc::new(VerdictSlot::new());
     let clock = Arc::new(TestClock::new(1_000));
 
@@ -176,7 +182,11 @@ fn ut_grd_03_recoverable_clears_slot() {
     assert!(f.slot.load().is_some(), "先有判定");
 
     // ocr 下一轮 Recoverable
-    f.ocr.outputs.lock().unwrap().push_front(Err(StageError::Recoverable("OCR 抖动".into())));
+    f.ocr
+        .outputs
+        .lock()
+        .unwrap()
+        .push_front(Err(StageError::Recoverable("OCR 抖动".into())));
     let out = f.core.run_trigger(Trigger::Slow, request());
     assert!(matches!(out, TickOutcome::Cleared(msg) if msg.contains("OCR 抖动")));
     assert!(f.slot.load().is_none(), "fail-open：槽位清空");
@@ -186,7 +196,11 @@ fn ut_grd_03_recoverable_clears_slot() {
 #[test]
 fn fatal_disables_subsequent_triggers() {
     let f = fixture();
-    f.sem.outputs.lock().unwrap().push_front(Err(StageError::Fatal("模型损坏".into())));
+    f.sem
+        .outputs
+        .lock()
+        .unwrap()
+        .push_front(Err(StageError::Fatal("模型损坏".into())));
     let out = f.core.run_trigger(Trigger::Slow, request());
     assert!(matches!(out, TickOutcome::Fatal(m) if m.contains("模型损坏")));
     // 后续一切触发跳过
@@ -216,10 +230,14 @@ fn ut_grd_04_layout_cache_invalidation() {
     assert_eq!(f.layout.call_count(), before + 1, "缓存过期 → 升级 Slow");
 
     // 3) rect 变化（capture 返回不同 rect 的快照——构造新快照序列）
-    f.capture.outputs.lock().unwrap().push_front(Ok(WindowSnapshot {
-        window_rect: Rect::new(5, 5, 640, 480),
-        ..snapshot(640, 480)
-    }));
+    f.capture
+        .outputs
+        .lock()
+        .unwrap()
+        .push_front(Ok(WindowSnapshot {
+            window_rect: Rect::new(5, 5, 640, 480),
+            ..snapshot(640, 480)
+        }));
     f.core.run_trigger(Trigger::Slow, request()); // 重建缓存 rect=(5,5)
     let before = f.layout.call_count();
     f.core.run_trigger(Trigger::Fast, request());
@@ -234,7 +252,11 @@ fn ut_grd_05_ctx_snapshot_per_tick() {
     let f = fixture();
     // 两次触发各自拿到独立 ctx（run_id 递增）——由 ctx_factory 闭包保证；
     // 这里验证的是「一次 tick 失败不影响下一次」的快照隔离
-    f.ocr.outputs.lock().unwrap().push_front(Err(StageError::Recoverable("一次抖动".into())));
+    f.ocr
+        .outputs
+        .lock()
+        .unwrap()
+        .push_front(Err(StageError::Recoverable("一次抖动".into())));
     let out1 = f.core.run_trigger(Trigger::Slow, request());
     assert!(matches!(out1, TickOutcome::Cleared(_)));
     // 队列回到重复尾值 → 恢复成功
@@ -289,9 +311,16 @@ fn ut_grd_06_heartbeat_phash() {
     assert_eq!(f.layout.call_count(), c_layout, "零 layout 推理");
     assert_eq!(f.ocr.call_count(), c_ocr, "零 ocr 推理");
     assert_eq!(f.sem.call_count(), c_sem, "零 sem 推理");
-    assert_eq!(f.slot.load().map(|v| v.draft_epoch), stamp_before, "续期不改内容");
+    assert_eq!(
+        f.slot.load().map(|v| v.draft_epoch),
+        stamp_before,
+        "续期不改内容"
+    );
     // refresh 后 TTL 窗口内仍可读
-    assert!(f.slot.load_fresh(std::time::Duration::from_secs(10), 1_600).is_some());
+    assert!(f
+        .slot
+        .load_fresh(std::time::Duration::from_secs(10), 1_600)
+        .is_some());
 
     // 心跳 3：哈希变化（聊天对象切换）→ Slow
     *hash_cell.lock().unwrap() = 42;
@@ -319,5 +348,8 @@ fn ut_grd_07_layout_cache_conditions() {
     assert!(!c.reusable(HWND, Rect::new(1, 0, 100, 100), 5_000));
     // 过期（30s）
     assert!(!c.reusable(HWND, Rect::new(0, 0, 100, 100), 31_001));
-    assert!(c.reusable(HWND, Rect::new(0, 0, 100, 100), 30_999), "30s 内有效");
+    assert!(
+        c.reusable(HWND, Rect::new(0, 0, 100, 100), 30_999),
+        "30s 内有效"
+    );
 }

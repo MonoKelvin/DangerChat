@@ -21,6 +21,7 @@ import { ImageGrid } from './components/ImageGrid';
 import { RelabelMenu } from './components/RelabelMenu';
 import { ExportDialog } from './components/ExportDialog';
 import { ShortcutsHelp } from './components/ShortcutsHelp';
+import { AboutDialog } from './components/AboutDialog';
 import { ThemeToggle } from './components/ThemeToggle';
 import { WindowControls } from './components/WindowControls';
 import { Button } from './components/ui/button';
@@ -196,15 +197,10 @@ function App() {  const init = useStore((s) => s.init);
           }}
         >
           <div className="mr-1 flex items-center gap-2.5" data-tauri-drag-region>
-            <div className="flex size-6 items-center justify-center rounded-md bg-gradient-to-br from-orange-500 to-rose-500 text-[10px] font-bold text-white shadow-sm">
-              标
-            </div>
-            <div className="flex flex-col leading-none" data-tauri-drag-region>
-              <span className="text-[13px] font-semibold tracking-tight">dc_uitag</span>
-              <span className="mt-0.5 text-[10px] tracking-widest text-muted-foreground/70 uppercase">
-                annotator
-              </span>
-            </div>
+            <img src="app-icon.png" alt="UiTag" className="size-6 rounded-md shadow-sm" />
+            <span className="text-[13px] font-semibold tracking-tight" data-tauri-drag-region>
+              UiTag
+            </span>
           </div>
 
           <Separator orientation="vertical" className="mx-1.5 !h-5" />
@@ -236,6 +232,7 @@ function App() {  const init = useStore((s) => s.init);
           <Separator orientation="vertical" className="mx-1.5 !h-5" />
           <ThemeToggle />
           <ShortcutsHelp />
+          <AboutDialog />
 
           <div className="flex-1" />
 

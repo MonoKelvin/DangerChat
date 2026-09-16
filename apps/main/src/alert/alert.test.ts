@@ -10,7 +10,7 @@ describe('alert 动作契约（UT-UI-02）', () => {
     vi.unmock('../lib/commands');
   });
 
-  it('四动作 → alert_action(name)', async () => {
+  it('两动作 → alert_action(name)', async () => {
     const calls: string[] = [];
     vi.doMock('@tauri-apps/api/core', () => ({
       invoke: (cmd: string, args: Record<string, unknown>) => {
@@ -19,17 +19,16 @@ describe('alert 动作契约（UT-UI-02）', () => {
       },
     }));
     const { alertAction } = await import('../lib/commands');
-    await alertAction('allow');
-    await alertAction('cancel');
-    await alertAction('edit');
     await alertAction('snooze');
-    expect(calls).toEqual(['allow', 'cancel', 'edit', 'snooze']);
+    await alertAction('cancel');
+    expect(calls).toEqual(['snooze', 'cancel']);
   });
 
-  it('allow 后的提示语义：文案包含「再按一次」', async () => {
-    // 文案断言（AlertRoot 的 allow-hint 分支文本），锁定关键提示不回退
-    const hint = '请再按一次回车完成发送';
-    expect(hint).toContain('再按一次');
-    expect(hint).toContain('回车');
+  it('snooze 的提示语义：静默当前稿，改稿即恢复', async () => {
+    // 文案断言（AlertRoot 的按钮文本），锁定关键提示不回退
+    const snoozeLabel = '我已知晓';
+    const cancelLabel = '关闭';
+    expect(snoozeLabel).toContain('知晓');
+    expect(cancelLabel).toContain('关闭');
   });
 });

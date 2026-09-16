@@ -71,7 +71,15 @@ pub fn letterbox_chw(src: &RgbaImage, size: u32) -> (Vec<f32>, Letterbox) {
 }
 
 /// 检出框（letterbox 坐标系）→ 原图像素坐标 Rect，并 clamp 到图内。
-pub fn rect_to_src(geo: &Letterbox, x: f32, y: f32, w: f32, h: f32, src_w: u32, src_h: u32) -> Rect {
+pub fn rect_to_src(
+    geo: &Letterbox,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    src_w: u32,
+    src_h: u32,
+) -> Rect {
     let (x1, y1) = geo.to_src(x, y);
     let (x2, y2) = geo.to_src(x + w, y + h);
     let x1 = x1.clamp(0.0, src_w as f32);
@@ -117,7 +125,15 @@ mod tests {
     #[test]
     fn rect_roundtrip_and_clamp() {
         let geo = Letterbox::for_size(1068, 766, 640);
-        let r = rect_to_src(&geo, geo.pad_x, geo.pad_y, 100.0 * geo.scale, 50.0 * geo.scale, 1068, 766);
+        let r = rect_to_src(
+            &geo,
+            geo.pad_x,
+            geo.pad_y,
+            100.0 * geo.scale,
+            50.0 * geo.scale,
+            1068,
+            766,
+        );
         assert_eq!((r.x, r.y), (0, 0));
         assert_eq!((r.w, r.h), (100, 50));
 
@@ -142,6 +158,9 @@ mod tests {
         assert!((data[idx(0, 160, 320)] - 1.0).abs() < 1e-3, "R 通道");
         assert!(data[idx(1, 160, 320)].abs() < 1e-3, "G 通道");
         // 上边 padding 应为 114/255
-        assert!((data[idx(0, 80, 320)] - 114.0 / 255.0).abs() < 1e-3, "padding 值");
+        assert!(
+            (data[idx(0, 80, 320)] - 114.0 / 255.0).abs() < 1e-3,
+            "padding 值"
+        );
     }
 }

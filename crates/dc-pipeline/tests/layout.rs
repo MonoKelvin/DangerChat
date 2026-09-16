@@ -12,10 +12,38 @@ use image::RgbaImage;
 #[test]
 fn ut_lay_02_nms_overlapping_suppressed() {
     let dets = vec![
-        RawDet { x: 100.0, y: 100.0, w: 50.0, h: 50.0, class: 0, score: 0.9 },
-        RawDet { x: 102.0, y: 101.0, w: 50.0, h: 50.0, class: 0, score: 0.8 },
-        RawDet { x: 400.0, y: 100.0, w: 50.0, h: 50.0, class: 0, score: 0.7 },
-        RawDet { x: 100.0, y: 100.0, w: 60.0, h: 60.0, class: 1, score: 0.6 },
+        RawDet {
+            x: 100.0,
+            y: 100.0,
+            w: 50.0,
+            h: 50.0,
+            class: 0,
+            score: 0.9,
+        },
+        RawDet {
+            x: 102.0,
+            y: 101.0,
+            w: 50.0,
+            h: 50.0,
+            class: 0,
+            score: 0.8,
+        },
+        RawDet {
+            x: 400.0,
+            y: 100.0,
+            w: 50.0,
+            h: 50.0,
+            class: 0,
+            score: 0.7,
+        },
+        RawDet {
+            x: 100.0,
+            y: 100.0,
+            w: 60.0,
+            h: 60.0,
+            class: 1,
+            score: 0.6,
+        },
     ];
     let kept = nms(&dets, 0.5);
     assert_eq!(kept.len(), 3);
@@ -56,14 +84,26 @@ fn decode_and_map_tags_pipeline() {
     let names = vec!["chat_list".into(), "msg_input".into()];
     let regions = map_tags(&dets, &names, 0.45);
     assert_eq!(regions.len(), 2);
-    assert!(regions.iter().any(|r| r.tag == "chat_list" && (r.confidence - 0.9).abs() < 1e-6));
-    assert!(regions.iter().any(|r| r.tag == "msg_input" && (r.confidence - 0.8).abs() < 1e-6));
+    assert!(regions
+        .iter()
+        .any(|r| r.tag == "chat_list" && (r.confidence - 0.9).abs() < 1e-6));
+    assert!(regions
+        .iter()
+        .any(|r| r.tag == "msg_input" && (r.confidence - 0.8).abs() < 1e-6));
 }
 
 #[test]
 fn rect_inverse_transform_clamped() {
     let geo = Letterbox::for_size(530, 774, 640);
-    let r = rect_to_src(&geo, geo.pad_x, geo.pad_y, 100.0 * geo.scale, 50.0 * geo.scale, 530, 774);
+    let r = rect_to_src(
+        &geo,
+        geo.pad_x,
+        geo.pad_y,
+        100.0 * geo.scale,
+        50.0 * geo.scale,
+        530,
+        774,
+    );
     assert_eq!((r.x, r.y, r.w, r.h), (0, 0, 100, 50));
 }
 
@@ -131,7 +171,14 @@ fn module_ctx(model: &str) -> (ModuleContext, tempfile::TempDir) {
     let dir = tmp.path().join(model);
     std::fs::create_dir_all(&dir).unwrap();
     let stub = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-    let src = stub.join(format!("yolo-test-{model_kind}.onnx", model_kind = if model.contains("empty") { "empty" } else { "fixed" }));
+    let src = stub.join(format!(
+        "yolo-test-{model_kind}.onnx",
+        model_kind = if model.contains("empty") {
+            "empty"
+        } else {
+            "fixed"
+        }
+    ));
     std::fs::copy(&src, dir.join("model.onnx")).unwrap();
     std::fs::write(
         dir.join("model.toml"),
@@ -145,7 +192,10 @@ classes = ["chat_list", "chat_window", "chat_target", "msg_input"]
     .unwrap();
 
     let mut values = BTreeMap::new();
-    values.insert("layout.model".to_string(), ConfigValue::Str(model.to_string()));
+    values.insert(
+        "layout.model".to_string(),
+        ConfigValue::Str(model.to_string()),
+    );
     values.insert("device.prefer_gpu".to_string(), ConfigValue::Bool(false)); // 测试环境强制 CPU（UT-LAY-06 路径）
     let mctx = ModuleContext {
         config: Arc::new(dc_core::ConfigSnapshot::new(values, 1)),
@@ -168,7 +218,11 @@ fn run_ctx() -> PipelineContext {
     PipelineContext::new(
         RunId::from_raw("20260913-200000-000001"),
         LoopKind::Slow,
-        ImageLogSink::new(std::path::PathBuf::from("unused"), RunId::from_raw("x"), false),
+        ImageLogSink::new(
+            std::path::PathBuf::from("unused"),
+            RunId::from_raw("x"),
+            false,
+        ),
         Arc::new(dc_core::ConfigSnapshot::default()),
     )
 }
@@ -180,7 +234,9 @@ fn ut_lay_04_empty_detection_returns_empty_not_err() {
     let mut stage = LayoutStage::new();
     stage.init(&mctx).expect("stub-empty init 应成功");
 
-    let out = stage.process(snapshot(640, 480), &run_ctx()).expect("空检出不应 Err");
+    let out = stage
+        .process(snapshot(640, 480), &run_ctx())
+        .expect("空检出不应 Err");
     assert!(out.regions.is_empty());
 }
 
@@ -192,8 +248,15 @@ fn ut_lay_06_cpu_fallback_infers() {
     let mut stage = LayoutStage::new();
     stage.init(&mctx).expect("stub-fixed init 应成功");
 
-    let out = stage.process(snapshot(640, 480), &run_ctx()).expect("CPU 推理不应 Err");
-    assert_eq!(out.regions.len(), 1, "固定框桩应恰好检出 1 个: {:?}", out.regions);
+    let out = stage
+        .process(snapshot(640, 480), &run_ctx())
+        .expect("CPU 推理不应 Err");
+    assert_eq!(
+        out.regions.len(),
+        1,
+        "固定框桩应恰好检出 1 个: {:?}",
+        out.regions
+    );
     let r = &out.regions[0];
     assert_eq!(r.tag, "chat_list");
     assert!((r.confidence - 0.9).abs() < 1e-3, "score={}", r.confidence);
@@ -208,7 +271,10 @@ fn ut_lay_06_cpu_fallback_infers() {
 fn missing_model_is_fatal() {
     let tmp = tempfile::tempdir().unwrap();
     let mut values = BTreeMap::new();
-    values.insert("layout.model".to_string(), ConfigValue::Str("no-such".into()));
+    values.insert(
+        "layout.model".to_string(),
+        ConfigValue::Str("no-such".into()),
+    );
     let mctx = ModuleContext {
         config: Arc::new(dc_core::ConfigSnapshot::new(values, 1)),
         models: Arc::new(ModelStore::new(tmp.path())),
@@ -239,11 +305,17 @@ fn ut_lay_01_golden_regions_iou() {
     // ModuleContext 指向仓库根 models/，layout.model = layout-wechat
     let tmp = tempfile::tempdir().unwrap();
     let mut values = BTreeMap::new();
-    values.insert("layout.model".to_string(), ConfigValue::Str("layout-wechat".into()));
+    values.insert(
+        "layout.model".to_string(),
+        ConfigValue::Str("layout-wechat".into()),
+    );
     values.insert("device.prefer_gpu".to_string(), ConfigValue::Bool(false));
     // 34 张训练的模型置信度未校准（正确框可低至 ~0.16）；黄金测试验证几何正确性，
     // 阈值压低到 0.15。标满 73 张重训后应回归默认并重新校准。
-    values.insert("layout.conf_threshold".to_string(), ConfigValue::Float(0.15));
+    values.insert(
+        "layout.conf_threshold".to_string(),
+        ConfigValue::Float(0.15),
+    );
     let mctx = ModuleContext {
         config: Arc::new(dc_core::ConfigSnapshot::new(values, 1)),
         models: Arc::new(ModelStore::new(MODELS_ROOT)),
@@ -263,11 +335,18 @@ fn ut_lay_01_golden_regions_iou() {
         let img = image::open(golden_dir.join(name)).unwrap().to_rgba8();
         let snap = WindowSnapshot {
             image: img,
-            window_rect: Rect::new(0, 0, exp["size"][0].as_u64().unwrap() as u32, exp["size"][1].as_u64().unwrap() as u32),
+            window_rect: Rect::new(
+                0,
+                0,
+                exp["size"][0].as_u64().unwrap() as u32,
+                exp["size"][1].as_u64().unwrap() as u32,
+            ),
             dpi_scale: 1.0,
             captured_at: Instant::now(),
         };
-        let out = stage.process(snap, &ctx).unwrap_or_else(|e| panic!("{name} 推理失败：{e}"));
+        let out = stage
+            .process(snap, &ctx)
+            .unwrap_or_else(|e| panic!("{name} 推理失败：{e}"));
 
         for region in exp["regions"].as_array().unwrap() {
             let tag = region["tag"].as_str().unwrap();
@@ -278,7 +357,13 @@ fn ut_lay_01_golden_regions_iou() {
                 region["rect"][3].as_i64().unwrap() as u32,
             );
             let got = out.rect_of(tag).unwrap_or_else(|| {
-                panic!("{name}：未检出 {tag}（检出的 tag：{:?}）", out.regions.iter().map(|r| r.tag.as_str()).collect::<Vec<_>>())
+                panic!(
+                    "{name}：未检出 {tag}（检出的 tag：{:?}）",
+                    out.regions
+                        .iter()
+                        .map(|r| r.tag.as_str())
+                        .collect::<Vec<_>>()
+                )
             });
             let overlap = got.x.max(x)..(got.x + got.w as i32).min(x + w as i32);
             let overlap_y = got.y.max(y)..(got.y + got.h as i32).min(y + h as i32);

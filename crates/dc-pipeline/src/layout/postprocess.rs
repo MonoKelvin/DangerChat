@@ -75,20 +75,29 @@ pub fn iou(a: (f32, f32, f32, f32), b: (f32, f32, f32, f32)) -> f32 {
 }
 
 fn box_of(d: &RawDet) -> (f32, f32, f32, f32) {
-    (d.x - d.w / 2.0, d.y - d.h / 2.0, d.x + d.w / 2.0, d.y + d.h / 2.0)
+    (
+        d.x - d.w / 2.0,
+        d.y - d.h / 2.0,
+        d.x + d.w / 2.0,
+        d.y + d.h / 2.0,
+    )
 }
 
 /// 类别 NMS：同类别内按分数降序，IoU > threshold 的低分框被抑制。
 /// （跨类别不抑制——chat_window 与 chat_target 可能合法重叠。）
 pub fn nms(dets: &[RawDet], iou_threshold: f32) -> Vec<RawDet> {
     let mut sorted: Vec<&RawDet> = dets.iter().collect();
-    sorted.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    sorted.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let mut kept: Vec<RawDet> = Vec::new();
     for d in sorted {
         let bb = box_of(d);
-        let suppressed = kept.iter().any(|k| {
-            k.class == d.class && iou(box_of(k), bb) > iou_threshold
-        });
+        let suppressed = kept
+            .iter()
+            .any(|k| k.class == d.class && iou(box_of(k), bb) > iou_threshold);
         if !suppressed {
             kept.push(d.clone());
         }
@@ -99,11 +108,7 @@ pub fn nms(dets: &[RawDet], iou_threshold: f32) -> Vec<RawDet> {
 /// TagMapper：类别 index → tags.json 名称；每 tag 取置信度最高 1 个（v1.0），
 /// 输出为 Region（原图像素系坐标由调用方用 [`crate::layout::preprocess::rect_to_src`] 换算，
 /// 此处只做类别映射与排序）。
-pub fn map_tags(
-    dets: &[RawDet],
-    class_names: &[String],
-    conf_threshold: f32,
-) -> Vec<Region> {
+pub fn map_tags(dets: &[RawDet], class_names: &[String], conf_threshold: f32) -> Vec<Region> {
     let mut best: Vec<Region> = Vec::new();
     for d in dets.iter().filter(|d| d.score >= conf_threshold) {
         let Some(tag) = class_names.get(d.class) else {
@@ -139,7 +144,14 @@ mod tests {
     use super::*;
 
     fn det(x: f32, y: f32, w: f32, h: f32, class: usize, score: f32) -> RawDet {
-        RawDet { x, y, w, h, class, score }
+        RawDet {
+            x,
+            y,
+            w,
+            h,
+            class,
+            score,
+        }
     }
 
     /// UT-LAY-02：合成框 NMS——重叠抑制与阈值边界。
@@ -183,21 +195,43 @@ mod tests {
         let anchors = 3;
         // 手工构造 1×6×3：anchor0 → class1 分高；anchor1 → class0；anchor2 分数 NaN 跳过
         let mut data = vec![0f32; (4 + nc) * anchors];
-        data[0] = 10.0; data[3] = 20.0; data[6] = 5.0; data[9] = 6.0;   // cx
-        data[1] = 11.0; data[4] = 21.0; data[7] = 5.0; data[10] = 6.0;  // cy
-        data[2] = 12.0; data[5] = 22.0; data[8] = 5.0; data[11] = 6.0;  // w
-        data[3] = 13.0; data[6 + 3] = 23.0; data[9 + 3] = 5.0; data[12 + 3] = 6.0; // h（第 4 行）
-        // class 分数行（第 4/5 行）：重新明确写
+        data[0] = 10.0;
+        data[3] = 20.0;
+        data[6] = 5.0;
+        data[9] = 6.0; // cx
+        data[1] = 11.0;
+        data[4] = 21.0;
+        data[7] = 5.0;
+        data[10] = 6.0; // cy
+        data[2] = 12.0;
+        data[5] = 22.0;
+        data[8] = 5.0;
+        data[11] = 6.0; // w
+        data[3] = 13.0;
+        data[6 + 3] = 23.0;
+        data[9 + 3] = 5.0;
+        data[12 + 3] = 6.0; // h（第 4 行）
+                            // class 分数行（第 4/5 行）：重新明确写
         data.fill(0.0);
         // anchor0: cx,cy,w,h = 10,11,12,13; class0=0.1 class1=0.9
-        data[0] = 10.0; data[anchors] = 11.0; data[2 * anchors] = 12.0; data[3 * anchors] = 13.0;
-        data[4 * anchors] = 0.1; data[5 * anchors] = 0.9;
+        data[0] = 10.0;
+        data[anchors] = 11.0;
+        data[2 * anchors] = 12.0;
+        data[3 * anchors] = 13.0;
+        data[4 * anchors] = 0.1;
+        data[5 * anchors] = 0.9;
         // anchor1: class0=0.8 class1=0.2
-        data[1] = 20.0; data[anchors + 1] = 21.0; data[2 * anchors + 1] = 22.0; data[3 * anchors + 1] = 23.0;
-        data[4 * anchors + 1] = 0.8; data[5 * anchors + 1] = 0.2;
+        data[1] = 20.0;
+        data[anchors + 1] = 21.0;
+        data[2 * anchors + 1] = 22.0;
+        data[3 * anchors + 1] = 23.0;
+        data[4 * anchors + 1] = 0.8;
+        data[5 * anchors + 1] = 0.2;
         // anchor2: 全 NaN
-        data[2] = f32::NAN; data[anchors + 2] = f32::NAN;
-        data[4 * anchors + 2] = f32::NAN; data[5 * anchors + 2] = f32::NAN;
+        data[2] = f32::NAN;
+        data[anchors + 2] = f32::NAN;
+        data[4 * anchors + 2] = f32::NAN;
+        data[5 * anchors + 2] = f32::NAN;
 
         let dets = decode(&data, anchors, nc);
         assert_eq!(dets.len(), 2, "NaN 锚点应跳过: {dets:?}");

@@ -41,7 +41,7 @@ impl OcrStage {
     pub fn new() -> Self {
         Self {
             engine: None,
-            noise_words: vec!["发送".into(), "按住 说话".into()],
+            noise_words: vec!["发送".into(), "按住鼠标 语音输入文字".into()],
             min_conf: 0.5,
             upscale: true,
             metrics: MetricsRecorder::default(),
@@ -49,7 +49,11 @@ impl OcrStage {
     }
 
     /// ROI 裁剪（窗口图坐标系 → ROI 局部）+ 可选 2× 超分，转 RGB。
-    fn crop_roi(snapshot: &WindowSnapshot, rect: &dc_sys::Rect, upscale: bool) -> Option<image::RgbImage> {
+    fn crop_roi(
+        snapshot: &WindowSnapshot,
+        rect: &dc_sys::Rect,
+        upscale: bool,
+    ) -> Option<image::RgbImage> {
         let (w, h) = (snapshot.image.width(), snapshot.image.height());
         let x = rect.x.clamp(0, w as i32).max(0) as u32;
         let y = rect.y.clamp(0, h as i32).max(0) as u32;
@@ -191,7 +195,7 @@ impl Module for OcrStage {
             ConfigField {
                 key: "ocr.noise_words".into(),
                 ty: ConfigType::StrList,
-                default: ConfigValue::StrList(vec!["发送".into(), "按住 说话".into()]),
+                default: ConfigValue::StrList(vec!["发送".into(), "按住鼠标 语音输入文字".into()]),
                 label: "噪声词表".into(),
                 help: "整行命中即过滤（发送按钮一类）".into(),
                 group: "模型与设备".into(),
@@ -205,19 +209,19 @@ impl Module for OcrStage {
         let det = root.join("ocr-det-ppocrv4");
         let cls = root.join("ocr-cls-ppocrv20");
         let rec = root.join("ocr-rec-ppocrv4");
-        let paths =
-            engine::resolve_paths(&det, &cls, &rec).map_err(ModuleError::Fatal)?;
+        let paths = engine::resolve_paths(&det, &cls, &rec).map_err(ModuleError::Fatal)?;
         let intra = mctx.config.i64_or("device.intra_threads", 2).clamp(1, 4) as usize;
         let gpu = mctx.config.str_or("ocr.device", "direct-ml") == "direct-ml";
         let engine = engine::OcrEngine::new(&paths, intra, gpu).map_err(ModuleError::Fatal)?;
-        let default_noise: Vec<String> = vec!["发送".into(), "按住 说话".into()];
-        self.noise_words = mctx
-            .config
-            .str_list_or("ocr.noise_words", &default_noise);
+        let default_noise: Vec<String> = vec!["发送".into(), "按住鼠标 语音输入文字".into()];
+        self.noise_words = mctx.config.str_list_or("ocr.noise_words", &default_noise);
         self.min_conf = mctx.config.f64_or("ocr.min_conf", 0.5);
         self.upscale = mctx.config.bool_or("ocr.upscale", true);
         self.engine = Some(engine);
-        tracing::info!("OCR 引擎已加载（PP-OCRv4 mobile，{}）", if gpu { "DirectML GPU" } else { "CPU" });
+        tracing::info!(
+            "OCR 引擎已加载（PP-OCRv4 mobile，{}）",
+            if gpu { "DirectML GPU" } else { "CPU" }
+        );
         Ok(())
     }
 

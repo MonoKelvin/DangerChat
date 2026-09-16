@@ -67,7 +67,9 @@ fn main() -> ExitCode {
             let threads: usize = opt(&args, "--threads")
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(2);
-            let seq: usize = opt(&args, "--seq").and_then(|v| v.parse().ok()).unwrap_or(32);
+            let seq: usize = opt(&args, "--seq")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(32);
             let shape = parse_shape(&opt(&args, "--shape").unwrap_or_else(|| "1,1,28,28".into()));
             let ep = opt(&args, "--ep").unwrap_or_else(|| "both".to_string());
             let sessions: usize = opt(&args, "--sessions")
@@ -294,8 +296,10 @@ fn run_once(
     session: &mut Session,
     specs: &[(String, InputSpec)],
 ) -> Result<f64, Box<dyn std::error::Error>> {
-    let mut named: Vec<(std::borrow::Cow<'_, str>, ort::session::SessionInputValue<'_>)> =
-        Vec::with_capacity(specs.len());
+    let mut named: Vec<(
+        std::borrow::Cow<'_, str>,
+        ort::session::SessionInputValue<'_>,
+    )> = Vec::with_capacity(specs.len());
     for (name, spec) in specs {
         match spec {
             InputSpec::Tokens(seq) => {

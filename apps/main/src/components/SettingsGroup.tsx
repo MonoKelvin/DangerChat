@@ -30,7 +30,8 @@ export function SettingsRow({
   stacked,
   children,
 }: {
-  label: string;
+  /** 省略时为纯内容行（长段落一类） */
+  label?: string;
   subtitle?: string;
   /** 长内容时上下布局，默认左右 */
   stacked?: boolean;
@@ -40,18 +41,20 @@ export function SettingsRow({
     <div
       className={cn(
         'border-b border-[var(--divider)] px-5 py-3.5 last:border-b-0',
-        stacked ? 'flex-col items-stretch gap-3' : 'flex items-center justify-between gap-8',
+        stacked ? 'flex flex-col items-stretch gap-4' : 'flex items-center justify-between gap-8',
       )}
     >
-      <div className="min-w-0">
-        <p className={cn('text-sm font-medium text-[var(--text-primary)]', !subtitle && 'leading-6')}>
-          {label}
-        </p>
-        {subtitle && (
-          <p className="mt-0.5 text-[13px] leading-relaxed text-[var(--text-tertiary)]">{subtitle}</p>
-        )}
-      </div>
-      <div className={cn('shrink-0', stacked && 'w-full')}>{children}</div>
+      {label !== undefined && (
+        <div className="min-w-0">
+          <p className={cn('text-sm font-medium text-[var(--text-primary)]', !subtitle && 'leading-6')}>
+            {label}
+          </p>
+          {subtitle && (
+            <p className="mt-0.5 text-[13px] leading-relaxed text-[var(--text-tertiary)]">{subtitle}</p>
+          )}
+        </div>
+      )}
+      <div className={cn('shrink-0', stacked && 'w-full', label === undefined && 'w-full')}>{children}</div>
     </div>
   );
 }

@@ -244,11 +244,13 @@ where
         Vec::new()
     }
     fn init(&mut self, _ctx: &ModuleContext) -> Result<(), ModuleError> {
-        self.init_calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.init_calls
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Ok(())
     }
     fn shutdown(&mut self) -> Result<(), ModuleError> {
-        self.shutdown_calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.shutdown_calls
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Ok(())
     }
     fn metrics(&self) -> ModuleMetrics {
@@ -264,13 +266,21 @@ where
     type Input = I;
     type Output = O;
 
-    fn process(&self, input: Self::Input, _ctx: &PipelineContext) -> Result<Self::Output, StageError> {
-        self.calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    fn process(
+        &self,
+        input: Self::Input,
+        _ctx: &PipelineContext,
+    ) -> Result<Self::Output, StageError> {
+        self.calls
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.inputs
             .lock()
             .map(|mut v| v.push(format!("{input:?}")))
             .ok();
-        let mut q = self.outputs.lock().map_err(|_| StageError::Recoverable("mock 锁中毒".into()))?;
+        let mut q = self
+            .outputs
+            .lock()
+            .map_err(|_| StageError::Recoverable("mock 锁中毒".into()))?;
         if q.is_empty() {
             return Err(StageError::Recoverable(format!("{} 无预置输出", self.id)));
         }

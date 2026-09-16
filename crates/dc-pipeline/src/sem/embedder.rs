@@ -39,8 +39,8 @@ impl Embedder {
         let tokenizer = Tokenizer::from_file(&tokenizer_path)
             .map_err(|e| format!("tokenizer 加载失败：{e}"))?;
         // CPU（ADR-15：sem 默认 CPU；短文本 GPU 派发开销占主导）
-        let builder = ort::session::Session::builder()
-            .map_err(|e| format!("ort builder 失败：{e}"))?;
+        let builder =
+            ort::session::Session::builder().map_err(|e| format!("ort builder 失败：{e}"))?;
         let builder = builder
             .with_execution_providers([ort::ep::CPU::default().build()])
             .map_err(|e| format!("EP 配置失败：{e}"))?;
@@ -62,7 +62,12 @@ impl Embedder {
             .tokenizer
             .encode(text, true)
             .map_err(|e| StageError::Recoverable(format!("分词失败：{e}")))?;
-        let ids: Vec<i64> = enc.get_ids().iter().map(|&v| v as i64).take(MAX_SEQ).collect();
+        let ids: Vec<i64> = enc
+            .get_ids()
+            .iter()
+            .map(|&v| v as i64)
+            .take(MAX_SEQ)
+            .collect();
         let mask: Vec<i64> = enc
             .get_attention_mask()
             .iter()

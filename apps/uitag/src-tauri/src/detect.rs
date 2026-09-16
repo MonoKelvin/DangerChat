@@ -69,7 +69,11 @@ pub fn detect(path: &str, min_run: u32) -> Result<Vec<SnapLine>, String> {
 /// 扫描一对相邻基线的差异段：返回 (差异像素数, 起点索引, 终点索引)。
 /// 闭区间；差异段内允许 ≤ MAX_GAP 的间隙（图标/文字打断仍连续）。
 /// diff_fn(i) = 位置 i 处是否存在显著颜色差异。
-fn best_run(len: usize, min_run: u32, diff_fn: impl Fn(usize) -> bool) -> Option<(u32, usize, usize)> {
+fn best_run(
+    len: usize,
+    min_run: u32,
+    diff_fn: impl Fn(usize) -> bool,
+) -> Option<(u32, usize, usize)> {
     let mut best: Option<(u32, usize, usize)> = None;
     let mut x0 = 0usize;
     let mut diff_count = 0u32;
@@ -197,7 +201,11 @@ mod tests {
     #[test]
     fn detects_region_boundary() {
         let (buf, w, h) = solid(200, 100, |_, y| {
-            if y < 50 { [255, 255, 255] } else { [120, 120, 120] }
+            if y < 50 {
+                [255, 255, 255]
+            } else {
+                [120, 120, 120]
+            }
         });
         let lines = scan_horizontal(&buf, w, h, 100);
         assert_eq!(lines.len(), 1, "{lines:?}");
@@ -209,7 +217,13 @@ mod tests {
     /// 同色细线：白底中 1px 灰线 → 线附近一条水平线（相邻候选合并）
     #[test]
     fn detects_solid_thin_line() {
-        let (buf, w, h) = solid(200, 100, |_, y| if y == 50 { [120, 120, 120] } else { [255, 255, 255] });
+        let (buf, w, h) = solid(200, 100, |_, y| {
+            if y == 50 {
+                [120, 120, 120]
+            } else {
+                [255, 255, 255]
+            }
+        });
         let lines = scan_horizontal(&buf, w, h, 100);
         assert_eq!(lines.len(), 1, "{lines:?}");
         assert!((49..=50).contains(&lines[0].pos));
@@ -219,7 +233,11 @@ mod tests {
     #[test]
     fn ignores_short_runs() {
         let (buf, w, h) = solid(200, 100, |x, y| {
-            if y < 50 || x < 150 { [255, 255, 255] } else { [120, 120, 120] }
+            if y < 50 || x < 150 {
+                [255, 255, 255]
+            } else {
+                [120, 120, 120]
+            }
         });
         let lines = scan_horizontal(&buf, w, h, 100);
         assert!(lines.is_empty(), "{lines:?}");
@@ -229,7 +247,11 @@ mod tests {
     #[test]
     fn detects_vertical_boundary() {
         let (buf, w, h) = solid(100, 200, |x, _| {
-            if x < 40 { [255, 255, 255] } else { [90, 90, 90] }
+            if x < 40 {
+                [255, 255, 255]
+            } else {
+                [90, 90, 90]
+            }
         });
         let lines = scan_vertical(&buf, w, h, 100);
         assert_eq!(lines.len(), 1, "{lines:?}");
@@ -239,7 +261,13 @@ mod tests {
     /// 小噪声（每通道 ≤3）不触发；缓变渐变不会产生假线
     #[test]
     fn ignores_small_noise() {
-        let (buf, w, h) = solid(200, 100, |_, y| if y < 50 { [255, 255, 255] } else { [252, 252, 252] });
+        let (buf, w, h) = solid(200, 100, |_, y| {
+            if y < 50 {
+                [255, 255, 255]
+            } else {
+                [252, 252, 252]
+            }
+        });
         let lines = scan_horizontal(&buf, w, h, 100);
         assert!(lines.is_empty(), "{lines:?}");
     }
@@ -248,7 +276,11 @@ mod tests {
     #[test]
     fn detects_subtle_1px_border() {
         let (buf, w, h) = solid(200, 100, |_, y| {
-            if y == 50 { [232, 232, 232] } else { [244, 244, 244] }
+            if y == 50 {
+                [232, 232, 232]
+            } else {
+                [244, 244, 244]
+            }
         });
         let lines = scan_horizontal(&buf, w, h, 100);
         assert_eq!(lines.len(), 1, "{lines:?}");
@@ -259,7 +291,11 @@ mod tests {
     #[test]
     fn detects_subtle_panel_difference() {
         let (buf, w, h) = solid(200, 100, |_, y| {
-            if y < 50 { [255, 255, 255] } else { [242, 242, 242] }
+            if y < 50 {
+                [255, 255, 255]
+            } else {
+                [242, 242, 242]
+            }
         });
         let lines = scan_horizontal(&buf, w, h, 100);
         assert_eq!(lines.len(), 1, "{lines:?}");

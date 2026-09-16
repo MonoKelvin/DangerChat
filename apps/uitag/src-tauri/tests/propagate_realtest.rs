@@ -31,10 +31,34 @@ fn prop_real_screenshots_perf() {
 
     // 模拟典型四框（聊天列表左侧栏、输入框底部、对象名顶部、整窗口）
     let boxes = vec![
-        AnnoBox { tag: "chat_list".into(), x: 0.0, y: 100.0, w: 250.0, h: 600.0 },
-        AnnoBox { tag: "chat_window".into(), x: 250.0, y: 0.0, w: 700.0, h: 700.0 },
-        AnnoBox { tag: "chat_target".into(), x: 300.0, y: 10.0, w: 300.0, h: 60.0 },
-        AnnoBox { tag: "msg_input".into(), x: 260.0, y: 620.0, w: 680.0, h: 80.0 },
+        AnnoBox {
+            tag: "chat_list".into(),
+            x: 0.0,
+            y: 100.0,
+            w: 250.0,
+            h: 600.0,
+        },
+        AnnoBox {
+            tag: "chat_window".into(),
+            x: 250.0,
+            y: 0.0,
+            w: 700.0,
+            h: 700.0,
+        },
+        AnnoBox {
+            tag: "chat_target".into(),
+            x: 300.0,
+            y: 10.0,
+            w: 300.0,
+            h: 60.0,
+        },
+        AnnoBox {
+            tag: "msg_input".into(),
+            x: 260.0,
+            y: 620.0,
+            w: 680.0,
+            h: 80.0,
+        },
     ];
 
     let req = PropagateRequest {
@@ -47,7 +71,11 @@ fn prop_real_screenshots_perf() {
     let t0 = std::time::Instant::now();
     let results = propagate(&req).unwrap();
     let dt = t0.elapsed();
-    eprintln!("5 张图 × 4 框 = {:.2}s（{:.0}ms/框）", dt.as_secs_f64(), dt.as_millis() as f64 / 20.0);
+    eprintln!(
+        "5 张图 × 4 框 = {:.2}s（{:.0}ms/框）",
+        dt.as_secs_f64(),
+        dt.as_millis() as f64 / 20.0
+    );
     for r in &results {
         let file = r.path.rsplit(['\\', '/']).next().unwrap_or(&r.path);
         let summary: Vec<String> = r

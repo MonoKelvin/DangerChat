@@ -34,7 +34,13 @@ pub fn bootstrap(app: &tauri::AppHandle) -> Arc<AppState> {
     let log_center = LogCenter::init(LogOptions {
         dir: data_dir.join("logs"),
         prefix: "danger".into(),
-        level: "info".into(),
+        // debug 构建：info（开发可观测）；release：仅 warn 以上（终端用户无需 info 噪音）
+        level: if cfg!(debug_assertions) {
+            "info"
+        } else {
+            "warn"
+        }
+        .into(),
         retain_days: 7,
         max_total_mb: 64,
         console: cfg!(debug_assertions),
@@ -45,9 +51,8 @@ pub fn bootstrap(app: &tauri::AppHandle) -> Arc<AppState> {
     tracing::info!(dir = %data_dir.display(), "危信启动");
 
     // 2) 配置中心（模块 schema 注册 + finalize）
-    let config = Arc::new(
-        ConfigCenter::open(data_dir.join("config.toml")).expect("配置中心打开失败"),
-    );
+    let config =
+        Arc::new(ConfigCenter::open(data_dir.join("config.toml")).expect("配置中心打开失败"));
     {
         // intercept 的配置面是自由函数（含 target.process_name 等装配前需要的键）
         config
@@ -124,12 +129,19 @@ pub fn bootstrap(app: &tauri::AppHandle) -> Arc<AppState> {
         intercept: Arc::clone(&intercept),
         guard: std::sync::Mutex::new(None),
         target_process: std::sync::Mutex::new(target.clone()),
+        scenarios: std::sync::Mutex::new(dc_pipeline::sem::scenarios::ScenarioManager::load(
+            &data_dir.join("scenes.toml"),
+        )),
         stats: DailyStats::load(data_dir.join("stats.json")),
         countdown_secs: std::sync::Mutex::new(
             config.snapshot().i64_or("alert.timeout_secs", 10).max(1) as u64,
         ),
         data_dir: data_dir.clone(),
         default_data_dir: default_dir,
+        // 待清理旧目录：迁移成功后才写入（见 migrate_data_dir）
+        pending_cleanup: std::sync::Mutex::new(None),
+        // 退出信号：托盘「退出」置位，后台线程据此收敛（否则进程不终止）
+        shutdown: std::sync::atomic::AtomicBool::new(false),
         // logo 基础色相（暖红）：前端主题色切换时经 set_tray_hue 覆盖
         tray_hue_deg: std::sync::atomic::AtomicU32::new(11),
     });
@@ -142,19 +154,16 @@ pub fn bootstrap(app: &tauri::AppHandle) -> Arc<AppState> {
             r#"[[rule]]
 pattern = "sb"
 match = "word"
-severity = "block"
 applies_to = ["formal"]
 
 [[rule]]
 pattern = "(傻|沙)(比|逼|雕)"
 match = "regex"
-severity = "warn"
 applies_to = ["formal"]
 
 [[rule]]
 pattern = "卧槽"
 match = "substring"
-severity = "warn"
 applies_to = ["all"]
 "#,
         );
@@ -163,6 +172,7 @@ applies_to = ["all"]
     if !contacts.is_file() {
         let _ = std::fs::write(&contacts, "");
     }
+    // scenes.toml：缺失时由 ScenarioManager::load 兜底为仅内置场景，无需建文件
 
     tracing::info!(target = %target, "装配完成（等待目标窗口发现）");
     state

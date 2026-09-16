@@ -42,8 +42,8 @@ pub fn state_path() -> PathBuf {
 }
 
 pub fn save(autosave: &Autosave, path: &Path) -> Result<(), StateError> {
-    let text = serde_json::to_string_pretty(autosave)
-        .map_err(|e| StateError::Parse(e.to_string()))?;
+    let text =
+        serde_json::to_string_pretty(autosave).map_err(|e| StateError::Parse(e.to_string()))?;
     std::fs::write(path, text)?;
     Ok(())
 }
@@ -51,8 +51,8 @@ pub fn save(autosave: &Autosave, path: &Path) -> Result<(), StateError> {
 pub fn load(path: &Path) -> Result<Option<Autosave>, StateError> {
     match std::fs::read_to_string(path) {
         Ok(text) => {
-            let a: Autosave = serde_json::from_str(&text)
-                .map_err(|e| StateError::Parse(e.to_string()))?;
+            let a: Autosave =
+                serde_json::from_str(&text).map_err(|e| StateError::Parse(e.to_string()))?;
             Ok(Some(a))
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -63,9 +63,14 @@ pub fn load(path: &Path) -> Result<Option<Autosave>, StateError> {
 /// 打开（或切换）工作目录：展开图片清单；annotations.json 不存在则创建空文件，
 /// 存在则加载并把 key 统一成绝对路径（磁盘上可能存的是相对路径或旧版绝对路径）。
 /// 返回 (图片清单, 标注表)。
-pub fn open_workspace(dir: &Path) -> Result<(Vec<crate::import::ImageEntry>, Autosave), StateError> {
+pub fn open_workspace(
+    dir: &Path,
+) -> Result<(Vec<crate::import::ImageEntry>, Autosave), StateError> {
     if !dir.is_dir() {
-        return Err(StateError::Parse(format!("不是有效目录：{}", dir.display())));
+        return Err(StateError::Parse(format!(
+            "不是有效目录：{}",
+            dir.display()
+        )));
     }
     let images = crate::import::collect_images(&[dir.to_string_lossy().into_owned()]);
     let state_file = dir.join(STATE_FILE);
@@ -100,19 +105,13 @@ fn to_abs_path(base: &Path, key: &str) -> String {
 
 /// 保存到工作目录：内存中的绝对路径 key 转为相对工作目录的路径再落盘，
 /// 使 json 可随目录整体移动（图片相对路径引用）。
-pub fn save_workspace(
-    autosave: &Autosave,
-    dir: &Path,
-) -> Result<(), StateError> {
+pub fn save_workspace(autosave: &Autosave, dir: &Path) -> Result<(), StateError> {
     let mut rel_annos: HashMap<String, Vec<AnnoBox>> = HashMap::new();
     for (key, boxes) in &autosave.annos {
         let rel = to_rel_path(dir, key);
         rel_annos.insert(rel, boxes.clone());
     }
-    save(
-        &Autosave { annos: rel_annos },
-        &dir.join(STATE_FILE),
-    )
+    save(&Autosave { annos: rel_annos }, &dir.join(STATE_FILE))
 }
 
 /// 绝对路径 key → 工作目录相对路径（用 `/` 分隔，跨平台一致）。
@@ -133,7 +132,13 @@ mod tests {
     use super::*;
 
     fn box_of(tag: &str) -> AnnoBox {
-        AnnoBox { tag: tag.into(), x: 1.0, y: 2.0, w: 3.0, h: 4.0 }
+        AnnoBox {
+            tag: tag.into(),
+            x: 1.0,
+            y: 2.0,
+            w: 3.0,
+            h: 4.0,
+        }
     }
 
     #[test]
@@ -143,7 +148,13 @@ mod tests {
         let mut a = Autosave::default();
         a.annos.insert(
             "C:\\img\\a.png".into(),
-            vec![AnnoBox { tag: "msg_input".into(), x: 10.0, y: 20.0, w: 100.0, h: 50.0 }],
+            vec![AnnoBox {
+                tag: "msg_input".into(),
+                x: 10.0,
+                y: 20.0,
+                w: 100.0,
+                h: 50.0,
+            }],
         );
         save(&a, &path).unwrap();
         let loaded = load(&path).unwrap().unwrap();
@@ -178,15 +189,24 @@ mod tests {
         let mut disk = Autosave::default();
         disk.annos.insert("a.png".into(), vec![box_of("chat_list")]);
         let abs_b = tmp.path().join("b.png");
+        disk.annos.insert(
+            abs_b.to_string_lossy().into_owned(),
+            vec![box_of("msg_input")],
+        );
         disk.annos
-            .insert(abs_b.to_string_lossy().into_owned(), vec![box_of("msg_input")]);
-        disk.annos.insert("gone.png".into(), vec![box_of("chat_target")]);
+            .insert("gone.png".into(), vec![box_of("chat_target")]);
         save(&disk, &tmp.path().join(STATE_FILE)).unwrap();
 
         let (_, loaded) = open_workspace(tmp.path()).unwrap();
         let expect_abs = |name: &str| tmp.path().join(name).to_string_lossy().into_owned();
-        assert_eq!(loaded.annos[&expect_abs("a.png")], vec![box_of("chat_list")]);
-        assert_eq!(loaded.annos[&expect_abs("b.png")], vec![box_of("msg_input")]);
+        assert_eq!(
+            loaded.annos[&expect_abs("a.png")],
+            vec![box_of("chat_list")]
+        );
+        assert_eq!(
+            loaded.annos[&expect_abs("b.png")],
+            vec![box_of("msg_input")]
+        );
         assert_eq!(
             loaded.annos[&tmp.path().join("gone.png").to_string_lossy().into_owned()],
             vec![box_of("chat_target")]

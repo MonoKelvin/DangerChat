@@ -34,11 +34,11 @@ pub use contract::{
     RegionLayout, Stage, StageError, TextBlock, WindowSnapshot, TAG_CHAT_LIST, TAG_CHAT_TARGET,
     TAG_CHAT_WINDOW, TAG_MSG_INPUT,
 };
-pub use layout::LayoutStage;
-pub use ocr::OcrStage;
 pub use intercept::{
     config_schema as intercept_config_schema, AlertAction, AlertBus, AlertBusError, AlertMessage,
     DraftTracker, ForegroundTracker, GuardEvent, GuardState, Intercept, InterceptConfig,
     InterceptDeps, InterceptGuard, SendKey, Trigger, TriggerBus,
 };
+pub use layout::LayoutStage;
+pub use ocr::OcrStage;
 pub use verdict::{draft_fingerprint, Verdict, VerdictLevel, VerdictSlot};

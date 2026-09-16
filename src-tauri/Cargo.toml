@@ -22,10 +22,12 @@ dc-pipeline.workspace = true
 dc-bridge.workspace = true
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-autostart = "2"
+tauri-plugin-single-instance = "2"
 image = { workspace = true }
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
+tauri-plugin-opener = "2.5.5"
 
 [lints]
 workspace = true

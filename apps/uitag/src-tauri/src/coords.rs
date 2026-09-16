@@ -20,12 +20,7 @@ pub fn to_yolo_line(b: &AnnoBox, img_w: u32, img_h: u32, class_id: usize) -> Opt
 }
 
 /// YOLO 归一化行 → 像素矩形（UT-TAG-01 的往返路径）。
-pub fn from_yolo_line(
-    line: &str,
-    img_w: u32,
-    img_h: u32,
-    tag: &str,
-) -> Option<AnnoBox> {
+pub fn from_yolo_line(line: &str, img_w: u32, img_h: u32, tag: &str) -> Option<AnnoBox> {
     let (w, h) = (img_w as f64, img_h as f64);
     let mut it = line.split_whitespace();
     let _class = it.next()?;
@@ -51,15 +46,59 @@ mod tests {
     #[test]
     fn ut_tag_01_pixel_yolo_roundtrip() {
         let cases: Vec<(u32, u32, AnnoBox)> = vec![
-            (1068, 766, AnnoBox { tag: "a".into(), x: 100.0, y: 50.0, w: 300.0, h: 200.0 }),
-            (530, 774, AnnoBox { tag: "a".into(), x: 13.0, y: 7.0, w: 127.0, h: 251.0 }),
-            (530, 774, AnnoBox { tag: "a".into(), x: 0.0, y: 0.0, w: 530.0, h: 774.0 }),
-            (1920, 1080, AnnoBox { tag: "a".into(), x: 0.5, y: 0.25, w: 1.0, h: 2.0 }),
+            (
+                1068,
+                766,
+                AnnoBox {
+                    tag: "a".into(),
+                    x: 100.0,
+                    y: 50.0,
+                    w: 300.0,
+                    h: 200.0,
+                },
+            ),
+            (
+                530,
+                774,
+                AnnoBox {
+                    tag: "a".into(),
+                    x: 13.0,
+                    y: 7.0,
+                    w: 127.0,
+                    h: 251.0,
+                },
+            ),
+            (
+                530,
+                774,
+                AnnoBox {
+                    tag: "a".into(),
+                    x: 0.0,
+                    y: 0.0,
+                    w: 530.0,
+                    h: 774.0,
+                },
+            ),
+            (
+                1920,
+                1080,
+                AnnoBox {
+                    tag: "a".into(),
+                    x: 0.5,
+                    y: 0.25,
+                    w: 1.0,
+                    h: 2.0,
+                },
+            ),
         ];
         for (iw, ih, b) in cases {
             let line = to_yolo_line(&b, iw, ih, 0).unwrap();
             let back = from_yolo_line(&line, iw, ih, &b.tag).unwrap();
-            assert!((back.x - b.x).abs() < 1e-4, "x drift on {iw}x{ih}: {}", back.x - b.x);
+            assert!(
+                (back.x - b.x).abs() < 1e-4,
+                "x drift on {iw}x{ih}: {}",
+                back.x - b.x
+            );
             assert!((back.y - b.y).abs() < 1e-4, "y drift on {iw}x{ih}");
             assert!((back.w - b.w).abs() < 1e-4, "w drift on {iw}x{ih}");
             assert!((back.h - b.h).abs() < 1e-4, "h drift on {iw}x{ih}");
@@ -68,14 +107,29 @@ mod tests {
 
     #[test]
     fn yolo_line_format() {
-        let b = AnnoBox { tag: "t".into(), x: 0.0, y: 0.0, w: 100.0, h: 50.0 };
+        let b = AnnoBox {
+            tag: "t".into(),
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 50.0,
+        };
         let line = to_yolo_line(&b, 200, 100, 2).unwrap();
-        assert_eq!(line, "2 0.2500000000 0.2500000000 0.5000000000 0.5000000000");
+        assert_eq!(
+            line,
+            "2 0.2500000000 0.2500000000 0.5000000000 0.5000000000"
+        );
     }
 
     #[test]
     fn zero_size_image_returns_none() {
-        let b = AnnoBox { tag: "t".into(), x: 0.0, y: 0.0, w: 1.0, h: 1.0 };
+        let b = AnnoBox {
+            tag: "t".into(),
+            x: 0.0,
+            y: 0.0,
+            w: 1.0,
+            h: 1.0,
+        };
         assert!(to_yolo_line(&b, 0, 100, 0).is_none());
     }
 }

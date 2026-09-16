@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ConfigFieldDto, ContactDto, RuleDto, StatusPayload } from './types';
+import type { ConfigFieldDto, ContactDto, RuleDto, ScenarioDto, StatusPayload } from './types';
 
 export async function getConfigSchema(): Promise<ConfigFieldDto[]> {
   return invoke<ConfigFieldDto[]>('get_config_schema');
@@ -29,6 +29,26 @@ export async function saveRules(rules: RuleDto[]): Promise<void> {
   return invoke('save_rules', { rules });
 }
 
+export async function listScenarios(): Promise<ScenarioDto[]> {
+  return invoke<ScenarioDto[]>('list_scenarios');
+}
+
+export async function addScenario(name: string, base: 'formal' | 'casual'): Promise<ScenarioDto> {
+  return invoke<ScenarioDto>('add_scenario', { name, base });
+}
+
+export async function updateScenario(
+  id: string,
+  name: string,
+  base: 'formal' | 'casual',
+): Promise<ScenarioDto> {
+  return invoke<ScenarioDto>('update_scenario', { id, name, base });
+}
+
+export async function removeScenario(id: string): Promise<void> {
+  return invoke('remove_scenario', { id });
+}
+
 export async function pauseGuard(): Promise<void> {
   return invoke('pause_guard');
 }
@@ -45,7 +65,7 @@ export async function clearLogs(): Promise<void> {
   return invoke('clear_logs');
 }
 
-export async function alertAction(action: 'allow' | 'cancel' | 'edit' | 'snooze'): Promise<void> {
+export async function alertAction(action: 'cancel' | 'snooze'): Promise<void> {
   return invoke('alert_action', { action });
 }
 
@@ -66,6 +86,32 @@ export async function setDataDir(path: string): Promise<void> {
   return invoke('set_data_dir', { path });
 }
 
+export interface MigrateReport {
+  /** 已复制的文件数 */
+  files: number;
+  /** 已复制的总字节数 */
+  bytes: number;
+  /** 目标目录（迁移后生效位置） */
+  target: string;
+  /** 迁移前的旧目录（「删除旧目录」选项用） */
+  previous: string;
+}
+
+/** 一键迁移数据目录：复制全部数据到 target 并写指针（重启生效，旧目录保留） */
+export async function migrateDataDir(target: string): Promise<MigrateReport> {
+  return invoke<MigrateReport>('migrate_data_dir', { target });
+}
+
+/** 删除迁移后的旧数据目录（后端会二次校验路径安全性）。 */
+export async function deleteOldDataDir(path: string): Promise<void> {
+  return invoke('delete_old_data_dir', { path });
+}
+
+/** 重启应用（数据目录变更需重启生效）。 */
+export async function restartApp(): Promise<void> {
+  return invoke('restart_app');
+}
+
 export async function openDataDir(): Promise<void> {
   return invoke('open_data_dir');
 }
@@ -82,4 +128,9 @@ export function agreeNotice(): void {
 /** 主题色切换 → 托盘图标同步按该色相着色（即时刷新） */
 export async function setTrayHue(hue: number): Promise<void> {
   return invoke('set_tray_hue', { hue });
+}
+
+/** 外部浏览器打开链接（后端仅放行 https） */
+export async function openExternal(url: string): Promise<void> {
+  return invoke('open_external', { url });
 }

@@ -12,9 +12,10 @@ pub mod contacts;
 pub mod embedder;
 pub mod head;
 pub mod rules;
+pub mod scenarios;
 
-use std::time::Instant;
 use std::sync::RwLock;
+use std::time::Instant;
 
 use dc_core::{
     ConfigField, ConfigType, ConfigValue, MetricsRecorder, ModuleContext, ModuleError,
@@ -25,6 +26,7 @@ use crate::contract::{Module, OcrResult, PipelineContext, Stage, StageError};
 use crate::verdict::Verdict;
 use contacts::ContactBook;
 use rules::{Profile, RuleSet};
+use scenarios::ScenarioManager;
 
 /// 阈值（§5.7；默认值待 ≥200 条样本校准后定稿）。
 pub const THRESHOLD_FORMAL: f32 = 0.55;
@@ -35,6 +37,8 @@ pub const BLOCK_MARGIN: f32 = 0.15;
 pub struct SemStage {
     rules: RwLock<RuleSet>,
     contacts: RwLock<ContactBook>,
+    /// 场景表（id/名称/基线；L1 过滤键与 L2 基线折算的唯一来源）
+    scenarios: RwLock<ScenarioManager>,
     /// L2 三件：None = 未加载（fail-open 仅 L1）。
     embedder: Option<embedder::Embedder>,
     heads: head::Heads,
@@ -58,6 +62,7 @@ impl SemStage {
                 panic!("空规则集构造失败")
             })),
             contacts: RwLock::new(ContactBook::default()),
+            scenarios: RwLock::new(ScenarioManager::builtin_only()),
             embedder: None,
             heads: head::Heads::fallback_only(),
             l2_enabled: false,
@@ -72,6 +77,7 @@ impl SemStage {
         Self {
             rules: RwLock::new(rules),
             contacts: RwLock::new(contacts),
+            scenarios: RwLock::new(ScenarioManager::builtin_only()),
             embedder: None,
             heads: head::Heads::fallback_only(),
             l2_enabled: false,
@@ -81,8 +87,13 @@ impl SemStage {
         }
     }
 
-    /// 热重载规则和联系人（保存后由前端触发）。
-    pub fn reload_rules_and_contacts(&self, rules_path: &str, contacts_path: &str) {
+    /// 热重载规则/联系人/场景（保存后由前端触发）。
+    pub fn reload_rules_and_contacts(
+        &self,
+        rules_path: &str,
+        contacts_path: &str,
+        scenes_path: &str,
+    ) {
         // 重载规则
         match std::fs::read_to_string(rules_path) {
             Ok(text) => match RuleSet::from_toml(&text) {
@@ -98,8 +109,8 @@ impl SemStage {
         }
 
         // 重载联系人
-        match std::fs::read_to_string(contacts_path) {
-            Ok(text) => match ContactBook::from_toml(&text) {
+        if let Ok(text) = std::fs::read_to_string(contacts_path) {
+            match ContactBook::from_toml(&text) {
                 Ok(cb) => {
                     if let Ok(mut w) = self.contacts.write() {
                         *w = cb;
@@ -107,8 +118,13 @@ impl SemStage {
                     }
                 }
                 Err(e) => tracing::warn!(error = %e, "联系人画像解析失败，保持原有画像"),
-            },
-            Err(_) => {}
+            }
+        }
+
+        // 重载场景（文件即真相；缺失/非法由 load 内部兜底为仅内置场景）
+        if let Ok(mut w) = self.scenarios.write() {
+            *w = ScenarioManager::load(std::path::Path::new(scenes_path));
+            tracing::info!(path = %scenes_path, "场景表热重载");
         }
     }
 
@@ -116,16 +132,24 @@ impl SemStage {
     pub fn judge(&self, input: &OcrResult) -> Verdict {
         let draft = input.draft_text.trim();
 
-        // 读取联系人画像（使用 RwLock）
-        let profile = self.contacts.read()
-            .ok()
-            .map(|c| c.profile_of(input.chat_target.as_deref().unwrap_or("")))
-            .unwrap_or(Profile::Formal);
-
+        // 读取联系人画像 → 场景 id；经场景表折算展示名与 L2 基线
+        // （RwLock 中毒 → 空串 → 场景表按未知 id 兜底为 formal）
+        let scenario_id = self
+            .contacts
+            .read()
+            .map(|c| {
+                c.profile_of(input.chat_target.as_deref().unwrap_or(""))
+                    .to_string()
+            })
+            .unwrap_or_default();
+        let (scenario_name, base) = match self.scenarios.read() {
+            Ok(sm) => (sm.name_of(&scenario_id), sm.base_profile(&scenario_id)),
+            Err(_) => (scenario_id.clone(), Profile::Formal),
+        };
         // L1（永远启用，毫秒级；命中短路）
         if let Ok(rules) = self.rules.read() {
-            if let Some(hit) = rules.first_hit(draft, profile) {
-                return Verdict::from_rule(&hit.pattern, hit.severity.into());
+            if let Some(hit) = rules.first_hit(draft, &scenario_id) {
+                return Verdict::from_rule(&hit.pattern);
             }
         }
 
@@ -136,20 +160,21 @@ impl SemStage {
 
         // L2（可开关；Embedder 缺失 = fail-open 仅 L1）
         if self.l2_enabled && self.embedder.is_some() {
-            if let Some(score) = self.l2_score(draft, profile) {
-                let threshold = match profile {
+            if let Some(score) = self.l2_score(draft, base) {
+                let threshold = match base {
                     Profile::Formal => self.threshold_formal,
                     Profile::Casual => self.threshold_casual,
                 };
                 let mut v = Verdict::from_score(score, threshold);
                 if v.level != crate::verdict::VerdictLevel::Safe {
-                    let mode = if self.heads.has_weights(profile) {
+                    // has_weights 只接受 Profile（双头按基线复用，不随场景数增长）
+                    let mode = if self.heads.has_weights(base) {
                         "危险分"
                     } else {
                         "兜底相似度"
                     };
                     v.reasons.push(format!(
-                        "与{profile}场景语义不匹配，{mode} {score:.2} ≥ {threshold:.2}"
+                        "与「{scenario_name}」场景语义不匹配，{mode} {score:.2} ≥ {threshold:.2}"
                     ));
                 }
                 return v;
@@ -160,17 +185,20 @@ impl SemStage {
     }
 
     /// L2 打分。头缺失/推理失败 → None（调用方回 Safe；fail-open）。
-    fn l2_score(&self, draft: &str, profile: Profile) -> Option<f32> {
+    fn l2_score(&self, draft: &str, base: Profile) -> Option<f32> {
         let embedder = self.embedder.as_ref()?;
         let embed = embedder.embed(draft).ok()?;
-        self.heads.score(&embed, profile)
+        self.heads.score(&embed, base)
     }
 
     fn run(&self, input: OcrResult, ctx: &PipelineContext) -> Result<Verdict, StageError> {
         ctx.cancel.check()?;
         let verdict = self.judge(&input);
         Ok(verdict
-            .with_draft(input.draft_text.clone(), crate::verdict::draft_fingerprint(&input.draft_text))
+            .with_draft(
+                input.draft_text.clone(),
+                crate::verdict::draft_fingerprint(&input.draft_text),
+            )
             .with_target(input.chat_target.clone().unwrap_or_default()))
     }
 }
@@ -195,8 +223,8 @@ impl Module for SemStage {
                 key: "sem.threshold.formal".into(),
                 ty: ConfigType::Float { min: 0.1, max: 0.9 },
                 default: ConfigValue::Float(THRESHOLD_FORMAL as f64),
-                label: "正式场景阈值".into(),
-                help: "危险分超过该值告警，+0.15 内为警告，再高为阻断".into(),
+                label: "正式基线阈值".into(),
+                help: "正式及基于正式基线的自定义场景使用；危险分超过该值告警，+0.15 内为警告，再高为阻断".into(),
                 group: "拦截与提示".into(),
                 owner: "sem".into(),
             },
@@ -204,8 +232,8 @@ impl Module for SemStage {
                 key: "sem.threshold.casual".into(),
                 ty: ConfigType::Float { min: 0.1, max: 0.9 },
                 default: ConfigValue::Float(THRESHOLD_CASUAL as f64),
-                label: "随意场景阈值".into(),
-                help: "同上，随意（好友/家人）场景".into(),
+                label: "个人基线阈值".into(),
+                help: "同上，个人及基于个人基线的自定义场景使用".into(),
                 group: "拦截与提示".into(),
                 owner: "sem".into(),
             },
@@ -267,10 +295,24 @@ impl Module for SemStage {
             }
         }
 
+        // 场景表（数据目录根 scenes.toml；缺失 = 仅内置场景）
+        let scenes_path = mctx
+            .log_dir
+            .parent()
+            .map(|d| d.join("scenes.toml"))
+            .unwrap_or_else(|| std::path::PathBuf::from("scenes.toml"));
+        if let Ok(mut w) = self.scenarios.write() {
+            *w = ScenarioManager::load(&scenes_path);
+        }
+
         // L2：模型 + 头
         self.l2_enabled = mctx.config.bool_or("sem.l2_enabled", true);
-        self.threshold_formal = mctx.config.f64_or("sem.threshold.formal", THRESHOLD_FORMAL as f64) as f32;
-        self.threshold_casual = mctx.config.f64_or("sem.threshold.casual", THRESHOLD_CASUAL as f64) as f32;
+        self.threshold_formal =
+            mctx.config
+                .f64_or("sem.threshold.formal", THRESHOLD_FORMAL as f64) as f32;
+        self.threshold_casual =
+            mctx.config
+                .f64_or("sem.threshold.casual", THRESHOLD_CASUAL as f64) as f32;
 
         if self.l2_enabled {
             let root = mctx.models.root().to_path_buf();
@@ -307,7 +349,11 @@ impl Stage for SemStage {
     type Input = OcrResult;
     type Output = Verdict;
 
-    fn process(&self, input: Self::Input, ctx: &PipelineContext) -> Result<Self::Output, StageError> {
+    fn process(
+        &self,
+        input: Self::Input,
+        ctx: &PipelineContext,
+    ) -> Result<Self::Output, StageError> {
         let started = Instant::now();
         let result = self.run(input, ctx);
         self.metrics.record(started.elapsed());
@@ -340,7 +386,6 @@ mod tests {
         let rules = RuleSet::from_defs(vec![rules::RuleDef {
             pattern: "sb".into(),
             r#match: rules::MatchKind::Word,
-            severity: rules::Severity::Block,
             applies_to: vec!["formal".into()],
         }])
         .unwrap();
@@ -361,7 +406,6 @@ profile = "casual"
         let v = s.judge(&ocr("你是 sb", Some("张总")));
         assert_eq!(v.level, crate::verdict::VerdictLevel::Block);
         assert!(v.reasons[0].contains("sb"));
-        assert!(v.reasons[0].contains("block"));
     }
 
     /// UT-SEM-02：未标记对象按 formal 保守处理。
@@ -384,8 +428,14 @@ profile = "casual"
     #[test]
     fn empty_draft_safe() {
         let s = stage();
-        assert_eq!(s.judge(&ocr("", None)).level, crate::verdict::VerdictLevel::Safe);
-        assert_eq!(s.judge(&ocr("   ", None)).level, crate::verdict::VerdictLevel::Safe);
+        assert_eq!(
+            s.judge(&ocr("", None)).level,
+            crate::verdict::VerdictLevel::Safe
+        );
+        assert_eq!(
+            s.judge(&ocr("   ", None)).level,
+            crate::verdict::VerdictLevel::Safe
+        );
     }
 
     /// UT-SEM-05：模型未加载（fail-open）→ 仅 L1，无 panic。
@@ -393,7 +443,10 @@ profile = "casual"
     fn no_embedder_l1_only() {
         let s = stage();
         // L2 关闭路径：非规则文本 → Safe（不因模型缺失而 Err/panic）
-        assert_eq!(s.judge(&ocr("普通工作消息", None)).level, crate::verdict::VerdictLevel::Safe);
+        assert_eq!(
+            s.judge(&ocr("普通工作消息", None)).level,
+            crate::verdict::VerdictLevel::Safe
+        );
     }
 
     /// 阈值边界（UT-SEM-04 的纯函数半边；带 L2 的在 tests/sem.rs）。

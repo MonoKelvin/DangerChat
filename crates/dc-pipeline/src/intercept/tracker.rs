@@ -1,28 +1,23 @@
-//! 纪元跟踪（§2.2「草稿纪元 draft epoch」+ allow-once + snooze）与前台跟踪（§5.3 去抖）。
+//! 纪元跟踪（§2.2「草稿纪元 draft epoch」+ snooze）与前台跟踪（§5.3 去抖）。
 //!
 //! **本文件里的每个方法都必须能在钩子回调里 O(1) 调用**：全部是原子读或 CAS，
 //! 没有任何锁、内存分配或系统调用。
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-/// `draft_epoch` / `allow_once` / `snooze_epoch` 三个原子量的唯一实现者（§2.2）。
+/// `draft_epoch` / `snooze_epoch` 两个原子量的唯一实现者（§2.2）。
 #[derive(Debug)]
 pub struct DraftTracker {
     epoch: AtomicU64,
-    /// 「仍然发送」放行截止时刻（毫秒）；0 = 无效。
-    allow_once_until_ms: AtomicU64,
     /// 「本次不再提示」静默纪元；仅等于当前纪元时静默。
     snooze_epoch: AtomicU64,
-    allow_once_timeout_ms: u64,
 }
 
 impl DraftTracker {
-    pub fn new(allow_once_timeout_ms: u64) -> Self {
+    pub fn new() -> Self {
         Self {
             epoch: AtomicU64::new(0),
-            allow_once_until_ms: AtomicU64::new(0),
             snooze_epoch: AtomicU64::new(u64::MAX),
-            allow_once_timeout_ms,
         }
     }
 
@@ -33,47 +28,6 @@ impl DraftTracker {
     /// 内容修改键 / 输入法提交 → 纪元 +1。
     pub fn bump(&self) -> u64 {
         self.epoch.fetch_add(1, Ordering::SeqCst) + 1
-    }
-
-    /// 用户点了「仍然发送」：置放行标志（默认 30s 超时或一次发送键后失效，§2.2）。
-    pub fn arm_allow_once(&self, now_ms: u64) {
-        self.allow_once_until_ms.store(
-            now_ms.saturating_add(self.allow_once_timeout_ms),
-            Ordering::SeqCst,
-        );
-    }
-
-    /// 消费放行标志：未过期则**消费并返回 true**（只允许一次）。
-    pub fn take_allow_once(&self, now_ms: u64) -> bool {
-        loop {
-            let until = self.allow_once_until_ms.load(Ordering::SeqCst);
-            if until == 0 {
-                return false;
-            }
-            if now_ms >= until {
-                // 过期回收，避免下次误判为「仍有效」
-                let _ = self.allow_once_until_ms.compare_exchange(
-                    until,
-                    0,
-                    Ordering::SeqCst,
-                    Ordering::SeqCst,
-                );
-                return false;
-            }
-            if self
-                .allow_once_until_ms
-                .compare_exchange(until, 0, Ordering::SeqCst, Ordering::SeqCst)
-                .is_ok()
-            {
-                return true;
-            }
-        }
-    }
-
-    /// 放行标志是否仍然有效（诊断/UI 用）。
-    pub fn allow_once_armed(&self, now_ms: u64) -> bool {
-        let until = self.allow_once_until_ms.load(Ordering::SeqCst);
-        until != 0 && now_ms < until
     }
 
     /// 「本次不再提示」：静默**当前**纪元；用户一改稿（纪元 +1）即自动恢复守护。

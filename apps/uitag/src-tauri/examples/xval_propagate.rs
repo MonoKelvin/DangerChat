@@ -113,8 +113,14 @@ fn main() {
         }
     }
 
-    println!("\n=== {} pairs, {} boxes skipped by confidence ===", n_pairs, skipped);
-    println!("{:<28} {:>6} {:>8} {:>8} {:>10} {:>10} {:>8}", "tag", "n", "iou_avg", "iou_med", "cerr_avg", "cerr_med", "iou>0.8");
+    println!(
+        "\n=== {} pairs, {} boxes skipped by confidence ===",
+        n_pairs, skipped
+    );
+    println!(
+        "{:<28} {:>6} {:>8} {:>8} {:>10} {:>10} {:>8}",
+        "tag", "n", "iou_avg", "iou_med", "cerr_avg", "cerr_med", "iou>0.8"
+    );
     let mut all: Vec<(f64, f64)> = Vec::new();
     for (tag, vals) in &per_tag {
         if tag.ends_with("(no-truth)") {

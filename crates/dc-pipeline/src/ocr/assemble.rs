@@ -19,7 +19,10 @@ pub struct RawLine {
 pub fn join_draft(lines: &[RawLine]) -> String {
     let mut sorted: Vec<&RawLine> = lines.iter().collect();
     sorted.sort_by(|a, b| {
-        let (ay, by) = (a.rect.y + a.rect.h as i32 / 2, b.rect.y + b.rect.h as i32 / 2);
+        let (ay, by) = (
+            a.rect.y + a.rect.h as i32 / 2,
+            b.rect.y + b.rect.h as i32 / 2,
+        );
         ay.cmp(&by).then(a.rect.x.cmp(&b.rect.x))
     });
     sorted
@@ -76,7 +79,11 @@ pub fn pick_chat_target(lines: &[RawLine], min_conf: f32) -> Option<String> {
     lines
         .iter()
         .filter(|l| l.score >= min_conf && !l.text.trim().is_empty())
-        .max_by(|a, b| a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal))
+        .max_by(|a, b| {
+            a.score
+                .partial_cmp(&b.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
         .map(|l| l.text.trim().to_string())
 }
 
@@ -123,15 +130,15 @@ mod tests {
     /// UT-OCR-04：噪声词（发送按钮）与 UI 碎片短行被过滤。
     #[test]
     fn ut_ocr_04_noise_filter() {
-        let noise = vec!["发送".to_string(), "按住 说话".to_string()];
+        let noise = vec!["发送".to_string(), "按住鼠标 语音输入文字".to_string()];
         let lines = vec![
             line("你好世界", 0.9, 10, 10),
-            line("发送", 0.99, 500, 600),   // 精确噪声词
-            line("按住 说话", 0.99, 500, 630), // 精确噪声词（含空格）
-            line("发", 0.9, 10, 40),          // 短行 → 过滤
-            line("%", 0.89, 20, 40),          // UI 碎片短行（高分也滤）→ 过滤
-            line("白(", 0.8, 20, 60),         // 2 字符碎片 → 过滤
-            line("三个字", 0.9, 10, 70),      // 3 字符 → 保留
+            line("发送", 0.99, 500, 600),      // 精确噪声词
+            line("按住鼠标 语音输入文字", 0.99, 500, 630), // 精确噪声词（含空格）
+            line("发", 0.9, 10, 40),           // 短行 → 过滤
+            line("%", 0.89, 20, 40),           // UI 碎片短行（高分也滤）→ 过滤
+            line("白(", 0.8, 20, 60),          // 2 字符碎片 → 过滤
+            line("三个字", 0.9, 10, 70),       // 3 字符 → 保留
         ];
         let r = assemble(lines, &noise, 0.5);
         assert_eq!(r.draft_text, "你好世界\n三个字");

@@ -26,7 +26,7 @@ pub struct HeadFile {
     pub weights: Option<Vec<f32>>,
     #[serde(default)]
     pub bias: f32,
-    /// 兜底相似度锚点（正式/随意场景各一段描述即可）。
+    /// 兜底相似度锚点（正式/个人场景各一段描述即可）。
     #[serde(default)]
     pub templates: Vec<String>,
 }
@@ -58,22 +58,23 @@ impl Heads {
 
     /// 从 models/bge/ 加载两个头 + 模板锚点（锚点预计算，运行期零推理）。
     pub fn load(model_dir: &std::path::Path) -> Self {
-        let embedder = std::sync::Arc::new(
-            match super::embedder::Embedder::load(model_dir) {
-                Ok(e) => e,
-                Err(e) => {
-                    tracing::warn!(error = %e, "头锚点预计算失败，模板兜底不可用");
-                    return Self::fallback_only();
-                }
-            },
-        );
+        let embedder = std::sync::Arc::new(match super::embedder::Embedder::load(model_dir) {
+            Ok(e) => e,
+            Err(e) => {
+                tracing::warn!(error = %e, "头锚点预计算失败，模板兜底不可用");
+                return Self::fallback_only();
+            }
+        });
 
         let formal = Self::load_head(&model_dir.join("head-formal.json"), &embedder);
         let casual = Self::load_head(&model_dir.join("head-casual.json"), &embedder);
         Self { formal, casual }
     }
 
-    fn load_head(path: &std::path::Path, embedder: &std::sync::Arc<super::embedder::Embedder>) -> Head {
+    fn load_head(
+        path: &std::path::Path,
+        embedder: &std::sync::Arc<super::embedder::Embedder>,
+    ) -> Head {
         let Ok(text) = std::fs::read_to_string(path) else {
             return Head::None;
         };
@@ -97,7 +98,10 @@ impl Heads {
         }
     }
 
-    fn anchors_from(templates: Vec<String>, embedder: &std::sync::Arc<super::embedder::Embedder>) -> Head {
+    fn anchors_from(
+        templates: Vec<String>,
+        embedder: &std::sync::Arc<super::embedder::Embedder>,
+    ) -> Head {
         let anchors = templates
             .iter()
             .filter_map(|t| embedder.embed(t).ok())
@@ -126,7 +130,12 @@ impl Heads {
     pub fn score(&self, embed: &[f32; EMBED_DIM], profile: Profile) -> Option<f32> {
         match self.head_of(profile) {
             Head::Linear { weights, bias } => {
-                let z: f32 = weights.iter().zip(embed.iter()).map(|(w, x)| w * x).sum::<f32>() + bias;
+                let z: f32 = weights
+                    .iter()
+                    .zip(embed.iter())
+                    .map(|(w, x)| w * x)
+                    .sum::<f32>()
+                    + bias;
                 Some(1.0 / (1.0 + (-z).exp()))
             }
             Head::Templates { anchors } => {
@@ -178,7 +187,10 @@ mod tests {
         let mut x = [0f32; EMBED_DIM];
         x[0] = 1.0;
         // 手工构造 Head::Linear 走公共逻辑
-        let head = Head::Linear { weights: hf.weights.unwrap(), bias: 0.0 };
+        let head = Head::Linear {
+            weights: hf.weights.unwrap(),
+            bias: 0.0,
+        };
         let heads = Heads {
             formal: head,
             casual: Head::None,

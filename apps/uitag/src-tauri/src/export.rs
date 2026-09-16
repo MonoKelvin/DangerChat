@@ -52,7 +52,8 @@ pub fn write_dataset_zip(req: &ExportRequest, dest: &Path) -> Result<std::path::
 
     for img in &req.images {
         let stem = stem_of(&img.src)?;
-        let bytes = std::fs::read(&img.src).map_err(|e| format!("读取图片失败 {}: {e}", img.src))?;
+        let bytes =
+            std::fs::read(&img.src).map_err(|e| format!("读取图片失败 {}: {e}", img.src))?;
 
         // 前端只对浏览过的图片有尺寸缓存；缺失时从图片文件头实测（避免 0 尺寸导致导出失败）
         let (iw, ih) = if img.width > 0 && img.height > 0 {
@@ -64,7 +65,8 @@ pub fn write_dataset_zip(req: &ExportRequest, dest: &Path) -> Result<std::path::
 
         let img_name = format!("images/{stem}.{}", ext_of(&img.src)?);
         zip.start_file(&img_name, opts).map_err(zip_err)?;
-        zip.write_all(&bytes).map_err(|e| format!("zip 写入失败：{e}"))?;
+        zip.write_all(&bytes)
+            .map_err(|e| format!("zip 写入失败：{e}"))?;
 
         let label_name = format!("labels/{stem}.txt");
         zip.start_file(&label_name, opts).map_err(zip_err)?;
@@ -77,21 +79,26 @@ pub fn write_dataset_zip(req: &ExportRequest, dest: &Path) -> Result<std::path::
             let Some(line) = to_yolo_line(b, iw, ih, *class) else {
                 return Err(format!("图片尺寸非法：{stem}"));
             };
-            zip.write_all(line.as_bytes()).map_err(|e| format!("zip 写入失败：{e}"))?;
-            zip.write_all(b"\n").map_err(|e| format!("zip 写入失败：{e}"))?;
+            zip.write_all(line.as_bytes())
+                .map_err(|e| format!("zip 写入失败：{e}"))?;
+            zip.write_all(b"\n")
+                .map_err(|e| format!("zip 写入失败：{e}"))?;
         }
     }
 
     zip.start_file("classes.txt", opts).map_err(zip_err)?;
     for t in &req.tags.tags {
-        zip.write_all(t.name.as_bytes()).map_err(|e| format!("zip 写入失败：{e}"))?;
-        zip.write_all(b"\n").map_err(|e| format!("zip 写入失败：{e}"))?;
+        zip.write_all(t.name.as_bytes())
+            .map_err(|e| format!("zip 写入失败：{e}"))?;
+        zip.write_all(b"\n")
+            .map_err(|e| format!("zip 写入失败：{e}"))?;
     }
 
     zip.start_file("tags.json", opts).map_err(zip_err)?;
-    let tags_snapshot = serde_json::to_string_pretty(&req.tags)
-        .map_err(|e| format!("序列化 tags 失败：{e}"))?;
-    zip.write_all(tags_snapshot.as_bytes()).map_err(|e| format!("zip 写入失败：{e}"))?;
+    let tags_snapshot =
+        serde_json::to_string_pretty(&req.tags).map_err(|e| format!("序列化 tags 失败：{e}"))?;
+    zip.write_all(tags_snapshot.as_bytes())
+        .map_err(|e| format!("zip 写入失败：{e}"))?;
 
     zip.finish().map_err(zip_err)?;
     Ok(dest.to_path_buf())
@@ -124,17 +131,41 @@ mod tests {
         annos.insert(
             "shot1".to_string(),
             vec![
-                AnnoBox { tag: "chat_list".into(), x: 0.0, y: 0.0, w: 265.0, h: 774.0 },
-                AnnoBox { tag: "msg_input".into(), x: 265.0, y: 700.0, w: 265.0, h: 74.0 },
+                AnnoBox {
+                    tag: "chat_list".into(),
+                    x: 0.0,
+                    y: 0.0,
+                    w: 265.0,
+                    h: 774.0,
+                },
+                AnnoBox {
+                    tag: "msg_input".into(),
+                    x: 265.0,
+                    y: 700.0,
+                    w: 265.0,
+                    h: 74.0,
+                },
             ],
         );
         // shot2 无标注 → 负样本空文件
 
         let req = ExportRequest {
             images: vec![
-                ExportImage { src: png.to_string_lossy().into_owned(), width: 530, height: 774 },
-                ExportImage { src: jpg.to_string_lossy().into_owned(), width: 1068, height: 766 },
-                ExportImage { src: unlabeled.to_string_lossy().into_owned(), width: 530, height: 774 },
+                ExportImage {
+                    src: png.to_string_lossy().into_owned(),
+                    width: 530,
+                    height: 774,
+                },
+                ExportImage {
+                    src: jpg.to_string_lossy().into_owned(),
+                    width: 1068,
+                    height: 766,
+                },
+                ExportImage {
+                    src: unlabeled.to_string_lossy().into_owned(),
+                    width: 530,
+                    height: 774,
+                },
             ],
             annos,
             tags,
@@ -181,7 +212,11 @@ mod tests {
         let lines: Vec<&str> = labels.lines().collect();
         assert_eq!(lines.len(), 2);
         assert!(lines[0].starts_with("0 0.25"), "{}", lines[0]);
-        assert!(lines[1].starts_with("3 0.7500000000 0.9521963824 0.5000000000 0.0956072351"), "{}", lines[1]);
+        assert!(
+            lines[1].starts_with("3 0.7500000000 0.9521963824 0.5000000000 0.0956072351"),
+            "{}",
+            lines[1]
+        );
 
         // 无标注 → 空文件
         assert_eq!(read_entry(&mut zip, "labels/shot2.txt"), "");
@@ -219,7 +254,13 @@ mod tests {
         let (tmp, mut req) = fixture();
         req.annos.insert(
             "shot3".to_string(),
-            vec![AnnoBox { tag: "no_such_tag".into(), x: 1.0, y: 1.0, w: 2.0, h: 2.0 }],
+            vec![AnnoBox {
+                tag: "no_such_tag".into(),
+                x: 1.0,
+                y: 1.0,
+                w: 2.0,
+                h: 2.0,
+            }],
         );
         let out = tmp.path().join("d.zip");
         let err = write_dataset_zip(&req, &out).unwrap_err();
@@ -243,7 +284,13 @@ mod tests {
         }
         req.annos.insert(
             "shot3".to_string(),
-            vec![AnnoBox { tag: "msg_input".into(), x: 1.0, y: 1.0, w: 2.0, h: 2.0 }],
+            vec![AnnoBox {
+                tag: "msg_input".into(),
+                x: 1.0,
+                y: 1.0,
+                w: 2.0,
+                h: 2.0,
+            }],
         );
         let out = tmp.path().join("d.zip");
         write_dataset_zip(&req, &out).unwrap();

@@ -39,7 +39,9 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
 use windows::Win32::UI::HiDpi::{
-    GetDpiForWindow, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+    GetAwarenessFromDpiAwarenessContext, GetDpiForWindow, GetThreadDpiAwarenessContext,
+    GetWindowDpiAwarenessContext, SetProcessDpiAwarenessContext,
+    DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, DPI_AWARENESS_PER_MONITOR_AWARE,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, VK_CONTROL, VK_MENU, VK_SHIFT,
@@ -506,6 +508,63 @@ fn process_name_of(pid: u32) -> Option<String> {
 // RealSys
 // ---------------------------------------------------------------------------
 
+/// 确认进程为 per-monitor DPI 感知；已由宿主预先设置时视为成功。
+///
+/// **为什么不能只看 `SetProcessDpiAwarenessContext` 的返回值**：该 API 在
+/// 「进程 DPI 感知级别已设置过」时一律返回 FALSE（`GetLastError` =
+/// `ERROR_ACCESS_DENIED`），而**不管已设级别是否正是我们要的那一档**。
+/// 宿主是 Tauri：`tauri::Builder` 创建窗口时会令 WebView2 设置进程 DPI 感知，
+/// 于是 `RealSys::new()`（在 `bootstrap` 中、Builder 之后调用）必然撞上
+/// 「已设置」分支。若把这种情况当失败，就是**把期望状态误报成故障** ——
+/// 日志每次启动都刷一条无意义的 warn，且 `is_dpi_aware()` 会骗过调用方。
+///
+/// 故改为**读实际状态**判定：能查询到 per-monitor（V2 或 V1）即为满足。
+///
+/// 坐标系一致性（本函数存在的唯一目的，FR-CAP-04）：
+/// - per-monitor 感知 → `GetWindowRect` 返回物理像素，屏幕 DC 亦在物理像素系，
+///   两者可直接同用（§5.4「禁止二次缩放」的前提）；
+/// - 感知级别为 unaware / system-aware → 上述坐标可能被 DWM 虚拟化，截图必然错位。
+///
+/// 降级策略（§2.1 宁漏勿阻）：即便拿到不可用的感知级别，也**不阻断启动** ——
+/// 只记 warn 让上层可观测，行为交由后续截图自身的失败路径（Recoverable → fail-open）。
+fn ensure_per_monitor_dpi_aware() -> bool {
+    let hwnd = unsafe { GetForegroundWindow() };
+
+    // 1) 进程是否**已经**是 per-monitor 感知（含 V1/V2 两档，均已满足坐标一致性）。
+    //    有前台窗口时按窗口查（对混合模式进程更准），否则退化为查当前线程。
+    let current = unsafe {
+        if hwnd.is_invalid() {
+            GetThreadDpiAwarenessContext()
+        } else {
+            GetWindowDpiAwarenessContext(hwnd)
+        }
+    };
+    let current_awareness = unsafe { GetAwarenessFromDpiAwarenessContext(current) };
+    if current_awareness == DPI_AWARENESS_PER_MONITOR_AWARE {
+        tracing::debug!("进程已是 per-monitor DPI 感知（宿主已设置）");
+        return true;
+    }
+
+    // 2) 尚未设置：尝试提升到 V2。此调用仅在「本进程首次设置」时才可能成功。
+    match unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) } {
+        Ok(()) => {
+            tracing::info!("已切换为 per-monitor DPI 感知（V2）");
+            true
+        }
+        Err(_) => {
+            // 3) 设置被拒（已被更早的清单/API 固定为 unaware 或 system-aware）。
+            //    复核实际级别，避免把「本来就对」误判为失败。
+            let err = unsafe { windows::Win32::Foundation::GetLastError() };
+            tracing::warn!(
+                awareness = current_awareness.0,
+                error = ?err,
+                "DPI 感知级别非 per-monitor 且无法提升，高分屏下截图坐标可能偏移（不阻断启动）"
+            );
+            false
+        }
+    }
+}
+
 /// 真实平台实现。进程内单实例使用（内部持有 sys-thread 与位图复用缓冲）。
 pub struct RealSys {
     thread: Mutex<Option<Arc<SysThread>>>,
@@ -516,14 +575,7 @@ pub struct RealSys {
 
 impl RealSys {
     pub fn new() -> Self {
-        // 进程级 per-monitor DPI 感知：GetWindowRect 与屏幕 DC 从此同处物理像素坐标系，
-        // 避免 DPI 缩放下截图与矩形错位（FR-CAP-04）。
-        let dpi_aware = unsafe {
-            SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2).is_ok()
-        };
-        if !dpi_aware {
-            tracing::warn!("SetProcessDpiAwarenessContext 失败，DPI 缩放下截图坐标可能偏移");
-        }
+        let dpi_aware = ensure_per_monitor_dpi_aware();
         Self {
             thread: Mutex::new(None),
             scratch: Mutex::new(Vec::new()),
@@ -769,10 +821,7 @@ fn find_window_by_process_impl(process_name: &str) -> Option<Hwnd> {
         found: None,
     };
     unsafe {
-        let _ = EnumWindows(
-            Some(on_wnd),
-            LPARAM(&mut ctx as *mut Ctx as isize),
-        );
+        let _ = EnumWindows(Some(on_wnd), LPARAM(&mut ctx as *mut Ctx as isize));
     }
     ctx.found
 }

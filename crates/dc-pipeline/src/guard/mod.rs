@@ -11,7 +11,7 @@ pub mod phash;
 use std::sync::Arc;
 use std::time::Duration;
 
-use dc_core::{ConfigField, ConfigType, ConfigValue};
+use dc_core::ConfigField;
 use dc_sys::{Hwnd, SysApi};
 
 use crate::clock::MonoClock;
@@ -93,11 +93,7 @@ impl Guard {
                 run_id.clone(),
                 kind,
                 // 图片日志（01_capture/02_layout…）：数据目录 logs/images，便于核对检测框位置
-                dc_core::ImageLogSink::new(
-                    mctx_log_root.clone().join("images"),
-                    run_id,
-                    true,
-                ),
+                dc_core::ImageLogSink::new(mctx_log_root.clone().join("images"), run_id, true),
                 Arc::clone(&cfg),
             )
         });
@@ -172,9 +168,11 @@ impl Guard {
         // sem 不热重载（规则/头热更新走 M6 set_config → 快照重建；模型本体常驻）
     }
 
-    /// 规则热重载：保存 rules.toml 后前端调用此方法让 sem 重新加载规则。
-    pub fn reload_rules(&self, rules_path: &str, contacts_path: &str) {
-        self.stages.sem.reload_rules_and_contacts(rules_path, contacts_path);
+    /// 规则热重载：保存 rules/contacts/scenes 后前端调用此方法让 sem 重新加载。
+    pub fn reload_rules(&self, rules_path: &str, contacts_path: &str, scenes_path: &str) {
+        self.stages
+            .sem
+            .reload_rules_and_contacts(rules_path, contacts_path, scenes_path);
     }
 
     pub fn stop(&mut self) {
@@ -234,14 +232,9 @@ fn spawn_worker(
 }
 
 /// guard 的编排配置（`pipeline.*` 前缀；intercept 已占用 `guard.*`）。
+///
+/// 无配置项：心跳周期为编译期常量 `HEARTBEAT`（§2.3 固定 1.5s，
+/// 曾有 `pipeline.heartbeat_ms` 配置但从未被读取，已删）。
 pub fn config_schema() -> Vec<ConfigField> {
-    vec![ConfigField {
-        key: "pipeline.heartbeat_ms".into(),
-        ty: ConfigType::Int { min: 500, max: 10_000 },
-        default: ConfigValue::Int(1500),
-        label: "心跳周期".into(),
-        help: "Active 态的窗口像素巡检间隔（ms）".into(),
-        group: "拦截与提示".into(),
-        owner: "pipeline".into(),
-    }]
+    Vec::new()
 }

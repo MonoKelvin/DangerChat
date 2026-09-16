@@ -145,7 +145,10 @@ impl LayoutStage {
         }
 
         // 4) 图片日志
-        if let Err(err) = ctx.image_log.save("02_layout", &draw_regions(snapshot, &best)) {
+        if let Err(err) = ctx
+            .image_log
+            .save("02_layout", &draw_regions(snapshot, &best))
+        {
             tracing::warn!(error = %err, "layout 可视化写入图片日志失败");
         }
 
@@ -181,7 +184,10 @@ impl Module for LayoutStage {
             },
             ConfigField {
                 key: "layout.conf_threshold".into(),
-                ty: ConfigType::Float { min: 0.05, max: 0.95 },
+                ty: ConfigType::Float {
+                    min: 0.05,
+                    max: 0.95,
+                },
                 default: ConfigValue::Float(0.45),
                 label: "置信度阈值".into(),
                 help: "低于此值的检出被丢弃".into(),
@@ -203,10 +209,9 @@ impl Module for LayoutStage {
     /// 经 ModelStore 加载模型并校验类别覆盖（UT-LAY-05：不覆盖 → Fatal）。
     fn init(&mut self, mctx: &ModuleContext) -> Result<(), ModuleError> {
         let model_name = mctx.config.str_or("layout.model", "layout-wechat");
-        let info = mctx
-            .models
-            .get(model_name)
-            .ok_or_else(|| ModuleError::Fatal(format!("layout 模型不存在：{model_name}（请在设置中导入）")))?;
+        let info = mctx.models.get(model_name).ok_or_else(|| {
+            ModuleError::Fatal(format!("layout 模型不存在：{model_name}（请在设置中导入）"))
+        })?;
         if info.kind() != Some(dc_core::ModelKind::Layout) {
             return Err(ModuleError::Fatal(format!(
                 "模型 {model_name} 的 kind 不是 layout"

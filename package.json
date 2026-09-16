@@ -2,7 +2,12 @@
   "name": "dangerchat",
   "private": true,
   "scripts": {
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "dev:uitag": "pnpm -F uitag exec tauri dev",
+    "build": "tauri build",
+    "build:uitag": "pnpm -F uitag exec tauri build",
+    "test": "cargo test --workspace && pnpm -r test"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.4"

@@ -66,12 +66,12 @@ export function Combobox({
         rect &&
         createPortal(
           <>
-            {/* 点击外部关闭 */}
-            <div className="fixed inset-0 z-[90]" onPointerDown={() => setOpen(false)} />
+            {/* 点击外部关闭（z 高于 Modal 的 z-[100]，否则面板被对话框遮住） */}
+            <div className="fixed inset-0 z-[120]" onPointerDown={() => setOpen(false)} />
             <div
               role="listbox"
               className={cn(
-                'animate-in fade-in-0 zoom-in-95 fixed z-[95] overflow-hidden rounded-xl border border-[var(--glass-border)] bg-[var(--popover-blur)] p-1.5 shadow-[var(--shadow-lg)] backdrop-blur-2xl',
+                'animate-in fade-in-0 zoom-in-95 fixed z-[125] overflow-hidden rounded-xl border border-[var(--glass-border)] bg-[var(--popover-blur)] p-1.5 shadow-[var(--shadow-lg)] backdrop-blur-2xl',
                 panelClassName,
               )}
               style={{
@@ -91,9 +91,7 @@ export function Combobox({
                   }}
                   className={cn(
                     'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors',
-                    o.value === value
-                      ? 'text-[var(--text-primary)]'
-                      : 'text-[var(--text-secondary)] hover:bg-[var(--hover-overlay)] hover:text-[var(--text-primary)]',
+                    'text-[var(--text-secondary)] hover:bg-[var(--hover-overlay)] hover:text-[var(--text-primary)]',
                   )}
                 >
                   <Check

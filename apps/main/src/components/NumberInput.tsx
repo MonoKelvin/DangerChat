@@ -101,23 +101,24 @@ export function NumberInput({
         }}
         className="h-full min-w-0 flex-1 bg-transparent px-3 text-right text-sm tabular-nums text-[var(--text-primary)] outline-none"
       />
-      {/* 堆叠步进按钮 */}
-      <div className="flex h-full flex-col">
+      {/* 堆叠步进按钮：lucide chevron 字形只占图标视口中间 1/4，两侧留白大，
+          单纯缩小按钮压不下箭头间隔——需负边距让两个按钮的盒体交叠 */}
+      <div className="flex h-full flex-col justify-center">
         <button
           type="button"
           tabIndex={-1}
           onClick={() => adjust(1)}
-          className="flex flex-1 items-center justify-center px-1.5 text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-primary)]"
+          className="flex h-4 items-center justify-center pl-0.5 pr-1.5 text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-primary)]"
         >
-          <ChevronUp className="size-3" strokeWidth={2.5} />
+          <ChevronUp className="size-4" strokeWidth={2.5} />
         </button>
         <button
           type="button"
           tabIndex={-1}
           onClick={() => adjust(-1)}
-          className="flex flex-1 items-center justify-center px-1.5 text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-primary)]"
+          className="-mt-[5px] flex h-4 items-center justify-center pl-0.5 pr-1.5 text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-primary)]"
         >
-          <ChevronDown className="size-3" strokeWidth={2.5} />
+          <ChevronDown className="size-4" strokeWidth={2.5} />
         </button>
       </div>
     </div>

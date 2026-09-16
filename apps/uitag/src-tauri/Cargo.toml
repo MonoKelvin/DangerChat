@@ -23,6 +23,7 @@ zip = { version = "=8", default-features = false, features = ["deflate"] }
 image = { workspace = true }
 imageproc = { version = "0.25", default-features = false }
 rayon = "1"
+tauri-plugin-opener = "2.5.5"
 
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -79,11 +79,13 @@ impl Verdict {
         Self::new(VerdictLevel::Warn, 0.5, vec![reason.into()])
     }
 
-    /// L1 规则命中（§5.7）：severity 直接决定级别，score 给 1.0/0.5 的名义值。
-    pub fn from_rule(pattern: &str, severity: VerdictLevel) -> Self {
-        let reason = format!("命中违禁词「{pattern}」(severity={})", severity.as_str());
-        let score = if severity == VerdictLevel::Block { 1.0 } else { 0.5 };
-        Self::new(severity, score, vec![reason])
+    /// L1 规则命中（§5.7）：命中即 Block，score 给名义值 1.0。
+    pub fn from_rule(pattern: &str) -> Self {
+        Self::new(
+            VerdictLevel::Block,
+            1.0,
+            vec![format!("命中违禁词「{pattern}」")],
+        )
     }
 
     /// L2 危险分（§5.7 阈值规则）：score 越过阈值 +0.15 区间升 Block，区间内 Warn。

@@ -11,7 +11,12 @@ const LOW: usize = 8;
 #[allow(clippy::needless_range_loop)]
 pub fn phash(img: &image::RgbaImage) -> u64 {
     // 1) 缩到 32×32 灰度
-    let small = image::imageops::resize(img, SIZE as u32, SIZE as u32, image::imageops::FilterType::Triangle);
+    let small = image::imageops::resize(
+        img,
+        SIZE as u32,
+        SIZE as u32,
+        image::imageops::FilterType::Triangle,
+    );
     let mut gray = [[0f32; SIZE]; SIZE];
     for (x, y, p) in small.enumerate_pixels() {
         // BT.601 luma（0..255）
@@ -120,7 +125,11 @@ mod tests {
         img.put_pixel(5, 5, Rgba([255, 255, 255, 255]));
         img.put_pixel(100, 40, Rgba([0, 0, 0, 255]));
         let h2 = phash(&img);
-        assert!(unchanged(h1, h2), "2/20000 像素变化应判未变（dist={}）", hamming(h1, h2));
+        assert!(
+            unchanged(h1, h2),
+            "2/20000 像素变化应判未变（dist={}）",
+            hamming(h1, h2)
+        );
     }
 
     /// 大块变化判变化（聊天对象切换的模拟）。
@@ -135,6 +144,10 @@ mod tests {
         }
         let h1 = phash(&solid([100, 100, 100, 255]));
         let h2 = phash(&img);
-        assert!(!unchanged(h1, h2), "半屏变化应判变化（dist={}）", hamming(h1, h2));
+        assert!(
+            !unchanged(h1, h2),
+            "半屏变化应判变化（dist={}）",
+            hamming(h1, h2)
+        );
     }
 }

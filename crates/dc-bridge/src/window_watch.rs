@@ -21,6 +21,9 @@ use crate::events;
 use crate::state::AppState;
 
 const POLL: Duration = Duration::from_secs(2);
+
+/// 退出信号轮询片段（毫秒）：把 POLL 切成小段，保证退出及时响应（最坏 EXIT_POLL_MS）。
+const EXIT_POLL_MS: u64 = 200;
 /// 窗口连续缺失多少次才判定消失（防目标程序瞬时无响应导致的抖动 respawn）。
 const MISS_CONFIRM: u32 = 2;
 
@@ -83,7 +86,16 @@ fn watch_loop(app: AppHandle) {
             (false, None) => {}
         }
 
-        std::thread::sleep(POLL);
+        // 退出信号：托盘「退出」后收敛本线程。
+        // 检查置于 sleep 前，并把 2s 等待切成 200ms 片段 —— 否则最坏要等满 2s
+        // 才会看到信号，而主线程正在等本线程结束（非分离线程会卡住进程终止）。
+        for _ in 0..(POLL.as_millis() as u64 / EXIT_POLL_MS) {
+            if state.is_shutting_down() {
+                tracing::info!("window-watch 收到退出信号，线程结束");
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(EXIT_POLL_MS));
+        }
     }
 }
 

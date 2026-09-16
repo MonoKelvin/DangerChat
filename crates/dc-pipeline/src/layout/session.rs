@@ -33,7 +33,11 @@ pub struct InferSession {
 
 impl InferSession {
     /// 从模型文件创建会话。`device` 决定 EP 链；DML 链建立失败自动落到 CPU。
-    pub fn load(path: &std::path::Path, device: DevicePref, intra_threads: usize) -> Result<Self, String> {
+    pub fn load(
+        path: &std::path::Path,
+        device: DevicePref,
+        intra_threads: usize,
+    ) -> Result<Self, String> {
         if device != DevicePref::Cpu && DirectML::default().is_available().unwrap_or(false) {
             match Self::build(path, true, intra_threads) {
                 Ok(s) => return Ok(s),
@@ -46,8 +50,7 @@ impl InferSession {
     fn build(path: &std::path::Path, dml: bool, intra_threads: usize) -> Result<Self, String> {
         let builder = Session::builder().map_err(|e| format!("ort builder 失败：{e}"))?;
         let builder = if dml {
-            builder
-                .with_execution_providers([DirectML::default().build(), CPU::default().build()])
+            builder.with_execution_providers([DirectML::default().build(), CPU::default().build()])
         } else {
             builder.with_execution_providers([CPU::default().build()])
         }

@@ -78,20 +78,19 @@ profile = "casual"
         ("absb 嵌入词", "领导", VerdictLevel::Safe),
         ("sb", "家人", VerdictLevel::Safe), // formal-only 规则在 casual 不命中
         // word all
-        ("weakup 信号", "家人", VerdictLevel::Warn),
+        ("weakup 信号", "家人", VerdictLevel::Block),
         ("wakeup 不同词", "家人", VerdictLevel::Safe),
         // substring all
-        ("你给我滚出去", "家人", VerdictLevel::Warn),
-        ("滚动列表", "领导", VerdictLevel::Warn), // substring 无边界
+        ("你给我滚出去", "家人", VerdictLevel::Block),
+        ("滚动列表", "领导", VerdictLevel::Block), // substring 无边界
         // substring casual-only
-        ("干活干到麻了", "家人", VerdictLevel::Warn),
+        ("干活干到麻了", "家人", VerdictLevel::Block),
         ("干活干到麻了", "领导", VerdictLevel::Safe),
         // regex formal-only
-        ("你别傻逼了", "领导", VerdictLevel::Warn),
-        ("你别傻雕了", "领导", VerdictLevel::Warn),
+        ("你别傻逼了", "领导", VerdictLevel::Block),
+        ("你别傻雕了", "领导", VerdictLevel::Block),
         ("你真傻", "家人", VerdictLevel::Safe),
         ("你别傻逼了", "家人", VerdictLevel::Safe),
-        // block 优先：同一文本同时命中 warn(滚) 与 block(sb)
         ("sb 你滚", "领导", VerdictLevel::Block),
         // substring 命中嵌入形态
         ("这个 kpi 很重要", "领导", VerdictLevel::Block),
@@ -117,7 +116,6 @@ fn ut_sem_07_reasons_text() {
     let rules = RuleSet::from_defs(vec![RuleDef {
         pattern: "sb".into(),
         r#match: MatchKind::Word,
-        severity: Severity::Block,
         applies_to: vec!["formal".into()],
     }])
     .unwrap();
@@ -125,7 +123,6 @@ fn ut_sem_07_reasons_text() {
 
     let v = stage.judge(&ocr("你是 sb", Some("领导")));
     assert!(v.reasons[0].contains("sb"), "{}", v.reasons[0]);
-    assert!(v.reasons[0].contains("block"), "{}", v.reasons[0]);
 
     // from_score 的理由由 sem 补充（带分数值）——直接验证文案格式函数面
     let mut scored = Verdict::from_score(0.71, THRESHOLD_FORMAL);
@@ -144,7 +141,6 @@ fn stage_process_attaches_metadata() {
     let rules = RuleSet::from_defs(vec![RuleDef {
         pattern: "sb".into(),
         r#match: MatchKind::Word,
-        severity: Severity::Block,
         applies_to: vec!["all".into()],
     }])
     .unwrap();
@@ -168,7 +164,10 @@ fn stage_process_attaches_metadata() {
 /// 这里验证 Stage 层：embedder 缺失 + 头缺失 → L2 整体跳过，仅 L1。
 #[test]
 fn ut_sem_08_missing_head_degrades_not_errors() {
-    let stage = SemStage::l1_only(RuleSet::from_defs(Vec::new()).unwrap(), ContactBook::default());
+    let stage = SemStage::l1_only(
+        RuleSet::from_defs(Vec::new()).unwrap(),
+        ContactBook::default(),
+    );
     // 无规则无模型：一切 Safe，无 panic
     assert_eq!(
         stage.judge(&ocr("随便什么文本", None)).level,

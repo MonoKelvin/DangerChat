@@ -39,21 +39,32 @@ impl TagsConfig {
 
     pub fn validate(&self) -> Result<(), TagsError> {
         if self.version != 1 {
-            return Err(TagsError::Invalid(format!("version 必须为 1，实际 {}", self.version)));
+            return Err(TagsError::Invalid(format!(
+                "version 必须为 1，实际 {}",
+                self.version
+            )));
         }
         if self.tags.is_empty() {
             return Err(TagsError::Invalid("tags 不能为空".into()));
         }
         let mut seen = std::collections::HashSet::new();
         for t in &self.tags {
-            if t.name.is_empty() || !t.name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            if t.name.is_empty()
+                || !t
+                    .name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_')
+            {
                 return Err(TagsError::Invalid(format!("标签名不合法：{:?}", t.name)));
             }
             if !seen.insert(t.name.as_str()) {
                 return Err(TagsError::Invalid(format!("标签名重复：{}", t.name)));
             }
             if !valid_color(&t.color) {
-                return Err(TagsError::Invalid(format!("颜色必须为 #RRGGBB：{}", t.color)));
+                return Err(TagsError::Invalid(format!(
+                    "颜色必须为 #RRGGBB：{}",
+                    t.color
+                )));
             }
         }
         Ok(())
@@ -74,7 +85,10 @@ mod tests {
         let cfg = TagsConfig::builtin();
         assert_eq!(cfg.version, 1);
         let names: Vec<&str> = cfg.tags.iter().map(|t| t.name.as_str()).collect();
-        assert_eq!(names, ["chat_list", "chat_window", "chat_target", "msg_input"]);
+        assert_eq!(
+            names,
+            ["chat_list", "chat_window", "chat_target", "msg_input"]
+        );
     }
 
     #[test]
