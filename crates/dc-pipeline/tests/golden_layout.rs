@@ -37,6 +37,13 @@ fn ut_lay_01_golden_regions_iou() {
         return;
     }
 
+    let golden_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/golden");
+    let expected_file = golden_dir.join("expected_regions.json");
+    if !expected_file.is_file() {
+        eprintln!("跳过 UT-LAY-01：tests/fixtures/golden/expected_regions.json 缺失（见 golden/README.md）");
+        return;
+    }
+
     // ModuleContext 指向仓库根 models/，layout.model = dc-layout-wechat
     let tmp = tempfile::tempdir().unwrap();
     let mut values = BTreeMap::new();
@@ -60,9 +67,8 @@ fn ut_lay_01_golden_regions_iou() {
     let mut stage = LayoutStage::new();
     stage.init(&mctx).expect("layout init 失败（模型非法？）");
 
-    let golden_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/golden");
     let expected: std::collections::HashMap<String, serde_json::Value> = serde_json::from_str(
-        &std::fs::read_to_string(golden_dir.join("expected_regions.json")).unwrap(),
+        &std::fs::read_to_string(expected_file).unwrap(),
     )
     .unwrap();
 
