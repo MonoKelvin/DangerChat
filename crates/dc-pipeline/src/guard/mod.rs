@@ -57,12 +57,11 @@ impl Guard {
         target_hwnd: Hwnd,
     ) -> Result<Self, String> {
         let capture = Arc::new(crate::capture::CaptureStage::new(sys));
-        let mctx_log_root = {
-            let mctx = mctx_factory();
-            mctx.log_dir.clone()
-        };
+        let mctx = mctx_factory();
+        let _mctx_log_root = mctx.log_dir.clone();
+        let image_store_ref = mctx.image_store.clone();
+
         let (layout, ocr, sem) = {
-            let mctx = mctx_factory();
             let mut layout = LayoutStage::new();
             if let Err(e) = layout.init(&mctx) {
                 tracing::warn!(error = %e, "layout init 失败（fail-open）");
@@ -89,13 +88,11 @@ impl Guard {
         let ctx_factory = Arc::new(move |kind: LoopKind| {
             let n = run_seed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let run_id = dc_core::RunId::from_raw(format!("run-{n:08}"));
-            PipelineContext::new(
-                run_id.clone(),
-                kind,
-                // 图片日志（01_capture/02_layout…）：数据目录 logs/images，便于核对检测框位置
-                dc_core::ImageLogSink::new(mctx_log_root.clone().join("images"), run_id, true),
-                Arc::clone(&cfg),
-            )
+            let image_sink = match &image_store_ref {
+                Some(store) => dc_core::ImageLogSink::from_store(Arc::clone(store)),
+                None => dc_core::ImageLogSink::noop(),
+            };
+            PipelineContext::new(run_id, kind, image_sink, Arc::clone(&cfg))
         });
 
         let core = Arc::new(GuardCore {

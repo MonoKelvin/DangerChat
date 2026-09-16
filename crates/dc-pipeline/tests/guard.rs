@@ -93,7 +93,7 @@ fn fixture() -> Fixture {
         PipelineContext::new(
             RunId::from_raw("t-run"),
             kind,
-            ImageLogSink::new(std::env::temp_dir(), RunId::from_raw("x"), false),
+            ImageLogSink::noop(),
             Arc::clone(&cfg),
         )
     });

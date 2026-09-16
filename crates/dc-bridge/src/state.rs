@@ -2,11 +2,12 @@
 
 use std::sync::{Arc, Mutex};
 
-use dc_core::{ConfigCenter, ModelStore};
+use dc_core::{config_doc::JsonStore, ConfigCenter, ModelStore, RollingImageStore};
 use dc_pipeline::guard::Guard;
 use dc_pipeline::intercept::Intercept;
 use dc_sys::SysApi;
 
+use crate::bootstrap::BootstrapConfig;
 use crate::stats::DailyStats;
 
 /// 退出原因：目标窗口消失后 Guard 被 window_watch 回收，带原因供状态事件展示。
@@ -22,6 +23,10 @@ pub struct AppState {
     /// 日志中心句柄（clear_logs 用；init 在 bootstrap，Drop 由全局 tracing 管）。
     #[allow(dead_code)]
     pub log_center: Option<dc_core::logging::LogCenter>,
+    /// 循环目录图片存储（调试模式专用，异步写入）。
+    pub image_store: Option<Arc<Mutex<RollingImageStore>>>,
+    /// bootstrap.json 句柄（数据目录指针管理）。
+    pub bootstrap: JsonStore<BootstrapConfig>,
     pub config: Arc<ConfigCenter>,
     pub models: Arc<ModelStore>,
     pub intercept: Arc<Intercept>,
@@ -29,14 +34,14 @@ pub struct AppState {
     pub guard: Mutex<Option<Guard>>,
     /// 目标进程名（config 快照的缓存，热更新经 set_config 生效）。
     pub target_process: Mutex<String>,
-    /// 场景管理器（scenes.toml 的唯一写方；判定侧另持快照，经 reload 同步）。
+    /// 场景管理器（scenes.json 的唯一写方；判定侧另持快照，经 reload 同步）。
     pub scenarios: Mutex<dc_pipeline::sem::scenarios::ScenarioManager>,
     pub stats: DailyStats,
     /// 弹窗倒计时秒数（alert.timeout_secs，默认 10）。
     pub countdown_secs: Mutex<u64>,
     /// 数据目录（日志/配置/统计所在根）。
     pub data_dir: std::path::PathBuf,
-    /// 系统默认数据目录（%APPDATA%\<identifier>；自定义目录指针存这里）。
+    /// 系统默认数据目录（%APPDATA%\<identifier>；bootstrap.json 固定存这里）。
     pub default_data_dir: std::path::PathBuf,
     /// 待清理的旧数据目录：`migrate_data_dir` 成功后写入，`delete_old_data_dir` 仅接受此路径。
     ///
@@ -57,12 +62,20 @@ pub struct AppState {
     pub shutdown: std::sync::atomic::AtomicBool,
 }
 
-/// 自定义数据目录指针文件（存于默认目录；内容为自定义路径，一行）。
+/// **已废弃**：旧版数据目录指针文件名（已被 bootstrap.json 取代）。
+#[deprecated(note = "使用 bootstrap.json 代替")]
+pub const POINTER_FILE: &str = "data_dir.txt";
+
+/// **已废弃**：旧版指针文件路径（已被 bootstrap.json 取代）。
+#[deprecated(note = "使用 bootstrap::load_or_create 代替")]
+#[allow(deprecated)]
 pub fn data_dir_pointer(default_data_dir: &std::path::Path) -> std::path::PathBuf {
-    default_data_dir.join("data_dir.txt")
+    default_data_dir.join(POINTER_FILE)
 }
 
-/// 解析生效数据目录：指针存在且指向有效目录 → 用之；否则默认目录。
+/// **已废弃**：旧版数据目录解析（已被 bootstrap.json 取代）。
+#[deprecated(note = "使用 bootstrap::load_or_create 代替")]
+#[allow(deprecated)]
 pub fn resolve_data_dir(default_data_dir: std::path::PathBuf) -> std::path::PathBuf {
     if let Ok(text) = std::fs::read_to_string(data_dir_pointer(&default_data_dir)) {
         let custom = std::path::PathBuf::from(text.trim());
@@ -91,10 +104,21 @@ impl AppState {
         self.guard.lock().map(|g| g.is_some()).unwrap_or(false)
     }
 
-    /// 请求退出：置位信号，后台线程在下一轮循环收敛。
+    /// 请求退出：置位信号，后台线程在下一轮循环收敛。同时持久化图片存储游标到 bootstrap.json。
     pub fn request_shutdown(&self) {
         self.shutdown
             .store(true, std::sync::atomic::Ordering::SeqCst);
+
+        // 持久化图片存储游标（调试模式启用时）
+        if let Some(store) = &self.image_store {
+            if let Ok(s) = store.lock() {
+                let cursor = s.current_index();
+                let _ = self.bootstrap.update(|cfg| {
+                    cfg.images_cursor = cursor as u64;
+                });
+                tracing::debug!(cursor, "图片存储游标已持久化到 bootstrap.json");
+            }
+        }
     }
 
     /// 是否已请求退出。

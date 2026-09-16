@@ -56,7 +56,7 @@ fn fields() -> Vec<ConfigField> {
 
 /// 按真实装配方式注册：每个模块只声明自己的配置项（owner 由注册方决定）。
 fn open(dir: &TempDir) -> ConfigCenter {
-    let center = ConfigCenter::open(dir.path().join("config.toml")).expect("open");
+    let center = ConfigCenter::open(dir.path().join("config.json")).expect("open");
     let all = fields();
     for module in ["guard", "sem", "ocr"] {
         let own: Vec<ConfigField> = all
@@ -86,10 +86,10 @@ fn ut_core_01_schema_defaults_roundtrip() {
         vec!["发送".to_string()]
     );
 
-    // 规范化落盘：schema 键全部写入文件
+    // 规范化落盘：schema 键全部写入文件（JSON 格式）
     let text = std::fs::read_to_string(center.path()).expect("config written");
-    assert!(text.contains("verdict_ttl_ms = 2000"), "text = {text}");
-    assert!(text.contains("[guard]"), "text = {text}");
+    assert!(text.contains("\"verdict_ttl_ms\": 2000"), "text = {text}");
+    assert!(text.contains("\"guard\""), "text = {text}");
 
     // 往返：改值 → 重新打开同一文件 → 值保留
     center
@@ -164,8 +164,8 @@ fn ut_core_02_invalid_set_rejected_without_persisting() {
 #[test]
 fn ut_core_03_corrupt_config_recovers() {
     let dir = TempDir::new().unwrap();
-    let path = dir.path().join("config.toml");
-    std::fs::write(&path, "[[[ this is not toml").unwrap();
+    let path = dir.path().join("config.json");
+    std::fs::write(&path, "[[[ this is not json").unwrap();
 
     let center = ConfigCenter::open(&path).expect("open on corrupt file");
     let recoveries = center.recoveries();
@@ -173,7 +173,7 @@ fn ut_core_03_corrupt_config_recovers() {
     assert!(recoveries[0].backup.exists(), "原文件应被备份");
     assert_eq!(
         std::fs::read_to_string(&recoveries[0].backup).unwrap(),
-        "[[[ this is not toml"
+        "[[[ this is not json"
     );
 
     center.register_module("guard", fields()).unwrap();
@@ -181,9 +181,9 @@ fn ut_core_03_corrupt_config_recovers() {
     assert_eq!(snap.i64_or("guard.verdict_ttl_ms", 0), 2000, "以默认值重建");
     assert!(snap.bool_or("guard.enabled", false));
 
-    // 恢复后的文件是合法 TOML
+    // 恢复后的文件是合法 JSON
     let text = std::fs::read_to_string(&path).unwrap();
-    assert!(text.parse::<toml::Value>().is_ok(), "text = {text}");
+    assert!(serde_json::from_str::<serde_json::Value>(&text).is_ok(), "text = {text}");
 }
 
 /// UT-CORE-04 并发写配置无丢失（rename 原子性）
@@ -239,7 +239,7 @@ fn ut_core_04_concurrent_writes_are_atomic() {
     assert!(!snap.bool_or("guard.enabled", true), "i=29 → 奇数次写入");
     let raw = std::fs::read_to_string(reopened.path()).unwrap();
     assert!(
-        raw.parse::<toml::Value>().is_ok(),
+        serde_json::from_str::<serde_json::Value>(&raw).is_ok(),
         "并发写后文件仍合法: {raw}"
     );
     // 无临时文件残留
@@ -269,4 +269,59 @@ fn duplicate_key_across_modules_panics() {
         .register_module("guard", vec![field.clone()])
         .unwrap();
     center.register_module("intruder", vec![field]).unwrap();
+}
+
+/// 补充：非 schema 键（壳层内部状态，如窗口位置记忆）批量写入与往返。
+/// 与 set 的契约差异：不进 schema（设置页不渲染）、不广播、schema 键一律拒绝。
+#[test]
+fn unmanaged_keys_roundtrip_and_schema_guard() {
+    let dir = TempDir::new().unwrap();
+    let center = open(&dir);
+    center.finalize().unwrap();
+
+    // 非 schema 键：批量写入 → 进快照 → 落盘
+    center
+        .set_unmanaged_batch(vec![
+            ("window.x".into(), ConfigValue::Int(100)),
+            ("window.y".into(), ConfigValue::Int(-200)), // 多显示器负坐标
+            ("window.width".into(), ConfigValue::Int(920)),
+            ("window.height".into(), ConfigValue::Int(610)),
+        ])
+        .expect("unmanaged batch");
+    let snap = center.snapshot();
+    assert_eq!(snap.i64_or("window.x", 0), 100);
+    assert_eq!(snap.i64_or("window.y", 0), -200);
+
+    // 不进 schema（前端设置页渲染依据）
+    assert!(!center.schema().iter().any(|f| f.key.starts_with("window.")));
+
+    // 不广播（模块订阅者不应收到壳层状态写入）
+    let rx = center.subscribe();
+    center
+        .set_unmanaged_batch(vec![("window.x".into(), ConfigValue::Int(120))])
+        .expect("unmanaged batch");
+    assert!(rx.try_recv().is_err(), "unmanaged 写入不应广播");
+
+    // schema 已注册的键拒绝（不得绕过校验），且不落盘任何键（整批原子）
+    let before = std::fs::read_to_string(center.path()).unwrap();
+    let err = center
+        .set_unmanaged_batch(vec![
+            ("window.x".into(), ConfigValue::Int(140)),
+            ("guard.verdict_ttl_ms".into(), ConfigValue::Int(99_999)),
+        ])
+        .unwrap_err();
+    assert!(err.to_string().contains("guard.verdict_ttl_ms"), "{err}");
+    assert_eq!(
+        std::fs::read_to_string(center.path()).unwrap(),
+        before,
+        "整批拒绝，window.x 也不得写入"
+    );
+
+    // 往返：重新打开同一文件 → 非托管键保留（finalize 不丢弃磁盘上的非 schema 键）
+    let reopened = open(&dir);
+    let snap2 = reopened.finalize().expect("finalize");
+    assert_eq!(snap2.i64_or("window.x", 0), 120);
+    assert_eq!(snap2.i64_or("window.height", 0), 610);
+    // 模块配置共存无损
+    assert_eq!(snap2.i64_or("guard.verdict_ttl_ms", 0), 2000);
 }

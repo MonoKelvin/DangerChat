@@ -3,7 +3,9 @@
 //! 本 crate 承载与业务无关的通用设施（设计文档 §5.1）：
 //!
 //! - [`config`]：配置中心，schema 注册 + 原子持久化 + 变更广播（FR-SYS-01）
+//! - [`config_doc`]：JSON 配置文档原语与管理器（路径唯一来源 / 原子写 / 损坏自愈）
 //! - [`logging`]：日志中心与识别过程图片日志（FR-SYS-02/03/05）
+//! - [`image_store`]：循环目录图片存储（调试模式专用，异步写入）
 //! - [`plugin`]：插件注册机制，模块统一生命周期契约（FR-SYS-04）
 //! - [`model_store`]：ONNX 模型目录管理与导入校验
 //!
@@ -11,12 +13,19 @@
 //! 也不触碰 Win32（平台能力一律经 `dc-sys`）。
 
 pub mod config;
+pub mod config_doc;
+pub mod image_store;
 pub mod logging;
+mod json_file;
 pub mod model_store;
 pub mod plugin;
 pub mod time;
 
-pub use config::{ConfigCenter, ConfigError, ConfigField, ConfigSnapshot, ConfigType, ConfigValue};
+pub use config::{
+    ConfigCenter, ConfigError, ConfigField, ConfigSnapshot, ConfigType, ConfigValue, RecoveryRecord,
+};
+pub use config_doc::{ConfigManager, Document, JsonStore};
+pub use image_store::{ImageStoreError, RollingImageStore, SaveRequest};
 pub use logging::{
     ImageLogError, ImageLogSink, LogCenter, LogError, LogOptions, PruneReport, RunId,
 };

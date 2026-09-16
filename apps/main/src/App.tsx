@@ -43,15 +43,14 @@ function MainWindow() {
 
   return (
     <div className="flex h-full flex-col bg-[var(--window-bg)] text-[var(--text-primary)]">
-      {/* 融入式顶栏：与左侧导航同底色（Win11 设置式分层），纯拖拽区 + 控制 */}
+      {/* 融入式顶栏：与左侧导航同底色（Win11 设置式分层），纯拖拽区 + 控制。
+          Mac 式控制点居右（关闭点在最外侧）。 */}
       <header
-        className="flex h-11 shrink-0 items-center justify-end bg-[var(--sidebar-bg)] pl-3"
+        className="flex h-11 shrink-0 items-center justify-end bg-[var(--sidebar-bg)] pl-3 pr-5"
         data-tauri-drag-region
       >
         <div className="flex-1" data-tauri-drag-region />
-        <div className="flex items-center pr-1">
-          <WindowControls />
-        </div>
+        <WindowControls />
       </header>
       <div className="min-h-0 flex-1">
         {agreed ? <SettingsRoot /> : <NoticePage onAgree={() => setAgreed(true)} />}

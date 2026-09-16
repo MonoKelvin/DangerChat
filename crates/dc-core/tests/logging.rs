@@ -2,6 +2,7 @@
 
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 
 use dc_core::logging::prune_logs;
 use dc_core::time;
@@ -67,33 +68,42 @@ fn ut_core_05_prune_by_age_and_size() {
     );
 }
 
-/// UT-CORE-06 隐私模式开启时 runs/ 目录零文件（断言磁盘为空）
+/// UT-CORE-06 隐私模式开启时不写盘（Noop sink 零副作用）
 #[test]
 fn ut_core_06_privacy_mode_writes_nothing() {
-    let dir = TempDir::new().unwrap();
-    let runs = dir.path().join("runs");
-
-    // 关闭图片日志（隐私模式 / privacy.no_image_logs = true）
-    let sink = ImageLogSink::new(&runs, RunId::from_raw("20260913-000000-000001"), false);
+    let sink = ImageLogSink::noop();
     assert!(!sink.is_enabled());
-    assert!(sink.run_dir().is_none());
     for name in ["01_window", "02_layout", "03_ocr"] {
         sink.save(name, &RgbaImage::new(4, 4)).unwrap();
     }
-    assert!(!runs.exists(), "隐私模式下不得创建任何目录/文件");
+    // Noop sink 无副作用，不会创建任何文件/目录
+}
 
-    // 反向对照：开启时确实落盘，证明上一条不是空断言
-    let sink_on = ImageLogSink::new(&runs, RunId::from_raw("20260913-000000-000002"), true);
-    assert!(sink_on.is_enabled());
-    sink_on.save("01_window", &RgbaImage::new(4, 4)).unwrap();
-    sink_on.save("03_ocr", &RgbaImage::new(2, 2)).unwrap();
-    let run_dir = sink_on.run_dir().unwrap();
-    assert!(run_dir.join("01_window.png").exists());
-    assert!(run_dir.join("03_ocr.png").exists());
-    let count = fs::read_dir(&run_dir).unwrap().count();
-    assert_eq!(count, 2, "一个 run 目录只放本轮的图");
+/// UT-CORE-06b 开启时通过 RollingImageStore 异步落盘
+#[test]
+fn ut_core_06b_enabled_mode_saves_async() {
+    let dir = TempDir::new().unwrap();
+    let store = dc_core::RollingImageStore::new(dir.path(), 10, 1);
+    let store_arc = Arc::new(std::sync::Mutex::new(store));
 
-    // RunId 语义：目录名可读、含序号
+    let sink = ImageLogSink::from_store(Arc::clone(&store_arc));
+    assert!(sink.is_enabled());
+    sink.save("01_window", &RgbaImage::new(4, 4)).unwrap();
+    sink.save("03_ocr", &RgbaImage::new(2, 2)).unwrap();
+
+    // 异步写入，需等待工作线程完成
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    drop(sink);
+    drop(store_arc); // Drop 会 join 工作线程
+
+    let dir1 = dir.path().join("1");
+    assert!(dir1.join("01_window.png").exists());
+    assert!(dir1.join("03_ocr.png").exists());
+}
+
+/// RunId 语义：目录名可读、含序号
+#[test]
+fn ut_core_06c_run_id_format() {
     let id = RunId::new(7, 480);
     assert!(id.as_str().ends_with("-000007"), "id = {id}");
     assert_eq!(id.as_str().len(), "20260913-000000".len() + 7);

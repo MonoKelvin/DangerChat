@@ -306,11 +306,12 @@ pub fn run() {
                 .map_err(|e| format!("dir-watch 启动失败：{e}"))?;
 
             // 4) 主窗口位置/大小记忆（关窗=隐藏到托盘，无退出时机可挂——
-            //    Moved/Resized 节流落盘 + 失焦即存 + 真退出兜底）。
+            //    Moved/Resized 节流落盘 + 失焦即存 + 真退出兜底；
+            //    存 config.toml 的非 schema 键 window.*）。
             //    恢复在 show 之前：非静默启动看不到窗口跳动。
             if let Some(win) = app.get_webview_window("main") {
-                window_state::restore(&win, &state.data_dir);
-                let data_dir = state.data_dir.clone();
+                window_state::restore(&win, &state);
+                let state_for_events = Arc::clone(&state);
                 let win_for_events = win.clone();
                 let last_save = Arc::new(std::sync::Mutex::new(
                     std::time::Instant::now() - std::time::Duration::from_secs(10),
@@ -324,11 +325,11 @@ pub fn run() {
                         };
                         if last.elapsed() >= std::time::Duration::from_secs(1) {
                             *last = std::time::Instant::now();
-                            window_state::snapshot(&win_for_events, &data_dir);
+                            window_state::snapshot(&win_for_events, &state_for_events.config);
                         }
                     }
                     tauri::WindowEvent::Focused(false) => {
-                        window_state::snapshot(&win_for_events, &data_dir);
+                        window_state::snapshot(&win_for_events, &state_for_events.config);
                     }
                     _ => {}
                 });
@@ -358,7 +359,7 @@ pub fn run() {
                     // 真退出：兜底保存窗口状态（节流可能漏掉最后一次移动）
                     let state = app.state::<Arc<dc_bridge::state::AppState>>();
                     if let Some(win) = app.get_webview_window("main") {
-                        window_state::snapshot(&win, &state.data_dir);
+                        window_state::snapshot(&win, &state.config);
                     }
                 }
             }

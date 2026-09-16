@@ -105,5 +105,6 @@ fn module_ctx(state: &AppState) -> dc_core::ModuleContext {
         config: state.config.snapshot(),
         models: Arc::clone(&state.models),
         log_dir: state.data_dir.join("logs"),
+        image_store: state.image_store.clone(),
     }
 }

@@ -148,7 +148,7 @@ fn stage_process_attaches_metadata() {
     let ctx = PipelineContext::new(
         RunId::from_raw("20260914-000000-000001"),
         dc_pipeline::contract::LoopKind::Fast,
-        ImageLogSink::new(std::env::temp_dir(), RunId::from_raw("x"), false),
+        ImageLogSink::noop(),
         Arc::new(ConfigSnapshot::default()),
     );
     let input = ocr("你是 sb", Some("张总"));

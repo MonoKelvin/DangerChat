@@ -784,16 +784,23 @@ pub async fn pick_data_dir() -> CmdResult<Option<String>> {
 /// 写入自定义数据目录指针（重启后生效）。空字符串 = 恢复系统默认。
 #[tauri::command]
 pub fn set_data_dir(state: State<'_, Arc<AppState>>, path: String) -> CmdResult<()> {
-    let pointer = crate::state::data_dir_pointer(&state.default_data_dir);
+    use crate::bootstrap::BootstrapConfig;
+
     if path.trim().is_empty() {
-        std::fs::remove_file(&pointer).ok();
+        // 恢复系统默认：data_dir 设为 default_data_dir
+        state.bootstrap.write(|cfg: &mut BootstrapConfig| {
+            cfg.data_dir = state.default_data_dir.clone();
+        }).map_err(|e| BridgeError::Io(format!("bootstrap.json 写入失败：{e}")))?;
         tracing::info!("数据目录已恢复系统默认（重启后生效）");
         return Ok(());
     }
     let dir = std::path::PathBuf::from(path.trim());
     std::fs::create_dir_all(&dir).map_err(|e| BridgeError::Io(format!("目录创建失败：{e}")))?;
-    std::fs::write(&pointer, path.trim())
-        .map_err(|e| BridgeError::Io(format!("指针写入失败：{e}")))?;
+
+    state.bootstrap.write(|cfg: &mut BootstrapConfig| {
+        cfg.data_dir = dir.clone();
+    }).map_err(|e| BridgeError::Io(format!("bootstrap.json 写入失败：{e}")))?;
+
     tracing::info!(dir = %dir.display(), "数据目录已设置（重启后生效）");
     Ok(())
 }
@@ -824,6 +831,15 @@ pub struct MigrateReport {
 /// 递归复制目录内容（不复制子目录本身，只复制其内容）。
 /// 返回 (文件数, 总字节数)。已存在的同名文件直接覆盖。
 fn copy_dir_contents(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<(u64, u64)> {
+    copy_dir_inner(src, dst, true)
+}
+
+/// 空目录也会被创建（`create_dir_all`），确保整棵目录结构原样搬过去。
+fn copy_dir_inner(
+    src: &std::path::Path,
+    dst: &std::path::Path,
+    root: bool,
+) -> std::io::Result<(u64, u64)> {
     let mut files = 0u64;
     let mut bytes = 0u64;
     std::fs::create_dir_all(dst)?;
@@ -833,12 +849,14 @@ fn copy_dir_contents(src: &std::path::Path, dst: &std::path::Path) -> std::io::R
         let to = dst.join(entry.file_name());
         let meta = entry.metadata()?;
         if meta.is_dir() {
-            let (f, b) = copy_dir_contents(&from, &to)?;
+            let (f, b) = copy_dir_inner(&from, &to, false)?;
             files += f;
             bytes += b;
         } else if meta.is_file() {
-            // 跳过「数据目录指针」自身：它必须留在默认目录，否则自引用
-            if entry.file_name() == "data_dir.txt" {
+            // 跳过 bootstrap.json：它固定在 Roaming 目录，不跟随数据目录迁移
+            // 跳过 data_dir.txt：旧版指针文件，防止自引用
+            let fname = entry.file_name();
+            if root && (fname == "bootstrap.json" || fname == "data_dir.txt") {
                 continue;
             }
             std::fs::copy(&from, &to)?;
@@ -848,6 +866,44 @@ fn copy_dir_contents(src: &std::path::Path, dst: &std::path::Path) -> std::io::R
         // 符号链接等其它类型跳过（本项目不产出）
     }
     Ok((files, bytes))
+}
+
+/// 清空目录下的全部条目（子目录整棵删除），`keep` 中的**顶层**名字保留。
+///
+/// 返回删除失败的条目数（0 = 已清空）。目录不存在视为已清空（幂等）。
+/// 单个条目失败只记日志、继续删其余条目：能删的删干净，残留数量交给调用方汇报。
+fn clear_dir_contents(dir: &std::path::Path, keep: &[&str]) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    let mut failed = 0usize;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if keep.iter().any(|k| name.eq_ignore_ascii_case(k)) {
+            continue;
+        }
+        let path = entry.path();
+        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        let result = if is_dir {
+            std::fs::remove_dir_all(&path)
+        } else {
+            std::fs::remove_file(&path)
+        };
+        if let Err(e) = result {
+            tracing::warn!(path = %path.display(), error = %e, "旧目录条目删除失败（跳过）");
+            failed += 1;
+        }
+    }
+    failed
+}
+
+/// 两个路径是否指向同一位置（存在时按规范化比较，不存在时按字面比较）。
+fn same_path(a: &std::path::Path, b: &std::path::Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(x), Ok(y)) => x == y,
+        _ => a == b,
+    }
 }
 
 /// 一键迁移数据目录：把当前目录全部内容复制到 `target`，成功后写入指针（重启生效）。
@@ -870,13 +926,7 @@ pub fn migrate_data_dir(
     let src = state.data_dir.clone();
 
     // 目标与当前相同（含规范化后相同）→ 无事可做
-    let same = |a: &std::path::Path, b: &std::path::Path| -> bool {
-        match (a.canonicalize(), b.canonicalize()) {
-            (Ok(x), Ok(y)) => x == y,
-            _ => a == b,
-        }
-    };
-    if same(&src, &dst) {
+    if same_path(&src, &dst) {
         return Err(BridgeError::Config("目标目录与当前数据目录相同".into()));
     }
 
@@ -895,9 +945,11 @@ pub fn migrate_data_dir(
     let (files, bytes) =
         copy_dir_contents(&src, &dst).map_err(|e| BridgeError::Io(format!("数据复制失败：{e}")))?;
 
-    // 提交点：写指针（指向新目录），重启后生效
-    let pointer = crate::state::data_dir_pointer(&state.default_data_dir);
-    std::fs::write(&pointer, target).map_err(|e| BridgeError::Io(format!("指针写入失败：{e}")))?;
+    // 提交点：写 bootstrap.json（指向新目录），重启后生效
+    use crate::bootstrap::BootstrapConfig;
+    state.bootstrap.write(|cfg: &mut BootstrapConfig| {
+        cfg.data_dir = dst.clone();
+    }).map_err(|e| BridgeError::Io(format!("bootstrap.json 写入失败：{e}")))?;
 
     // 登记待清理旧目录：本进程的 data_dir 仍是旧目录（启动时解析、运行期不变），
     // 只有经此登记，「删除旧目录」才会被放行（见 delete_old_data_dir）。
@@ -974,10 +1026,19 @@ fn validate_delete_target(
     Ok(Some(canon))
 }
 
-/// 删除迁移后的旧数据目录（用户在结果弹窗中关闭对话框时调用）。
+/// 删除迁移后的旧数据目录内容（用户在结果弹窗中关闭对话框时调用）。
+///
+/// 清理范围（"删除旧"= 把旧位置下**所有**内容删光）：
+/// 1. 登记的旧数据目录（本次迁移的源目录）；
+/// 2. 系统默认目录（%APPDATA%\<identifier>）—— 首次迁移前的数据落在这里，
+///    后续每次迁移都不会再动它，不清理就会永久残留一份旧数据。
+///
+/// **指针文件 data_dir.txt 一律保留**：它记录着"新目录在哪"，删掉它下次启动会
+/// 回退到默认目录、迁移直接失效（曾因此表现为"迁移后旧目录又长满资源"）。
+/// 旧目录是默认目录时它同时还兼作"清理后仍需保留的空壳目录"。
 ///
 /// 安全约束见 `validate_delete_target` —— 只接受 `pending_cleanup` 中登记的路径。
-/// 删除成功后清空登记（幂等：重复调用会因「没有待清理目录」而拒绝，不会误删）。
+/// 清理干净后清空登记；有残留（文件被占用删不掉）则保留登记并报错，用户可重试。
 #[tauri::command]
 pub fn delete_old_data_dir(state: State<'_, Arc<AppState>>, path: String) -> CmdResult<()> {
     let pending = state.pending_cleanup.lock().ok().and_then(|g| g.clone());
@@ -990,11 +1051,47 @@ pub fn delete_old_data_dir(state: State<'_, Arc<AppState>>, path: String) -> Cmd
         }
         return Ok(());
     };
-    std::fs::remove_dir_all(&canon).map_err(|e| BridgeError::Io(format!("删除失败：{e}")))?;
+
+    let default_dir = state.default_data_dir.clone();
+    // 当前生效目录（bootstrap.json 指向处）
+    let active = state.bootstrap.with(|cfg| cfg.data_dir.clone());
+    let active = active.canonicalize().unwrap_or(active);
+    let default_canon = default_dir
+        .canonicalize()
+        .unwrap_or_else(|_| default_dir.clone());
+    let default_holds_active = active.starts_with(&default_canon);
+
+    // 1) 旧目录内容全删；旧目录即默认目录时保留 bootstrap.json（它固定在 Roaming）
+    let is_default_dir = same_path(&canon, &default_dir);
+    let keep: &[&str] = if is_default_dir {
+        &["bootstrap.json"]
+    } else {
+        &[]
+    };
+    let mut failed = clear_dir_contents(&canon, keep);
+
+    // 2) 默认目录里的历史残留（首次迁移前留下的配置/日志/模型）同样清掉，
+    //    但仅当它既不承载当前数据、也不是本次旧目录时
+    if !is_default_dir && !default_holds_active {
+        failed += clear_dir_contents(&default_dir, &["bootstrap.json"]);
+    }
+
+    if failed > 0 {
+        // 前缀由前端弹窗补（那里统一显示「旧目录清理失败：…」）
+        return Err(BridgeError::Io(format!(
+            "{failed} 项被占用未能删除，可稍后重试"
+        )));
+    }
+
+    // 3) 自定义旧目录清空后连目录本身一并移除（默认目录要留壳放指针）
+    if !is_default_dir {
+        let _ = std::fs::remove_dir(&canon);
+    }
+
     if let Ok(mut slot) = state.pending_cleanup.lock() {
         *slot = None;
     }
-    tracing::info!(path = %canon.display(), "旧数据目录已删除");
+    tracing::info!(path = %canon.display(), "旧数据目录已清理");
     Ok(())
 }
 
@@ -1079,6 +1176,79 @@ mod tests {
         assert_eq!(files, 1);
         assert_eq!(std::fs::read(dst.join("config.toml")).unwrap(), b"new");
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// 整目录结构原样搬过去：空子目录也保留。
+    #[test]
+    fn copy_dir_contents_keeps_empty_subdirs() {
+        let base = std::env::temp_dir().join(format!("dc-migrate-empty-sub-{}", std::process::id()));
+        let src = base.join("src");
+        let dst = base.join("dst");
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(src.join("models")).unwrap();
+        std::fs::create_dir_all(src.join("datasets")).unwrap();
+
+        let (files, _) = copy_dir_contents(&src, &dst).unwrap();
+
+        assert_eq!(files, 0);
+        assert!(dst.join("models").is_dir(), "空子目录也要建出来");
+        assert!(dst.join("datasets").is_dir());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// 顶层跳过指针文件，但子目录里同名的普通文件属于用户数据，必须照搬。
+    #[test]
+    fn copy_dir_skips_pointer_only_at_root() {
+        let base = std::env::temp_dir().join(format!("dc-migrate-nested-ptr-{}", std::process::id()));
+        let src = base.join("src");
+        let dst = base.join("dst");
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(src.join("backup")).unwrap();
+        std::fs::write(src.join("data_dir.txt"), b"pointer").unwrap();
+        std::fs::write(src.join("backup").join("data_dir.txt"), b"user-data").unwrap();
+
+        let (files, _) = copy_dir_contents(&src, &dst).unwrap();
+
+        assert_eq!(files, 1, "只跳过顶层指针");
+        assert!(!dst.join("data_dir.txt").exists());
+        assert_eq!(
+            std::fs::read(dst.join("backup").join("data_dir.txt")).unwrap(),
+            b"user-data"
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// 清空目录：子目录整棵删掉，`keep` 中的顶层文件保留，目录本身留下。
+    #[test]
+    fn clear_dir_contents_keeps_named_entries() {
+        let base = std::env::temp_dir().join(format!("dc-clear-{}", std::process::id()));
+        let dir = base.join("old");
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(dir.join("logs")).unwrap();
+        std::fs::create_dir_all(dir.join("models")).unwrap();
+        std::fs::write(dir.join("logs").join("a.log"), b"x").unwrap();
+        std::fs::write(dir.join("config.toml"), b"c").unwrap();
+        std::fs::write(dir.join("data_dir.txt"), b"pointer").unwrap();
+
+        let failed = clear_dir_contents(&dir, &[crate::state::POINTER_FILE]);
+
+        assert_eq!(failed, 0);
+        assert!(dir.is_dir(), "目录本身保留");
+        assert!(dir.join("data_dir.txt").is_file(), "指针必须留下");
+        assert!(!dir.join("logs").exists(), "子目录整棵删除");
+        assert!(!dir.join("models").exists());
+        assert!(!dir.join("config.toml").exists());
+        // 再清一次：已空 → 幂等成功
+        assert_eq!(clear_dir_contents(&dir, &[crate::state::POINTER_FILE]), 0);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// 清空不存在的目录视为已清空（幂等）。
+    #[test]
+    fn clear_dir_contents_missing_dir_is_ok() {
+        let base = std::env::temp_dir().join(format!("dc-clear-gone-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        assert_eq!(clear_dir_contents(&base.join("nope"), &[]), 0);
     }
 
     /// 删除校验：白名单语义 —— 只有登记的待清理目录可删。

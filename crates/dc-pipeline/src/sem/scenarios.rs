@@ -1,6 +1,6 @@
-//! 场景管理（§5.7 ScenarioStore 的场景半边；scenes.toml）。
+//! 场景管理（§5.7 ScenarioStore 的场景半边；scenes.json）。
 //!
-//! 场景 = L1 规则过滤键（rules.toml 的 `applies_to` / contacts.toml 的 `profile`
+//! 场景 = L1 规则过滤键（rules.json 的 `applies_to` / contacts.json 的 `profile`
 //! 按 id 引用）+ 展示名 + **判定基线**（`base`，formal|casual）。
 //! L2 的阈值与线性头按基线复用 —— 自定义场景不引入新的模型头，
 //! `head.rs` 的双头结构因此不受场景数量影响。
@@ -11,6 +11,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::doc::SceneDoc;
 use super::rules::Profile;
 
 /// 场景总数上限（内置 2 + 自定义最多 8）。
@@ -50,22 +51,16 @@ fn builtin() -> Vec<Scenario> {
     ]
 }
 
-#[derive(Debug, Deserialize)]
-struct TomlScenes {
-    #[serde(default)]
-    scene: Vec<TomlScene>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct TomlScene {
-    id: String,
-    name: String,
-    base: Profile,
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SceneDef {
+    pub id: String,
+    pub name: String,
+    pub base: Profile,
 }
 
 /// 场景管理器：内置 + 自定义场景的唯一来源。
 ///
-/// 持有 scenes.toml 路径，增删改即持久化；其余模块（sem 判定、bridge 命令）
+/// 持有 scenes.json 路径，增删改即持久化；其余模块（sem 判定、bridge 命令）
 /// 只经 `all` / `get` / `base_profile` / `name_of` 读参数，不感知存储细节。
 pub struct ScenarioManager {
     path: std::path::PathBuf,
@@ -81,14 +76,14 @@ impl ScenarioManager {
         }
     }
 
-    /// 从 scenes.toml 加载；文件缺失/非法 → 仅内置场景（warn，不 Err——
+    /// 从 scenes.json 加载；文件缺失/非法 → 仅内置场景（warn，不 Err——
     /// 场景文件损坏不应拖垮整个判定链路）。
     pub fn load(path: &std::path::Path) -> Self {
         let custom = match std::fs::read_to_string(path) {
-            Ok(text) => match toml::from_str::<TomlScenes>(&text) {
+            Ok(text) => match serde_json::from_str::<SceneDoc>(&text) {
                 Ok(parsed) => Self::sanitize(parsed.scene),
                 Err(e) => {
-                    tracing::warn!(path = %path.display(), error = %e, "scenes.toml 非法，仅内置场景");
+                    tracing::warn!(path = %path.display(), error = %e, "scenes.json 非法，仅内置场景");
                     Vec::new()
                 }
             },
@@ -101,7 +96,7 @@ impl ScenarioManager {
     }
 
     /// 过滤非法条目：id 与内置冲突 / 空 id / 空名 / 重名 → 丢弃（warn）。
-    fn sanitize(scenes: Vec<TomlScene>) -> Vec<Scenario> {
+    fn sanitize(scenes: Vec<SceneDef>) -> Vec<Scenario> {
         let builtin = builtin();
         let mut out = Vec::new();
         for s in scenes {
@@ -114,7 +109,7 @@ impl ScenarioManager {
                     .iter()
                     .any(|e: &Scenario| e.id == s.id || e.name == s.name.trim());
             if invalid {
-                tracing::warn!(id = %s.id, "scenes.toml 含非法/重复场景条目，已忽略");
+                tracing::warn!(id = %s.id, "scenes.json 含非法/重复场景条目，已忽略");
                 continue;
             }
             out.push(Scenario {
@@ -229,27 +224,23 @@ impl ScenarioManager {
     }
 
     fn persist(&self) -> Result<(), String> {
-        let scenes: Vec<TomlScene> = self
+        let scenes: Vec<SceneDef> = self
             .custom
             .iter()
-            .map(|s| TomlScene {
+            .map(|s| SceneDef {
                 id: s.id.clone(),
                 name: s.name.clone(),
                 base: s.base,
             })
             .collect();
-        let text = toml::to_string_pretty(&TomlScenesSerialize { scene: scenes })
-            .map_err(|e| format!("scenes.toml 序列化失败：{e}"))?;
+        let doc = SceneDoc { scene: scenes };
+        let text = serde_json::to_string_pretty(&doc)
+            .map_err(|e| format!("scenes.json 序列化失败：{e}"))?;
         if self.path.as_os_str().is_empty() {
             return Ok(()); // builtin_only 占位实例（不落盘）
         }
-        std::fs::write(&self.path, text).map_err(|e| format!("scenes.toml 写入失败：{e}"))
+        std::fs::write(&self.path, text).map_err(|e| format!("scenes.json 写入失败：{e}"))
     }
-}
-
-#[derive(Debug, Serialize)]
-struct TomlScenesSerialize {
-    scene: Vec<TomlScene>,
 }
 
 #[cfg(test)]

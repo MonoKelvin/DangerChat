@@ -1172,6 +1172,7 @@ dependencies = [
  "crossbeam-channel",
  "image",
  "serde",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.20",
  "toml 0.8.2",

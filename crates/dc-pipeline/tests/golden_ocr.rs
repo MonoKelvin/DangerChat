@@ -41,6 +41,7 @@ fn module_ctx() -> ModuleContext {
         config: Arc::new(ConfigSnapshot::new(values, 1)),
         models: Arc::new(ModelStore::new(MODELS_ROOT)),
         log_dir: std::env::temp_dir(),
+        image_store: None,
     }
 }
 
@@ -48,7 +49,7 @@ fn run_ctx(kind: LoopKind) -> PipelineContext {
     PipelineContext::new(
         RunId::from_raw("20260913-210000-000001"),
         kind,
-        ImageLogSink::new(std::env::temp_dir(), RunId::from_raw("x"), false),
+        ImageLogSink::noop(),
         Arc::new(ConfigSnapshot::default()),
     )
 }

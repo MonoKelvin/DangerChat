@@ -1,10 +1,13 @@
+import type { ReactNode } from 'react';
+
 import { cn } from '../lib/utils';
 
 interface CheckboxProps {
   checked: boolean;
   onChange: (checked: boolean) => void;
   disabled?: boolean;
-  label?: string;
+  /** 支持 ReactNode：长内容（如路径）可在调用处用 span 控制断行 */
+  label?: ReactNode;
 }
 
 /** 复选框：无边框依赖色，选中态用主色填充 + 白勾，尺寸与文本行对齐。 */
@@ -31,7 +34,7 @@ export function Checkbox({ checked, onChange, disabled, label }: CheckboxProps) 
   );
 
   const buttonCls = cn(
-    'flex cursor-pointer items-center gap-2 text-left disabled:pointer-events-none disabled:opacity-40',
+    'flex cursor-pointer items-start gap-2 text-left disabled:pointer-events-none disabled:opacity-40',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-1',
     label ? 'text-sm text-[var(--text-primary)]' : 'rounded-[5px]',
   );
@@ -41,13 +44,13 @@ export function Checkbox({ checked, onChange, disabled, label }: CheckboxProps) 
       type="button"
       role="checkbox"
       aria-checked={checked}
-      aria-label={label}
+      aria-label={typeof label === 'string' ? label : undefined}
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={buttonCls}
     >
       {box}
-      {label}
+      {label && <span className="min-w-0 break-all leading-5">{label}</span>}
     </button>
   );
 }

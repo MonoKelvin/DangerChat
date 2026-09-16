@@ -66,9 +66,9 @@ src-tauri (dangerchat 主程序壳：bootstrap 装配 / 托盘 / 窗口状态 / 
 
 ### 数据目录
 
-- 默认 `%APPDATA%\com.monostudio.dangerchat\`（config.toml / rules.toml / contacts.toml / scenes.toml / logs/ / models/ / stats.json）。
-- 用户自定义目录：默认目录下 `data_dir.txt` 指针文件，bootstrap 启动时解析，重启生效。
-- rules.toml 热重载；models/ 与 datasets/ 有目录监听（自助训练数据流）。
+- 默认 `%APPDATA%\com.monostudio.dangerchat\`（bootstrap.json / config.json / rules.json / contacts.json / scenes.json / logs/ / models/ / stats.json）。
+- 用户自定义目录：默认目录下 `bootstrap.json` 管理数据目录指针，bootstrap 启动时解析，重启生效。
+- rules.json 热重载；models/ 与 datasets/ 有目录监听（自助训练数据流）。
 
 ### 版本与元数据（单一来源，改前必读）
 

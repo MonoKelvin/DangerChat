@@ -1,4 +1,4 @@
-//! L1 规则引擎（§5.7 RuleEngine；rules.toml，FR-SEM-04）。
+//! L1 规则引擎（§5.7 RuleEngine；rules.json，FR-SEM-04）。
 //!
 //! 三种匹配模式：
 //! - `word`：CJK 逐字匹配 + 拉丁词边界（`sb` 不命中 `absb`）
@@ -12,7 +12,7 @@ use aho_corasick::AhoCorasick;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-/// 场景画像（contacts.toml 的 profile 值）。
+/// 场景画像（contacts.json 的 profile 值）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Profile {
@@ -35,7 +35,7 @@ impl std::fmt::Display for Profile {
     }
 }
 
-/// rules.toml 的 [[rule]] 条目（反序列化形态）。
+/// rules.json 的 [[rule]] 条目（反序列化形态）。
 ///
 /// 命中即 Block（v1.1 起不再区分 warn/block；L1 无严重级别字段）。
 /// 旧文件中的 `severity` 字段被 `#[serde(default)]` 静默忽略，无需迁移。
@@ -109,6 +109,12 @@ impl RuleSet {
     pub fn from_toml(text: &str) -> Result<Self, String> {
         let parsed: TomlRules =
             toml::from_str(text).map_err(|e| format!("rules.toml 解析失败：{e}"))?;
+        Self::from_defs(parsed.rule)
+    }
+
+    pub fn from_json(text: &str) -> Result<Self, String> {
+        let parsed: super::doc::RuleDoc =
+            serde_json::from_str(text).map_err(|e| format!("rules.json 解析失败：{e}"))?;
         Self::from_defs(parsed.rule)
     }
 

@@ -36,6 +36,9 @@ resources/training_set/wechat_snapcaptures/
 resources/training_set/*.zip
 *.tsbuildinfo
 
+# 真实微信截图（测试夹具，严禁上传）
+crates/dc-pipeline/tests/fixtures/golden/
+
 # 训练用的原始权重与数据集（成品 ONNX 已随 models/ 入库，各目录附 LICENSE）
 models/dc-layout-wechat/best.pt
 weights/

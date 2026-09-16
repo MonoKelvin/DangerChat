@@ -21,11 +21,7 @@ fn run_ctx() -> PipelineContext {
     PipelineContext::new(
         RunId::from_raw("20260913-200000-000001"),
         LoopKind::Slow,
-        ImageLogSink::new(
-            std::path::PathBuf::from("unused"),
-            RunId::from_raw("x"),
-            false,
-        ),
+        ImageLogSink::noop(),
         Arc::new(dc_core::ConfigSnapshot::default()),
     )
 }
@@ -59,6 +55,7 @@ fn ut_lay_01_golden_regions_iou() {
         config: Arc::new(dc_core::ConfigSnapshot::new(values, 1)),
         models: Arc::new(dc_core::ModelStore::new(MODELS_ROOT)),
         log_dir: tmp.path().to_path_buf(),
+        image_store: None,
     };
     let mut stage = LayoutStage::new();
     stage.init(&mctx).expect("layout init 失败（模型非法？）");

@@ -201,6 +201,7 @@ classes = ["chat_list", "chat_window", "chat_target", "msg_input"]
         config: Arc::new(dc_core::ConfigSnapshot::new(values, 1)),
         models: Arc::new(ModelStore::new(tmp.path())),
         log_dir: tmp.path().to_path_buf(),
+        image_store: None,
     };
     (mctx, tmp)
 }
@@ -218,11 +219,7 @@ fn run_ctx() -> PipelineContext {
     PipelineContext::new(
         RunId::from_raw("20260913-200000-000001"),
         LoopKind::Slow,
-        ImageLogSink::new(
-            std::path::PathBuf::from("unused"),
-            RunId::from_raw("x"),
-            false,
-        ),
+        ImageLogSink::noop(),
         Arc::new(dc_core::ConfigSnapshot::default()),
     )
 }
@@ -279,6 +276,7 @@ fn missing_model_is_fatal() {
         config: Arc::new(dc_core::ConfigSnapshot::new(values, 1)),
         models: Arc::new(ModelStore::new(tmp.path())),
         log_dir: tmp.path().to_path_buf(),
+        image_store: None,
     };
     let mut stage = LayoutStage::new();
     let err = stage.init(&mctx).unwrap_err();

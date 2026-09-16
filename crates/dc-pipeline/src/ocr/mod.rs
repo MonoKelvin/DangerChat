@@ -113,52 +113,12 @@ impl OcrStage {
             }
         }
 
-        // 03_ocr 可视化（识别行画到快照副本）——仅 debug 用途，失败不阻断
-        if ctx.image_log.is_enabled() {
-            let img = draw_lines(snapshot, &draft_blocks, layout);
-            if let Err(err) = ctx.image_log.save("03_ocr", &img) {
-                tracing::warn!(error = %err, "OCR 可视化写入图片日志失败");
-            }
-        }
+        // 03_ocr 可视化已移除（按用户要求只保留 01_window + 02_layout）
 
         let mut result = assemble::assemble(draft_blocks, &self.noise_words, self.min_conf as f32);
         result.chat_target = chat_target;
         Ok(result)
     }
-}
-
-/// 把识别行画到快照副本（快环只有 msg_input 行；坐标平移回窗口系）。
-fn draw_lines(
-    snapshot: &WindowSnapshot,
-    lines: &[assemble::RawLine],
-    layout: &RegionLayout,
-) -> image::RgbaImage {
-    let mut img = snapshot.image.clone();
-    let Some(input_rect) = layout.rect_of(TAG_MSG_INPUT) else {
-        return img;
-    };
-    for l in lines {
-        let (x, y) = (input_rect.x + l.rect.x, input_rect.y + l.rect.y);
-        for dx in 0..l.rect.w {
-            for dy in [0, l.rect.h.saturating_sub(1)] {
-                if let Some(p) =
-                    img.get_pixel_mut_checked((x + dx as i32) as u32, (y + dy as i32) as u32)
-                {
-                    *p = image::Rgba([255, 86, 48, 255]);
-                }
-            }
-        }
-        for dy in 0..l.rect.h {
-            for dx in [0, l.rect.w.saturating_sub(1)] {
-                if let Some(p) =
-                    img.get_pixel_mut_checked((x + dx as i32) as u32, (y + dy as i32) as u32)
-                {
-                    *p = image::Rgba([255, 86, 48, 255]);
-                }
-            }
-        }
-    }
-    img
 }
 
 impl Default for OcrStage {

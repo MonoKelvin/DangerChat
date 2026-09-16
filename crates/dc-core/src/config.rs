@@ -3,13 +3,15 @@
 //! 设计要点：
 //! - **schema 驱动**：每个模块用 [`ConfigField`] 声明自己的配置项（键、类型、范围、默认值、说明），
 //!   前端只依赖 schema 渲染表单，新增配置项零前端改动（§5.10）。
-//! - **原子持久化**：`写 tmp → fsync → rename` 替换 `config.toml`，并发写不丢配置（UT-CORE-04）。
+//! - **原子持久化**：`写 tmp → fsync → rename` 替换 `config.json`，并发写不丢配置（UT-CORE-04）。
 //! - **损坏自愈**：配置文件解析失败时备份为 `.broken-<ts>` 并以默认值重建（UT-CORE-03）。
 //! - **快照语义**：运行中的流水线只读 [`ConfigSnapshot`]，每轮开始取一次，运行中配置变更不影响本轮（§4）。
+//!
+//! 点分键（`guard.send_key`）落盘为嵌套 JSON 对象（`{"guard":{"send_key":"enter"}}`），
+//! 与实际文件形态一一对应，便于用户手改。
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
@@ -17,7 +19,8 @@ use std::sync::{Arc, Mutex, RwLock};
 use crossbeam_channel::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
 
-use crate::time;
+use crate::config_doc;
+use crate::json_file;
 
 /// 配置项类型与校验约束。序列化后随 schema 下发前端，用于选择控件与做本地校验。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -47,7 +50,8 @@ pub enum ConfigType {
 }
 
 impl ConfigType {
-    /// 校验并规范化取值；`Int` 接受整值浮点，`Float` 接受整数（TOML 里 `1` 与 `1.0` 写法不同）。
+    /// 校验并规范化取值；`Int` 接受整值浮点，`Float` 接受整数（JSON 只有一种数字，
+    /// 手写 `1` 与 `1.0` 都可能落到任一分支）。
     pub fn normalize(&self, value: &ConfigValue) -> Result<ConfigValue, String> {
         match (self, value) {
             (ConfigType::Bool, ConfigValue::Bool(b)) => Ok(ConfigValue::Bool(*b)),
@@ -163,14 +167,16 @@ impl ConfigValue {
         }
     }
 
-    fn to_toml(&self) -> toml::Value {
+    fn to_json(&self) -> serde_json::Value {
         match self {
-            ConfigValue::Bool(b) => toml::Value::Boolean(*b),
-            ConfigValue::Int(i) => toml::Value::Integer(*i),
-            ConfigValue::Float(f) => toml::Value::Float(*f),
-            ConfigValue::Str(s) => toml::Value::String(s.clone()),
+            ConfigValue::Bool(b) => serde_json::Value::Bool(*b),
+            ConfigValue::Int(i) => serde_json::Value::Number((*i).into()),
+            ConfigValue::Float(f) => serde_json::Number::from_f64(*f)
+                .map(serde_json::Value::Number)
+                .unwrap_or(serde_json::Value::Null),
+            ConfigValue::Str(s) => serde_json::Value::String(s.clone()),
             ConfigValue::StrList(v) => {
-                toml::Value::Array(v.iter().map(|s| toml::Value::String(s.clone())).collect())
+                serde_json::Value::Array(v.iter().map(|s| serde_json::Value::String(s.clone())).collect())
             }
         }
     }
@@ -496,6 +502,37 @@ impl ConfigCenter {
         Ok(normalized)
     }
 
+    /// 写入非 schema 管理的键（主程序壳的内部状态，如窗口位置记忆）。
+    ///
+    /// 与 [`ConfigCenter::set`] 的分工：`set` 走 schema 校验并广播（模块配置）；
+    /// 本方法仅供壳层持久化自有状态——不进 schema（前端设置页不渲染）、
+    /// 不广播（无模块订阅这些键）。schema 已注册的键一律拒绝，防止绕过校验。
+    /// 一次落盘写多个键（窗口 x/y/width/height 四键同源，逐键写会落盘出中间态）。
+    pub fn set_unmanaged_batch(
+        &self,
+        entries: Vec<(String, ConfigValue)>,
+    ) -> Result<(), ConfigError> {
+        {
+            let schema = self.inner.schema.read().expect("schema poisoned");
+            for (key, _) in &entries {
+                if schema.contains_key(key) {
+                    return Err(ConfigError::InvalidValue {
+                        key: key.to_string(),
+                        reason: "schema 管理的键必须走 set()，不得绕过校验".into(),
+                    });
+                }
+            }
+        }
+        let mut values = self.inner.values.write().expect("values poisoned");
+        for (key, value) in entries {
+            values.insert(key, value);
+        }
+        let version = self.inner.version.fetch_add(1, Ordering::SeqCst) + 1;
+        let snapshot = Arc::new(ConfigSnapshot::new(values.clone(), version));
+        *self.inner.snapshot.write().expect("snapshot poisoned") = snapshot;
+        self.save_locked(&values)
+    }
+
     /// 订阅配置变更；返回的接收端被丢弃后自动从广播表移除。
     pub fn subscribe(&self) -> Receiver<ConfigChanged> {
         let (tx, rx) = crossbeam_channel::unbounded();
@@ -518,55 +555,67 @@ impl ConfigCenter {
     }
 
     fn save_locked(&self, values: &BTreeMap<String, ConfigValue>) -> Result<(), ConfigError> {
-        let mut table = toml::value::Table::new();
+        let mut obj = serde_json::Map::new();
         for (key, value) in values {
-            insert_path(&mut table, key, value.to_toml());
+            insert_json_path(&mut obj, key, value.to_json());
         }
-        let text = toml::to_string_pretty(&table).map_err(|e| ConfigError::Parse(e.to_string()))?;
+        let text = serde_json::to_string_pretty(&obj).map_err(|e| ConfigError::Parse(e.to_string()))?;
+        json_file::write_atomic(&self.inner.path, text.as_bytes())
+    }
 
-        let path = &self.inner.path;
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
-                fs::create_dir_all(parent).map_err(|source| ConfigError::Io {
-                    path: parent.to_path_buf(),
-                    source,
-                })?;
-            }
+    /// 从磁盘重新加载配置（热重载）。
+    pub fn reload(&self) -> Result<(), ConfigError> {
+        let (loaded, recoveries) = load_or_recover(&self.inner.path)?;
+
+        // 追加恢复记录
+        if !recoveries.is_empty() {
+            let mut rec_guard = self.inner.recoveries.lock().expect("recoveries poisoned");
+            rec_guard.extend(recoveries);
         }
-        // 原子替换：写 tmp → fsync → rename（Windows 上 rename 语义为 MoveFileEx + REPLACE_EXISTING）
-        let tmp = tmp_path(path);
-        {
-            let mut f = fs::File::create(&tmp).map_err(|source| ConfigError::Io {
-                path: tmp.clone(),
-                source,
-            })?;
-            f.write_all(text.as_bytes())
-                .map_err(|source| ConfigError::Io {
-                    path: tmp.clone(),
-                    source,
-                })?;
-            f.sync_all().map_err(|source| ConfigError::Io {
-                path: tmp.clone(),
-                source,
-            })?;
+
+        // 合并 schema 默认值 + 已加载值
+        let schema = self.inner.schema.read().expect("schema poisoned");
+        let mut merged = BTreeMap::new();
+        for field in schema.values() {
+            let key = &field.key;
+            merged.insert(
+                key.clone(),
+                loaded.get(key).cloned().unwrap_or_else(|| field.default.clone()),
+            );
         }
-        fs::rename(&tmp, path).map_err(|source| ConfigError::Io {
-            path: path.clone(),
-            source,
-        })
+
+        // 替换运行时值
+        let mut values = self.inner.values.write().expect("values poisoned");
+        *values = merged;
+
+        Ok(())
     }
 }
 
-fn tmp_path(path: &Path) -> PathBuf {
-    let mut s = path.as_os_str().to_os_string();
-    s.push(".tmp");
-    PathBuf::from(s)
-}
+impl config_doc::Document for ConfigCenter {
+    fn name(&self) -> &str {
+        "config"
+    }
 
-fn broken_path(path: &Path) -> PathBuf {
-    let mut s = path.as_os_str().to_os_string();
-    s.push(format!(".broken-{}", time::unix_now()));
-    PathBuf::from(s)
+    fn path(&self) -> &Path {
+        &self.inner.path
+    }
+
+    fn flush(&self) -> Result<(), ConfigError> {
+        self.save()
+    }
+
+    fn reload(&self) -> Result<(), ConfigError> {
+        ConfigCenter::reload(self)
+    }
+
+    fn recoveries(&self) -> Vec<RecoveryRecord> {
+        self.inner
+            .recoveries
+            .lock()
+            .expect("recoveries poisoned")
+            .clone()
+    }
 }
 
 /// 读取配置；损坏时备份并以空配置继续。
@@ -582,73 +631,61 @@ fn load_or_recover(
     })?;
 
     let mut out = BTreeMap::new();
-    let parse_result = text
-        .parse::<toml::Value>()
+    let parse_result = serde_json::from_str::<serde_json::Value>(&text)
         .map_err(|e| ConfigError::Parse(e.to_string()))
-        .and_then(|v| flatten("", &v, &mut out));
+        .and_then(|v| flatten_json("", &v, &mut out));
 
     match parse_result {
         Ok(()) => Ok((out, Vec::new())),
         Err(err) => {
-            let backup = broken_path(path);
-            fs::rename(path, &backup).map_err(|source| ConfigError::Io {
-                path: path.to_path_buf(),
-                source,
-            })?;
-            tracing::warn!(
-                backup = %backup.display(),
-                error = %err,
-                "配置文件损坏，已备份并以默认值重建"
-            );
-            Ok((
-                BTreeMap::new(),
-                vec![RecoveryRecord {
-                    backup,
-                    reason: err.to_string(),
-                }],
-            ))
+            let recovery = json_file::backup_broken(path, &err.to_string())?;
+            Ok((BTreeMap::new(), vec![recovery]))
         }
     }
 }
 
-fn flatten(
+fn flatten_json(
     prefix: &str,
-    value: &toml::Value,
+    value: &serde_json::Value,
     out: &mut BTreeMap<String, ConfigValue>,
 ) -> Result<(), ConfigError> {
     match value {
-        toml::Value::Table(t) => {
-            for (k, v) in t {
+        serde_json::Value::Object(obj) => {
+            for (k, v) in obj {
                 let key = if prefix.is_empty() {
                     k.clone()
                 } else {
                     format!("{prefix}.{k}")
                 };
-                flatten(&key, v, out)?;
+                flatten_json(&key, v, out)?;
             }
             Ok(())
         }
-        toml::Value::Boolean(b) => {
+        serde_json::Value::Bool(b) => {
             out.insert(prefix.to_string(), ConfigValue::Bool(*b));
             Ok(())
         }
-        toml::Value::Integer(i) => {
-            out.insert(prefix.to_string(), ConfigValue::Int(*i));
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                out.insert(prefix.to_string(), ConfigValue::Int(i));
+            } else if let Some(f) = n.as_f64() {
+                out.insert(prefix.to_string(), ConfigValue::Float(f));
+            } else {
+                return Err(ConfigError::Parse(format!(
+                    "`{prefix}` 数字取值超出范围: {n}"
+                )));
+            }
             Ok(())
         }
-        toml::Value::Float(f) => {
-            out.insert(prefix.to_string(), ConfigValue::Float(*f));
-            Ok(())
-        }
-        toml::Value::String(s) => {
+        serde_json::Value::String(s) => {
             out.insert(prefix.to_string(), ConfigValue::Str(s.clone()));
             Ok(())
         }
-        toml::Value::Array(items) => {
+        serde_json::Value::Array(items) => {
             let mut list = Vec::with_capacity(items.len());
             for item in items {
                 match item {
-                    toml::Value::String(s) => list.push(s.clone()),
+                    serde_json::Value::String(s) => list.push(s.clone()),
                     other => {
                         return Err(ConfigError::Parse(format!(
                             "`{prefix}` 数组含非字符串元素: {other:?}"
@@ -659,26 +696,26 @@ fn flatten(
             out.insert(prefix.to_string(), ConfigValue::StrList(list));
             Ok(())
         }
-        other => Err(ConfigError::Parse(format!(
-            "`{prefix}` 取值类型不支持: {other:?}"
+        serde_json::Value::Null => Err(ConfigError::Parse(format!(
+            "`{prefix}` 取值为 null"
         ))),
     }
 }
 
-fn insert_path(table: &mut toml::value::Table, key: &str, value: toml::Value) {
+fn insert_json_path(obj: &mut serde_json::Map<String, serde_json::Value>, key: &str, value: serde_json::Value) {
     match key.split_once('.') {
         None => {
-            table.insert(key.to_string(), value);
+            obj.insert(key.to_string(), value);
         }
         Some((head, rest)) => {
-            let entry = table
+            let entry = obj
                 .entry(head.to_string())
-                .or_insert_with(|| toml::Value::Table(toml::value::Table::new()));
-            if !entry.is_table() {
-                *entry = toml::Value::Table(toml::value::Table::new());
+                .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+            if !entry.is_object() {
+                *entry = serde_json::Value::Object(serde_json::Map::new());
             }
-            if let Some(inner) = entry.as_table_mut() {
-                insert_path(inner, rest, value);
+            if let Some(inner) = entry.as_object_mut() {
+                insert_json_path(inner, rest, value);
             }
         }
     }

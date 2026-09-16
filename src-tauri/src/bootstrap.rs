@@ -26,9 +26,14 @@ fn default_data_dir(app: &tauri::AppHandle) -> std::path::PathBuf {
 pub fn bootstrap(app: &tauri::AppHandle) -> Arc<AppState> {
     let default_dir = default_data_dir(app);
     let _ = std::fs::create_dir_all(&default_dir);
-    // 自定义数据目录指针（默认目录下的 data_dir.txt）优先于系统默认
-    let data_dir = dc_bridge::state::resolve_data_dir(default_dir.clone());
+
+    // 0) 加载 bootstrap.json（数据目录指针）
+    let (bootstrap_store, data_dir) =
+        dc_bridge::bootstrap::load_or_create(&default_dir).expect("bootstrap.json 加载失败");
     let _ = std::fs::create_dir_all(&data_dir);
+
+    // 清理旧指针文件 data_dir.txt（忽略错误）
+    dc_bridge::bootstrap::cleanup_legacy_pointer(&default_dir);
 
     // 1) 日志（最先：一切后续步骤可观测）
     let log_center = LogCenter::init(LogOptions {
@@ -52,7 +57,7 @@ pub fn bootstrap(app: &tauri::AppHandle) -> Arc<AppState> {
 
     // 2) 配置中心（模块 schema 注册 + finalize）
     let config =
-        Arc::new(ConfigCenter::open(data_dir.join("config.toml")).expect("配置中心打开失败"));
+        Arc::new(ConfigCenter::open(data_dir.join("config.json")).expect("配置中心打开失败"));
     {
         // intercept 的配置面是自由函数（含 target.process_name 等装配前需要的键）
         config
@@ -97,11 +102,52 @@ pub fn bootstrap(app: &tauri::AppHandle) -> Arc<AppState> {
                 ],
             )
             .expect("alert schema 注册失败");
+        // 调试配置项（图片存储）
+        config
+            .register_module(
+                "debug",
+                vec![
+                    dc_core::ConfigField {
+                        key: "debug.save_images".into(),
+                        ty: dc_core::ConfigType::Bool,
+                        default: dc_core::ConfigValue::Bool(false),
+                        label: "保存调试图片".into(),
+                        help: "开启后异步保存流水线截图到循环目录（logs/images/1~N/）".into(),
+                        group: "高级".into(),
+                        owner: "debug".into(),
+                    },
+                    dc_core::ConfigField {
+                        key: "debug.image_dirs_limit".into(),
+                        ty: dc_core::ConfigType::Int { min: 10, max: 100 },
+                        default: dc_core::ConfigValue::Int(50),
+                        label: "图片目录数量上限".into(),
+                        help: "循环覆盖目录上限（调小时自动删除超出部分）".into(),
+                        group: "高级".into(),
+                        owner: "debug".into(),
+                    },
+                ],
+            )
+            .expect("debug schema 注册失败");
         config.finalize().expect("配置 finalize 失败");
     }
 
     // 3) 模型仓库（models/，权重 gitignore）
     let models = Arc::new(ModelStore::new(data_dir.join("models")));
+
+    // 3.5) 图片存储（调试模式）
+    let image_store = if config.snapshot().bool_or("debug.save_images", false) {
+        let limit = config.snapshot().i64_or("debug.image_dirs_limit", 50) as u32;
+        let cursor = bootstrap_store.with(|cfg| cfg.images_cursor);
+        let store = dc_core::RollingImageStore::new(
+            data_dir.join("logs").join("images"),
+            limit.clamp(10, 100),
+            cursor,
+        );
+        tracing::info!(limit, cursor, "调试图片存储已启用（异步循环目录）");
+        Some(Arc::new(std::sync::Mutex::new(store)))
+    } else {
+        None
+    };
 
     // 4) Intercept（钩子 + 前台监听；RAII guard 存在 AppState 生命周期外——
     //    由 Intercept 自身持有，进程退出随 Drop 卸载）
@@ -124,13 +170,15 @@ pub fn bootstrap(app: &tauri::AppHandle) -> Arc<AppState> {
     let state = Arc::new(AppState {
         sys,
         log_center,
+        image_store,
+        bootstrap: bootstrap_store,
         config: Arc::clone(&config),
         models,
         intercept: Arc::clone(&intercept),
         guard: std::sync::Mutex::new(None),
         target_process: std::sync::Mutex::new(target.clone()),
         scenarios: std::sync::Mutex::new(dc_pipeline::sem::scenarios::ScenarioManager::load(
-            &data_dir.join("scenes.toml"),
+            &data_dir.join("scenes.json"),
         )),
         stats: DailyStats::load(data_dir.join("stats.json")),
         countdown_secs: std::sync::Mutex::new(

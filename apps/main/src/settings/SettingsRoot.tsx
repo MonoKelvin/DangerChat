@@ -549,8 +549,11 @@ function MigrateResultDialog({
         <Checkbox
           checked={removeOld}
           onChange={setRemoveOld}
-          label={`删除旧目录（${report.previous}）`}
+          label={`删除旧目录：${report.previous}`}
         />
+        <p className="mt-1.5 pl-6 text-xs text-[var(--text-tertiary)]">
+          旧目录下所有内容都会删除，包括系统默认目录里迁移前留下的数据；指向新目录的指针会保留。
+        </p>
       </div>
       {cleanupError && (
         <p className="mt-2.5 text-xs text-[var(--warning)]">旧目录清理失败：{cleanupError}</p>

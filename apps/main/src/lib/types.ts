@@ -54,7 +54,7 @@ export interface RuleDto {
   applies_to: string[];
 }
 
-/** 场景（scenes.toml；内置「正式」「个人」+ 自定义，共 ≤10） */
+/** 场景（scenes.json；内置「正式」「个人」+ 自定义，共 ≤10） */
 export interface ScenarioDto {
   id: string;
   name: string;

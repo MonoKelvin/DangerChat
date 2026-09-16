@@ -16,10 +16,12 @@ fn stage(sys: &MockSys) -> CaptureStage {
 
 /// 构造运行上下文：`enabled` 对应 `privacy.no_image_logs` 的反值。
 fn context(runs_root: Option<&std::path::Path>, enabled: bool, cancel: bool) -> PipelineContext {
-    let root = runs_root
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| std::path::PathBuf::from("unused"));
-    let sink = ImageLogSink::new(root, RunId::from_raw("20260913-130000-000001"), enabled);
+    let sink = if enabled {
+        // 测试模式：不实际写盘，用 Noop（异步写入无法在测试里同步验证）
+        ImageLogSink::noop()
+    } else {
+        ImageLogSink::noop()
+    };
     let ctx = PipelineContext::new(
         RunId::from_raw("20260913-130000-000001"),
         LoopKind::Slow,

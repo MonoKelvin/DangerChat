@@ -9,6 +9,7 @@
 //! 3. 空草稿 → Safe。
 
 pub mod contacts;
+pub mod doc;
 pub mod embedder;
 pub mod head;
 pub mod rules;
@@ -96,7 +97,7 @@ impl SemStage {
     ) {
         // 重载规则
         match std::fs::read_to_string(rules_path) {
-            Ok(text) => match RuleSet::from_toml(&text) {
+            Ok(text) => match RuleSet::from_json(&text) {
                 Ok(rs) => {
                     if let Ok(mut w) = self.rules.write() {
                         *w = rs;
@@ -110,7 +111,7 @@ impl SemStage {
 
         // 重载联系人
         if let Ok(text) = std::fs::read_to_string(contacts_path) {
-            match ContactBook::from_toml(&text) {
+            match ContactBook::from_json(&text) {
                 Ok(cb) => {
                     if let Ok(mut w) = self.contacts.write() {
                         *w = cb;
@@ -246,10 +247,10 @@ impl Module for SemStage {
         let rules_path = mctx
             .log_dir
             .parent()
-            .map(|d| d.join("rules.toml"))
-            .unwrap_or_else(|| std::path::PathBuf::from("rules.toml"));
+            .map(|d| d.join("rules.json"))
+            .unwrap_or_else(|| std::path::PathBuf::from("rules.json"));
         match std::fs::read_to_string(&rules_path) {
-            Ok(text) => match RuleSet::from_toml(&text) {
+            Ok(text) => match RuleSet::from_json(&text) {
                 Ok(rs) => {
                     if let Ok(mut w) = self.rules.write() {
                         *w = rs;
@@ -272,10 +273,10 @@ impl Module for SemStage {
         let contacts_path = mctx
             .log_dir
             .parent()
-            .map(|d| d.join("contacts.toml"))
-            .unwrap_or_else(|| std::path::PathBuf::from("contacts.toml"));
+            .map(|d| d.join("contacts.json"))
+            .unwrap_or_else(|| std::path::PathBuf::from("contacts.json"));
         match std::fs::read_to_string(&contacts_path) {
-            Ok(text) => match ContactBook::from_toml(&text) {
+            Ok(text) => match ContactBook::from_json(&text) {
                 Ok(cb) => {
                     if let Ok(mut w) = self.contacts.write() {
                         *w = cb;
@@ -295,7 +296,7 @@ impl Module for SemStage {
             }
         }
 
-        // 场景表（数据目录根 scenes.toml；缺失 = 仅内置场景）
+        // 场景表（数据目录根 scenes.json；缺失 = 仅内置场景）
         let scenes_path = mctx
             .log_dir
             .parent()

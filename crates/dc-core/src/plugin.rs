@@ -13,12 +13,14 @@ use std::time::Duration;
 use crate::config::{ConfigCenter, ConfigError, ConfigField, ConfigSnapshot};
 use crate::model_store::ModelStore;
 
-/// 模块初始化上下文：模块所需的一切外部依赖都从这里注入，模块不读全局状态（§4 约定）。
+/// 模块初始化上下文：模块所需的一切外部依赖都从这里注入,模块不读全局状态（§4 约定）。
 pub struct ModuleContext {
     pub config: Arc<ConfigSnapshot>,
     pub models: Arc<ModelStore>,
     /// 日志目录（模块自有的中间产物写在这里的子目录下）。
     pub log_dir: PathBuf,
+    /// 图片存储（调试模式专用，异步循环目录写入）。
+    pub image_store: Option<Arc<std::sync::Mutex<crate::image_store::RollingImageStore>>>,
 }
 
 #[derive(Debug, thiserror::Error)]

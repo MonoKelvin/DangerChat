@@ -248,9 +248,12 @@ impl LogCenter {
         runs_root(&self.opts.dir)
     }
 
-    /// 为某一轮分析创建图片日志句柄。`enabled=false`（隐私模式或未开图片日志）时返回 Noop。
-    pub fn image_sink(&self, run_id: &RunId, enabled: bool) -> ImageLogSink {
-        ImageLogSink::new(self.runs_dir(), run_id.clone(), enabled)
+    /// 为某一轮分析创建图片日志句柄。从 AppState.image_store 传入。
+    pub fn image_sink(&self, store: Option<Arc<std::sync::Mutex<crate::image_store::RollingImageStore>>>) -> ImageLogSink {
+        match store {
+            Some(s) => ImageLogSink::from_store(s),
+            None => ImageLogSink::noop(),
+        }
     }
 
     /// 按保留天数与总量上限清理日志文件。
@@ -459,69 +462,43 @@ pub enum ImageLogError {
     },
 }
 
-/// 图片日志句柄。`Noop` 与 `Dir` 的调用侧代码完全一致，隐私开关只影响构造（§5.1）。
-#[derive(Debug, Clone)]
+/// 图片日志句柄。`Noop` 与 `Store` 的调用侧代码完全一致，隐私开关只影响构造（§5.1）。
+#[derive(Clone)]
 pub enum ImageLogSink {
-    /// 不落盘（隐私模式或 `privacy.no_image_logs = true`）。
+    /// 不落盘（隐私模式或 `debug.save_images = false`）。
     Noop,
-    Dir {
-        dir: PathBuf,
-        run_id: RunId,
-        /// 目录是否已创建（懒创建：未真正写图时不留下空目录）。
-        created: Arc<std::sync::atomic::AtomicBool>,
+    /// 异步保存到循环目录（调试模式）。
+    Store {
+        store: Arc<std::sync::Mutex<crate::image_store::RollingImageStore>>,
+        dir_index: u32,
     },
 }
 
 impl ImageLogSink {
-    pub fn new(runs_root: impl Into<PathBuf>, run_id: RunId, enabled: bool) -> Self {
-        if !enabled {
-            return ImageLogSink::Noop;
-        }
-        ImageLogSink::Dir {
-            dir: runs_root.into(),
-            run_id,
-            created: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        }
+    /// 从 RollingImageStore 创建（调试模式开启时）。
+    pub fn from_store(store: Arc<std::sync::Mutex<crate::image_store::RollingImageStore>>) -> Self {
+        let dir_index = store.lock().expect("image store lock").next_index();
+        ImageLogSink::Store { store, dir_index }
+    }
+
+    /// 创建 Noop（调试模式关闭时）。
+    pub fn noop() -> Self {
+        ImageLogSink::Noop
     }
 
     pub fn is_enabled(&self) -> bool {
-        matches!(self, ImageLogSink::Dir { .. })
-    }
-
-    /// 本轮图片目录（Noop 时为 `None`）。
-    pub fn run_dir(&self) -> Option<PathBuf> {
-        match self {
-            ImageLogSink::Noop => None,
-            ImageLogSink::Dir { dir, run_id, .. } => Some(dir.join(run_id.as_str())),
-        }
+        matches!(self, ImageLogSink::Store { .. })
     }
 
     /// 保存一张过程图。`name` 形如 `01_window`（自动补 `.png`）。
+    /// 异步非阻塞：图片编码与写盘在后台线程完成。
     pub fn save(&self, name: &str, image: &image::RgbaImage) -> Result<(), ImageLogError> {
         match self {
             ImageLogSink::Noop => Ok(()),
-            ImageLogSink::Dir {
-                run_id, created, ..
-            } => {
-                let dir = self
-                    .run_dir()
-                    .ok_or_else(|| ImageLogError::Encode("missing run dir".into()))?;
-                if !created.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                    fs::create_dir_all(&dir).map_err(|source| ImageLogError::Io {
-                        path: dir.clone(),
-                        source,
-                    })?;
-                }
-                let file_name = if name.ends_with(".png") {
-                    name.to_string()
-                } else {
-                    format!("{name}.png")
-                };
-                let path = dir.join(file_name);
-                image.save(&path).map_err(|e| match e {
-                    image::ImageError::IoError(source) => ImageLogError::Io { path, source },
-                    other => ImageLogError::Encode(format!("{run_id}: {other}")),
-                })
+            ImageLogSink::Store { store, dir_index } => {
+                let store = store.lock().expect("image store lock");
+                store.save_async(*dir_index, name, Arc::new(image.clone()));
+                Ok(())
             }
         }
     }

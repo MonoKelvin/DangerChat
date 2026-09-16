@@ -1,10 +1,10 @@
-//! 聊天对象画像（§5.7 ScenarioStore 的 contacts 半边；contacts.toml，FR-SEM-03）。
+//! 聊天对象画像（§5.7 ScenarioStore 的 contacts 半边；contacts.json，FR-SEM-03）。
 //!
 //! profile 值为场景 id（ScenarioManager 分发）；未标记对象回落 `formal`。
 //! 解析不做场景合法性校验——已删除场景的残留条目由 `ScenarioManager::base_profile`
 //! 兜底回落 Formal（保守），不因引用失效而拒绝整个画像文件。
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
 struct TomlContacts {
@@ -12,10 +12,10 @@ struct TomlContacts {
     contact: Vec<ContactDef>,
 }
 
-#[derive(Debug, Deserialize)]
-struct ContactDef {
-    name: String,
-    profile: String,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContactDef {
+    pub name: String,
+    pub profile: String,
 }
 
 /// 画像表（不可变快照，热重载整体换入）。
@@ -28,6 +28,22 @@ impl ContactBook {
     pub fn from_toml(text: &str) -> Result<Self, String> {
         let parsed: TomlContacts =
             toml::from_str(text).map_err(|e| format!("contacts.toml 解析失败：{e}"))?;
+        let mut entries = std::collections::HashMap::new();
+        for c in parsed.contact {
+            if c.name.trim().is_empty() {
+                return Err("联系人 name 不能为空".into());
+            }
+            if c.profile.trim().is_empty() {
+                return Err(format!("联系人「{}」profile 不能为空", c.name));
+            }
+            entries.insert(c.name, c.profile);
+        }
+        Ok(Self { entries })
+    }
+
+    pub fn from_json(text: &str) -> Result<Self, String> {
+        let parsed: super::doc::ContactDoc =
+            serde_json::from_str(text).map_err(|e| format!("contacts.json 解析失败：{e}"))?;
         let mut entries = std::collections::HashMap::new();
         for c in parsed.contact {
             if c.name.trim().is_empty() {
