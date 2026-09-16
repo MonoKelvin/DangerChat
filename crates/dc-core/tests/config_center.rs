@@ -328,3 +328,64 @@ fn unmanaged_keys_roundtrip_and_schema_guard() {
     // 模块配置共存无损
     assert_eq!(snap2.i64_or("guard.verdict_ttl_ms", 0), 2000);
 }
+
+/// UT-CORE-05 钳制写：数值越界取最近边界，非数值类型语义与 `set` 一致
+///
+/// 动机：前端数字控件按 schema 渲染但不持有 min/max（早期 DTO 未透出范围），
+/// 越界直接报错 = 用户看不见的静默失败。钳制写把「明显可推断的意图」落地。
+#[test]
+fn ut_core_05_set_clamped_snaps_to_nearest_bound() {
+    let dir = TempDir::new().unwrap();
+    let center = open(&dir);
+    center.finalize().expect("finalize");
+
+    // Int 上溢/下溢 → 取边界
+    let v = center
+        .set_clamped("guard.verdict_ttl_ms", ConfigValue::Int(99_999))
+        .expect("clamped high");
+    assert_eq!(v, ConfigValue::Int(10_000));
+    let v = center
+        .set_clamped("guard.verdict_ttl_ms", ConfigValue::Int(-5))
+        .expect("clamped low");
+    assert_eq!(v, ConfigValue::Int(100));
+
+    // Float 越界 → 取边界；范围内原样通过
+    let v = center
+        .set_clamped("sem.threshold.formal", ConfigValue::Float(2.5))
+        .expect("clamped float");
+    assert_eq!(v, ConfigValue::Float(1.0));
+    let v = center
+        .set_clamped("sem.threshold.formal", ConfigValue::Float(0.42))
+        .expect("in range");
+    assert_eq!(v, ConfigValue::Float(0.42));
+
+    // 整值 Float 写 Int 字段：越界同样钳制
+    let v = center
+        .set_clamped("guard.verdict_ttl_ms", ConfigValue::Int(50))
+        .expect("clamped int low");
+    assert_eq!(v, ConfigValue::Int(100));
+
+    // 非数值类型：钳制无意义，退回严格校验（类型不符仍拒绝）
+    assert!(center
+        .set_clamped("guard.enabled", ConfigValue::Str("yes".into()))
+        .is_err());
+    // 枚举白名单同样不被钳制绕过
+    assert!(center
+        .set_clamped("guard.send_key", ConfigValue::Str("f13".into()))
+        .is_err());
+
+    // 结果已落盘（与 set 同一条写路径）
+    let reopened = open(&dir);
+    let snap = reopened.finalize().expect("finalize");
+    assert_eq!(snap.i64_or("guard.verdict_ttl_ms", 0), 100);
+    assert!((snap.f64_or("sem.threshold.formal", 0.0) - 0.42).abs() < 1e-9);
+}
+
+/// UT-CORE-05b 未知键：钳制写不得比严格写更宽松
+#[test]
+fn ut_core_05b_set_clamped_rejects_unknown_key() {
+    let dir = TempDir::new().unwrap();
+    let center = open(&dir);
+    center.finalize().expect("finalize");
+    assert!(center.set_clamped("nope.key", ConfigValue::Int(1)).is_err());
+}

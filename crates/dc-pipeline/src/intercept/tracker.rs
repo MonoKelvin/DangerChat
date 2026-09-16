@@ -61,7 +61,10 @@ pub struct ForegroundTracker {
     is_target: AtomicBool,
     /// 计划挂起的时刻；0 = 无计划。
     suspend_at_ms: AtomicU64,
-    debounce_ms: u64,
+    /// 去抖窗口。原子量而非裸 `u64`：配置项 `guard.foreground_debounce_ms` 支持热更新，
+    /// 而每次取用都是一次 relaxed 读（与 `evaluate` 里的两次 SEQ_CST 读同量级），
+    /// 不引入锁、不改变按键路径的零等待语义。
+    debounce_ms: AtomicU64,
 }
 
 impl ForegroundTracker {
@@ -69,12 +72,20 @@ impl ForegroundTracker {
         Self {
             is_target: AtomicBool::new(false),
             suspend_at_ms: AtomicU64::new(0),
-            debounce_ms,
+            debounce_ms: AtomicU64::new(debounce_ms),
         }
     }
 
     pub fn debounce_ms(&self) -> u64 {
-        self.debounce_ms
+        self.debounce_ms.load(Ordering::Relaxed)
+    }
+
+    /// 热更新去抖窗口（`set_config` → 即时生效）。
+    ///
+    /// 只影响**后续**的挂起计划：已排定的 `suspend_at_ms` 不重算——它记录的是
+    /// 「那一次离开前台时刻 + 当时窗口」，改配置追溯重排会让已过期的判定复活。
+    pub fn set_debounce_ms(&self, ms: u64) {
+        self.debounce_ms.store(ms, Ordering::Relaxed);
     }
 
     /// 收到前台事件。目标回到前台 → 立即生效并取消挂起计划；目标离开 → 计划 `now + debounce`。
@@ -83,8 +94,9 @@ impl ForegroundTracker {
             self.is_target.store(true, Ordering::SeqCst);
             self.suspend_at_ms.store(0, Ordering::SeqCst);
         } else if self.is_target.load(Ordering::SeqCst) {
+            let debounce = self.debounce_ms.load(Ordering::Relaxed);
             self.suspend_at_ms
-                .store(now_ms.saturating_add(self.debounce_ms), Ordering::SeqCst);
+                .store(now_ms.saturating_add(debounce), Ordering::SeqCst);
         }
     }
 

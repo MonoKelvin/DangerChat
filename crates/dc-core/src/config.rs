@@ -468,6 +468,9 @@ impl ConfigCenter {
     }
 
     /// 写入配置：先校验，再更新内存与快照，最后原子落盘并广播；任一步失败都不产生副作用。
+    ///
+    /// 返回值是**合并后的生效值**，而非本次传入值：`Int`/`Float` 已存在的边界通过
+    /// [`ConfigCenter::set_bounded`] 表达，此处的"合并"指并发写场景下以最终落盘值为准。
     pub fn set(&self, key: &str, value: ConfigValue) -> Result<ConfigValue, ConfigError> {
         let field = self
             .inner
@@ -502,6 +505,64 @@ impl ConfigCenter {
         };
         self.broadcast(&changed);
         Ok(normalized)
+    }
+
+    /// [`ConfigCenter::set`] 的钳制变体：数值越界时取最近的合法边界而非报错。
+    ///
+    /// 用途是「控件已经表达了范围」（滑块、带 min/max 的数字框）——用户拖到边界外的
+    /// 意图明确可推断，报错只会制造一次静默失败。非数值类型、或数值但落在范围内，
+    /// 与 `set` 完全一致（含类型不匹配仍报错）。
+    pub fn set_clamped(&self, key: &str, value: ConfigValue) -> Result<ConfigValue, ConfigError> {
+        let field = self
+            .inner
+            .schema
+            .read()
+            .expect("schema poisoned")
+            .get(key)
+            .cloned()
+            .ok_or_else(|| ConfigError::UnknownKey(key.to_string()))?;
+
+        let in_range = match (&field.ty, &value) {
+            (ConfigType::Int { min, max }, ConfigValue::Int(i)) => *i >= *min && *i <= *max,
+            (ConfigType::Int { min, max }, ConfigValue::Float(f)) => {
+                f.fract() == 0.0 && (*f as i64) >= *min && (*f as i64) <= *max
+            }
+            (ConfigType::Float { min, max }, ConfigValue::Float(f)) => {
+                f.is_finite() && *f >= *min && *f <= *max
+            }
+            (ConfigType::Float { min, max }, ConfigValue::Int(i)) => {
+                let f = *i as f64;
+                f >= *min && f <= *max
+            }
+            // 非数值类型没有"钳制"语义，交给 normalize 处理（Bool/Str/StrList 类型不符仍报错）
+            _ => true,
+        };
+        if in_range {
+            return self.set(key, value);
+        }
+
+        let clamped = match (&field.ty, value.clone()) {
+            (ConfigType::Int { min, max }, ConfigValue::Int(i)) => {
+                ConfigValue::Int(i.clamp(*min, *max))
+            }
+            (ConfigType::Int { min, max }, ConfigValue::Float(f)) => {
+                ConfigValue::Int((f as i64).clamp(*min, *max))
+            }
+            (ConfigType::Float { min, max }, ConfigValue::Float(f)) => {
+                ConfigValue::Float(f.clamp(*min, *max))
+            }
+            (ConfigType::Float { min, max }, ConfigValue::Int(i)) => {
+                ConfigValue::Float((i as f64).clamp(*min, *max))
+            }
+            (_, other) => other,
+        };
+        tracing::debug!(
+            key = %key,
+            requested = ?value,
+            applied = ?clamped,
+            "配置值越界，已钳制到合法边界"
+        );
+        self.set(key, clamped)
     }
 
     /// 写入非 schema 管理的键（主程序壳的内部状态，如窗口位置记忆）。

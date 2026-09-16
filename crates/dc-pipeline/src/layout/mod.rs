@@ -144,11 +144,9 @@ impl LayoutStage {
             }
         }
 
-        // 4) 图片日志
-        if let Err(err) = ctx
-            .image_log
-            .save("02_layout", &draw_regions(snapshot, &best))
-        {
+        // 4) 图片日志（名称带 `<run_id>/` 前缀，见 capture.rs 同处说明）
+        let name = format!("{}/02_layout", ctx.run_id.as_str());
+        if let Err(err) = ctx.image_log.save(&name, &draw_regions(snapshot, &best)) {
             tracing::warn!(error = %err, "layout 可视化写入图片日志失败");
         }
 

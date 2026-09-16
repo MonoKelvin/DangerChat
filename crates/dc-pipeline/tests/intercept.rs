@@ -480,6 +480,55 @@ fn foreground_debounce_and_instant_wake() {
     assert_eq!(h.intercept.state(), GuardState::Active);
 }
 
+/// 前台去抖热更新：改窗口后只影响**后续**挂起计划，已排定的不追溯重排
+///
+/// 动机：`guard.foreground_debounce_ms` 是暴露给用户的设置项，但早期只在
+/// `Intercept::new` 读取一次——改配置要重启才生效，属于"假设置"。
+#[test]
+fn foreground_debounce_hot_update() {
+    let h = Harness::new();
+    h.target_foreground();
+    assert_eq!(h.intercept.state(), GuardState::Active);
+
+    // 缩短去抖窗口 → 立即影响下一次离开前台
+    h.intercept.set_foreground_debounce_ms(500);
+    h.other_foreground("explorer.exe");
+    h.advance(499);
+    assert_eq!(h.intercept.state(), GuardState::Active, "新窗口内不挂起");
+    h.advance(1);
+    assert_eq!(
+        h.intercept.state(),
+        GuardState::Suspended,
+        "按新窗口 500ms 挂起"
+    );
+
+    // 拉长窗口 → 同样按新值排定
+    h.target_foreground();
+    h.intercept.set_foreground_debounce_ms(5_000);
+    h.other_foreground("cmd.exe");
+    h.advance(3_000);
+    assert_eq!(
+        h.intercept.state(),
+        GuardState::Active,
+        "旧的 3s 窗口已失效，应按 5s 判定"
+    );
+    h.advance(2_000);
+    assert_eq!(h.intercept.state(), GuardState::Suspended);
+
+    // 已排定的计划不因改配置而追溯重排
+    h.target_foreground();
+    h.other_foreground("cmd.exe"); // 按当前 5s 排定
+    h.intercept.set_foreground_debounce_ms(100); // 缩短到 100ms
+    h.advance(200);
+    assert_eq!(
+        h.intercept.state(),
+        GuardState::Active,
+        "已排定计划保持原时刻，不追溯重排"
+    );
+    h.advance(4_800);
+    assert_eq!(h.intercept.state(), GuardState::Suspended);
+}
+
 /// 目标进程名匹配：大小写不敏感、空配置视为不匹配
 #[test]
 fn target_matching_semantics() {

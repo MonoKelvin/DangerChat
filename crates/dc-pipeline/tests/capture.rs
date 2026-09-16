@@ -14,15 +14,12 @@ fn stage(sys: &MockSys) -> CaptureStage {
     CaptureStage::new(Arc::new(sys.clone()) as Arc<dyn SysApi>)
 }
 
-/// 构造运行上下文：`enabled` 对应 `privacy.no_image_logs` 的反值。
-/// `runs_root` 当前测试用 Noop sink、不实际写盘，故未使用（保留参数以保持调用点签名稳定）。
-fn context(_runs_root: Option<&std::path::Path>, enabled: bool, cancel: bool) -> PipelineContext {
-    let sink = if enabled {
-        // 测试模式：不实际写盘，用 Noop（异步写入无法在测试里同步验证）
-        ImageLogSink::noop()
-    } else {
-        ImageLogSink::noop()
-    };
+/// 构造运行上下文。`enabled=false` 对应 `debug.save_images = false`（Noop sink，
+/// 零副作用）；`enabled=true` 接调用方传入的真实 sink（真实 `RollingImageStore`）。
+///
+/// 上一版无论 `enabled` 取何值都返回 `Noop`，于是 UT-CAP-04 的「开启后应写出图片」
+/// 断言虽在，但 pre-fix 的写入路径从未被走到——**假阳性**测试。sink 改为显式传入。
+fn context(sink: ImageLogSink, cancel: bool) -> PipelineContext {
     let ctx = PipelineContext::new(
         RunId::from_raw("20260913-130000-000001"),
         LoopKind::Slow,
@@ -75,7 +72,10 @@ fn ut_cap_01_region_crop_is_byte_exact() {
 
     let stage = stage(&sys);
     let snap = stage
-        .process(CaptureRequest { hwnd: HWND }, &context(None, false, false))
+        .process(
+            CaptureRequest { hwnd: HWND },
+            &context(ImageLogSink::noop(), false),
+        )
         .expect("capture ok");
 
     assert_eq!(snap.window_rect, rect_dip, "100% 缩放下矩形原样");
@@ -107,7 +107,10 @@ fn ut_cap_02_dpi_scaling_no_double_conversion() {
 
         let stage = stage(&sys);
         let snap = stage
-            .process(CaptureRequest { hwnd: HWND }, &context(None, false, false))
+            .process(
+                CaptureRequest { hwnd: HWND },
+                &context(ImageLogSink::noop(), false),
+            )
             .expect("capture ok");
 
         assert_eq!(snap.window_rect, expect, "缩放 {dpi_scale} 的物理矩形");
@@ -136,7 +139,7 @@ fn ut_cap_03_unavailable_window_is_recoverable() {
     // 最小化
     sys.set_minimized(HWND, true);
     let err = stage
-        .process(req, &context(None, false, false))
+        .process(req, &context(ImageLogSink::noop(), false))
         .unwrap_err();
     assert!(err.is_recoverable(), "最小化应为 Recoverable：{err}");
     assert!(matches!(err, StageError::Recoverable(_)));
@@ -149,19 +152,21 @@ fn ut_cap_03_unavailable_window_is_recoverable() {
         process_name: "Code.exe".to_string(),
     }));
     let err = stage
-        .process(req, &context(None, false, false))
+        .process(req, &context(ImageLogSink::noop(), false))
         .unwrap_err();
     assert!(err.is_recoverable(), "非前台应为 Recoverable：{err}");
 
     // 完全没有前台窗口（锁屏等）
     sys.set_foreground(None);
-    assert!(stage.process(req, &context(None, false, false)).is_err());
+    assert!(stage
+        .process(req, &context(ImageLogSink::noop(), false))
+        .is_err());
 
     // 未登记的窗口
     assert!(stage
         .process(
             CaptureRequest { hwnd: Hwnd(0xDEAD) },
-            &context(None, false, false)
+            &context(ImageLogSink::noop(), false)
         )
         .is_err());
 
@@ -169,20 +174,26 @@ fn ut_cap_03_unavailable_window_is_recoverable() {
     setup_window(&sys, Rect::new(0, 0, 300, 200), 1.0, (800, 600));
     sys.fail_capture(true);
     let err = stage
-        .process(req, &context(None, false, false))
+        .process(req, &context(ImageLogSink::noop(), false))
         .unwrap_err();
     assert!(err.is_recoverable(), "截图失败应为 Recoverable：{err}");
 
     // 取消令牌优先
     sys.fail_capture(false);
-    let err = stage.process(req, &context(None, false, true)).unwrap_err();
+    let err = stage
+        .process(req, &context(ImageLogSink::noop(), true))
+        .unwrap_err();
     assert!(matches!(err, StageError::Cancelled), "已取消：{err}");
 
     // 指标记录了失败次数
     assert!(stage.metrics().failures >= 4, "{:?}", stage.metrics());
 }
 
-/// UT-CAP-04 图片日志开关：开 → 01_window.png 存在；关 → 不落任何文件
+/// UT-CAP-04 图片日志开关：开 → `runs/<dir>/<run_id>/01_window.png` 存在；关 → 不落任何文件。
+///
+/// 夹具曾用 `Noop` sink 冒充「开启」，本用例因此长期是假阳性。现在用真实
+/// `RollingImageStore`，并显式 `drop` 关停写入线程（Drop → 关 channel → join），
+/// 故断言点无需 sleep 赌时序。
 #[test]
 fn ut_cap_04_image_log_switch() {
     let dir = tempfile::TempDir::new().unwrap();
@@ -191,20 +202,39 @@ fn ut_cap_04_image_log_switch() {
     let stage = stage(&sys);
     let req = CaptureRequest { hwnd: HWND };
 
-    // 关闭（隐私模式 / privacy.no_image_logs = true）
     let runs = dir.path().join("runs");
+
+    // 关闭（debug.save_images = false）：Noop sink，不得创建任何目录
     stage
-        .process(req, &context(Some(&runs), false, false))
+        .process(req, &context(ImageLogSink::noop(), false))
         .unwrap();
     assert!(!runs.exists(), "关闭时不得创建图片日志目录");
 
-    // 开启
-    let snap = stage
-        .process(req, &context(Some(&runs), true, false))
-        .unwrap();
+    // 开启：真实 store，根目录 = runs
+    let store = Arc::new(std::sync::Mutex::new(dc_core::RollingImageStore::new(
+        &runs, 10, 1,
+    )));
+    // 循环目录索引在 `from_store` 那一刻就被消费掉了（之后 next_index 会 +1），
+    // 因此必须在构造 sink 之前取，否则断言会指到下一个空目录。
+    let dir_index = store.lock().expect("store lock").current_index();
+    let sink = ImageLogSink::from_store(Arc::clone(&store));
+    let snap = stage.process(req, &context(sink, false)).unwrap();
     assert_eq!(snap.image.dimensions(), (64, 48));
-    let png = runs.join("20260913-130000-000001").join("01_window.png");
-    assert!(png.is_file(), "开启时应写出 {}", png.display());
+
+    // 先关停写入线程再做文件断言：写入是异步的，立刻断言会与后台线程竞速
+    drop(store);
+
+    // 层级为 runs/<循环目录>/<run_id>/01_window.png：循环目录由 store 的游标决定，
+    // run_id 一层由调用方（capture）显式拼进 name —— 两者缺一都会写错位置。
+    let png = runs
+        .join(dir_index.to_string())
+        .join("20260913-130000-000001")
+        .join("01_window.png");
+    assert!(
+        png.is_file(),
+        "开启时应写出 {}（每轮分析独占一个 run_id 子目录，不得落到循环目录根）",
+        png.display()
+    );
     let on_disk = image::open(&png).expect("可解码").to_rgba8();
     assert_eq!(on_disk, snap.image, "落盘内容与快照一致");
 }

@@ -71,7 +71,11 @@ impl CaptureStage {
         ctx.cancel.check()?;
 
         // 4) 图片日志（默认 Noop；落盘失败不阻断本轮，debug 图片不是关键路径）
-        if let Err(err) = ctx.image_log.save("01_window", &image) {
+        //
+        // 名称带 `<run_id>/` 前缀：sink 的 root 已是 `runs/`，而 §5.1 的约定是
+        // `runs/<run_id>/NN_xxx.png`，run 目录必须显式给出，sink 不会自动补。
+        let name = format!("{}/01_window", ctx.run_id.as_str());
+        if let Err(err) = ctx.image_log.save(&name, &image) {
             tracing::warn!(error = %err, "窗口截图写入图片日志失败");
         }
 

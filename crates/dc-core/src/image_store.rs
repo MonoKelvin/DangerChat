@@ -120,20 +120,21 @@ impl RollingImageStore {
 
     /// 同步保存单张图片（后台线程调用）。
     fn save_sync(root: &Path, req: &SaveRequest) -> Result<(), ImageStoreError> {
-        let dir = root.join(req.dir_index.to_string());
-        // 目录不存在时创建（懒创建）
-        if !dir.exists() {
-            std::fs::create_dir_all(&dir).map_err(|e| ImageStoreError::Io {
-                path: dir.clone(),
+        // `name` 允许带子目录（`<run_id>/01_window`，见 §5.1 的 `runs/<run_id>/` 约定），
+        // 此时父目录必须一并创建 —— `RgbaImage::save` 不会建中间目录，缺了就是
+        // 一次 ENOENT 静默失败：目录建出来了、图却没有。
+        let path = root.join(req.dir_index.to_string()).join(&req.name);
+        let path = if req.name.ends_with(".png") {
+            path
+        } else {
+            path.with_extension("png")
+        };
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| ImageStoreError::Io {
+                path: parent.to_path_buf(),
                 source: e,
             })?;
         }
-        let file_name = if req.name.ends_with(".png") {
-            req.name.clone()
-        } else {
-            format!("{}.png", req.name)
-        };
-        let path = dir.join(file_name);
         req.image.save(&path).map_err(|e| match e {
             image::ImageError::IoError(source) => ImageStoreError::Io { path, source },
             other => ImageStoreError::Encode(format!("{}: {}", req.name, other)),

@@ -43,6 +43,15 @@ pub struct ConfigFieldDto {
     pub label: String,
     pub help: String,
     pub group: String,
+    /// 数值下限（仅 int/float；其余为 null）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min: Option<f64>,
+    /// 数值上限（仅 int/float；其余为 null）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max: Option<f64>,
+    /// 数值步长（仅 int/float）：float 的显示小数位由它推导，int 恒为 1
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step: Option<f64>,
 }
 
 fn ty_str(t: &ConfigType) -> &'static str {
@@ -54,6 +63,16 @@ fn ty_str(t: &ConfigType) -> &'static str {
         ConfigType::Enum { .. } => "enum",
         ConfigType::StrList => "strlist",
         ConfigType::Path => "path",
+    }
+}
+
+/// 数值范围三件套 (min, max, step)：float 步长 0.05 给出两位小数，
+/// int 步长 1 表示整数。控件的钳制与显示精度都从这里取，避免前端硬编码。
+fn range_of(t: &ConfigType) -> (Option<f64>, Option<f64>, Option<f64>) {
+    match t {
+        ConfigType::Int { min, max } => (Some(*min as f64), Some(*max as f64), Some(1.0)),
+        ConfigType::Float { min, max } => (Some(*min), Some(*max), Some(0.05)),
+        _ => (None, None, None),
     }
 }
 
@@ -74,20 +93,50 @@ fn value_json(v: &ConfigValue) -> serde_json::Value {
     }
 }
 
+/// 数值型配置走钳制写，其余走严格写。
+///
+/// 分类依据是 **schema 声明的类型**，不是传入值的类型——前端控件按 schema 渲染，
+/// 只有 `int`/`float` 的控件会产出可能越界的数值。schema 缺该键时按严格写处理，
+/// 由 `ConfigCenter` 报 `UnknownKey`。
+fn clamp_if_numeric(
+    state: &AppState,
+    path: &str,
+    cv: ConfigValue,
+) -> Result<ConfigValue, BridgeError> {
+    let numeric = state
+        .config
+        .schema()
+        .iter()
+        .find(|f| f.key == path)
+        .is_some_and(|f| matches!(f.ty, ConfigType::Int { .. } | ConfigType::Float { .. }));
+    let result = if numeric {
+        state.config.set_clamped(path, cv)
+    } else {
+        state.config.set(path, cv)
+    };
+    result.map_err(|e| BridgeError::Config(e.to_string()))
+}
+
 #[tauri::command]
 pub fn get_config_schema(state: State<'_, Arc<AppState>>) -> CmdResult<Vec<ConfigFieldDto>> {
     Ok(state
         .config
         .schema()
         .into_iter()
-        .map(|f| ConfigFieldDto {
-            key: f.key,
-            ty: ty_str(&f.ty).to_string(),
-            default: value_json(&f.default),
-            options: type_options(&f.ty),
-            label: f.label,
-            help: f.help,
-            group: f.group,
+        .map(|f| {
+            let (min, max, step) = range_of(&f.ty);
+            ConfigFieldDto {
+                key: f.key,
+                ty: ty_str(&f.ty).to_string(),
+                default: value_json(&f.default),
+                options: type_options(&f.ty),
+                label: f.label,
+                help: f.help,
+                group: f.group,
+                min,
+                max,
+                step,
+            }
         })
         .collect())
 }
@@ -109,10 +158,10 @@ pub fn set_config(
 ) -> CmdResult<serde_json::Value> {
     let cv: ConfigValue = serde_json::from_value(value)
         .map_err(|e| BridgeError::Config(format!("值类型非法：{e}")))?;
-    let applied = state
-        .config
-        .set(&path, cv)
-        .map_err(|e| BridgeError::Config(e.to_string()))?;
+    // 数值项走钳制写：前端控件（NumberInput）未拿到 schema 的 min/max，
+    // 越界直接报错会变成一次用户看不见的静默失败（乐观更新已改内存态）。
+    // 越界即取最近边界，仍受 schema 校验约束（类型不符照样拒绝）。
+    let applied = clamp_if_numeric(&state, &path, cv)?;
     // 运行时热更新：目标进程名 / 发送键 / 守护开关改完即时生效（无需重启）
     match path.as_str() {
         "target.process_name" => {
@@ -136,6 +185,11 @@ pub fn set_config(
         "guard.verdict_ttl_ms" => {
             if let ConfigValue::Int(ms) = &applied {
                 state.intercept.set_verdict_ttl_ms(*ms as u64);
+            }
+        }
+        "guard.foreground_debounce_ms" => {
+            if let ConfigValue::Int(ms) = &applied {
+                state.intercept.set_foreground_debounce_ms(*ms as u64);
             }
         }
         "debug.image_dirs_limit" => {

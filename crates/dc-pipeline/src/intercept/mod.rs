@@ -265,6 +265,14 @@ impl Intercept {
             .store(ms.clamp(100, 60_000), Ordering::SeqCst);
     }
 
+    /// 热更新前后台切换防抖窗口（`guard.foreground_debounce_ms`）。
+    ///
+    /// 与其余 guard.* 键一致走即时生效：去抖窗口只在 `note()` 排定挂起计划时取用，
+    /// 因此改配置立即影响下一次「目标离开前台」的判定。
+    pub fn set_foreground_debounce_ms(&self, ms: u64) {
+        self.foreground.set_debounce_ms(ms);
+    }
+
     fn current_send_key(&self) -> SendKey {
         SendKey::decode(self.send_key.load(Ordering::SeqCst))
     }
