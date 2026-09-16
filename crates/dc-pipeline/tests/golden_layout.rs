@@ -67,10 +67,8 @@ fn ut_lay_01_golden_regions_iou() {
     let mut stage = LayoutStage::new();
     stage.init(&mctx).expect("layout init 失败（模型非法？）");
 
-    let expected: std::collections::HashMap<String, serde_json::Value> = serde_json::from_str(
-        &std::fs::read_to_string(expected_file).unwrap(),
-    )
-    .unwrap();
+    let expected: std::collections::HashMap<String, serde_json::Value> =
+        serde_json::from_str(&std::fs::read_to_string(expected_file).unwrap()).unwrap();
 
     let ctx = run_ctx();
     for (name, exp) in &expected {

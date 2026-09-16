@@ -162,38 +162,24 @@ pub fn set_config(
 
 /// Guard 运行中 → 即时热重载 sem 的三份数据（规则/画像/场景）。
 /// 未运行则下次发现目标窗口时 init 读到新文件。
+///
+/// 三份路径经 `DataLayout::sem_docs()` 统一推导（路径唯一来源，不再各处手拼）。
 fn trigger_sem_reload(state: &AppState) {
     if let Ok(guard_opt) = state.guard.lock() {
         if let Some(guard) = guard_opt.as_ref() {
-            let rules_path = state
-                .data_dir
-                .join(dc_core::paths::RULES_JSON)
-                .to_string_lossy()
-                .to_string();
-            let contacts_path = state
-                .data_dir
-                .join(dc_core::paths::CONTACTS_JSON)
-                .to_string_lossy()
-                .to_string();
-            let scenes_path = state
-                .data_dir
-                .join(dc_core::paths::SCENES_JSON)
-                .to_string_lossy()
-                .to_string();
-            guard.reload_rules(&rules_path, &contacts_path, &scenes_path);
+            let docs = state.layout.sem_docs();
+            guard.reload_rules(
+                &docs.rules_path.to_string_lossy(),
+                &docs.contacts_path.to_string_lossy(),
+                &docs.scenes_path.to_string_lossy(),
+            );
         }
     }
 }
 
 #[tauri::command]
 pub fn list_contacts(state: State<'_, Arc<AppState>>) -> CmdResult<Vec<ContactDto>> {
-    let path = state.data_dir.join(dc_core::paths::CONTACTS_JSON);
-    let text = std::fs::read_to_string(&path).unwrap_or_default();
-    if text.is_empty() {
-        return Ok(Vec::new());
-    }
-    let parsed: dc_pipeline::sem::doc::ContactDoc = serde_json::from_str(&text)
-        .map_err(|e| BridgeError::Config(format!("contacts.json 解析失败：{e}")))?;
+    let parsed = state.layout.contacts().read();
     Ok(parsed
         .contact
         .into_iter()
@@ -227,24 +213,18 @@ pub fn set_contact_profile(
             "画像非法：{profile}（不存在的场景）"
         )));
     }
-    let path = state.data_dir.join(dc_core::paths::CONTACTS_JSON);
-    let text = std::fs::read_to_string(&path).unwrap_or_default();
-    let mut parsed: dc_pipeline::sem::doc::ContactDoc = if text.is_empty() {
-        dc_pipeline::sem::doc::ContactDoc { contact: Vec::new() }
-    } else {
-        serde_json::from_str(&text)
-            .map_err(|e| BridgeError::Config(format!("contacts.json 解析失败：{e}")))?
-    };
-    parsed.contact.retain(|c| c.name != name);
-    if profile != "none" {
-        parsed.contact.push(dc_pipeline::sem::contacts::ContactDef {
-            name: name.clone(),
-            profile: profile.clone(),
-        });
-    }
-    let out = serde_json::to_string_pretty(&parsed)
-        .map_err(|e| BridgeError::Config(format!("json 序列化失败：{e}")))?;
-    std::fs::write(&path, out).map_err(|e| BridgeError::Io(e.to_string()))?;
+    let contacts = state.layout.contacts();
+    contacts
+        .write(|doc| {
+            doc.contact.retain(|c| c.name != name);
+            if profile != "none" {
+                doc.contact.push(dc_pipeline::sem::contacts::ContactDef {
+                    name: name.clone(),
+                    profile: profile.clone(),
+                });
+            }
+        })
+        .map_err(|e| BridgeError::Io(format!("contacts.json 写入失败：{e}")))?;
     tracing::info!(contact = %name, profile = %profile, "画像已更新");
     trigger_sem_reload(&state);
     Ok(())
@@ -261,23 +241,21 @@ pub struct RuleDto {
 
 #[tauri::command]
 pub fn get_rules(state: State<'_, Arc<AppState>>) -> CmdResult<Vec<RuleDto>> {
-    let path = state.data_dir.join(dc_core::paths::RULES_JSON);
-    let text = std::fs::read_to_string(&path).unwrap_or_default();
-    if text.is_empty() {
-        return Ok(Vec::new());
-    }
-    let doc: dc_pipeline::sem::doc::RuleDoc = serde_json::from_str(&text)
-        .map_err(|e| BridgeError::Config(format!("rules.json 解析失败：{e}")))?;
+    let doc = state.layout.rules().read();
     // 转换 RuleDef → RuleDto（MatchKind → String）
-    Ok(doc.rule.into_iter().map(|r| RuleDto {
-        pattern: r.pattern,
-        r#match: match r.r#match {
-            dc_pipeline::sem::rules::MatchKind::Word => "word".to_string(),
-            dc_pipeline::sem::rules::MatchKind::Substring => "substring".to_string(),
-            dc_pipeline::sem::rules::MatchKind::Regex => "regex".to_string(),
-        },
-        applies_to: r.applies_to,
-    }).collect())
+    Ok(doc
+        .rule
+        .into_iter()
+        .map(|r| RuleDto {
+            pattern: r.pattern,
+            r#match: match r.r#match {
+                dc_pipeline::sem::rules::MatchKind::Word => "word".to_string(),
+                dc_pipeline::sem::rules::MatchKind::Substring => "substring".to_string(),
+                dc_pipeline::sem::rules::MatchKind::Regex => "regex".to_string(),
+            },
+            applies_to: r.applies_to,
+        })
+        .collect())
 }
 
 #[tauri::command]
@@ -304,12 +282,13 @@ pub fn save_rules(state: State<'_, Arc<AppState>>, rules: Vec<RuleDto>) -> CmdRe
         .map_err(|e| BridgeError::Config(format!("规则校验失败：{e}")))?;
     let _ = ruleset;
 
-    let doc = dc_pipeline::sem::doc::RuleDoc { rule: rule_defs };
-    let out = serde_json::to_string_pretty(&doc)
-        .map_err(|e| BridgeError::Config(format!("json 序列化失败：{e}")))?;
-    let path = state.data_dir.join(dc_core::paths::RULES_JSON);
-    std::fs::write(&path, out).map_err(|e| BridgeError::Io(e.to_string()))?;
-    tracing::info!(count = rules.len(), path = %path.display(), "规则库已保存");
+    // 经 JsonStore 原子落盘（写失败内存不变，无中间态）
+    state
+        .layout
+        .rules()
+        .replace(dc_pipeline::sem::doc::RuleDoc { rule: rule_defs })
+        .map_err(|e| BridgeError::Io(format!("rules.json 写入失败：{e}")))?;
+    tracing::info!(count = rules.len(), "规则库已保存");
 
     trigger_sem_reload(&state);
     Ok(())
@@ -457,7 +436,7 @@ pub fn list_models(state: State<'_, Arc<AppState>>) -> CmdResult<Vec<ModelDto>> 
 
 /// 扫描数据目录 datasets/ 下的训练数据 zip（按修改时间倒序，最新导出的在前）。
 pub fn scan_datasets(state: &AppState) -> Vec<DatasetDto> {
-    let dir = state.data_dir.join("datasets");
+    let dir = state.layout.datasets_dir();
     let _ = std::fs::create_dir_all(&dir);
     let Ok(entries) = std::fs::read_dir(&dir) else {
         return Vec::new();
@@ -613,7 +592,7 @@ fn run_training(app: tauri::AppHandle, state: Arc<AppState>, zip: std::path::Pat
         cmd.arg(&script)
             .arg(&zip)
             .arg("--out")
-            .arg(state.models.root())
+            .arg(state.layout.models_dir())
             .arg("--name")
             .arg(&model_name)
             .stdout(std::process::Stdio::piped())
@@ -675,7 +654,7 @@ pub fn start_training(
     {
         return Err(BridgeError::Model(format!("训练数据名非法：{dataset}")));
     }
-    let zip = state.data_dir.join("datasets").join(&dataset);
+    let zip = state.layout.datasets_dir().join(&dataset);
     if !zip.is_file() {
         return Err(BridgeError::Model(format!("训练数据不存在：{dataset}")));
     }
@@ -803,18 +782,24 @@ pub fn set_data_dir(state: State<'_, Arc<AppState>>, path: String) -> CmdResult<
 
     if path.trim().is_empty() {
         // 恢复系统默认：data_dir 设为 default_data_dir
-        state.bootstrap.write(|cfg: &mut BootstrapConfig| {
-            cfg.data_dir = state.default_data_dir.clone();
-        }).map_err(|e| BridgeError::Io(format!("bootstrap.json 写入失败：{e}")))?;
+        state
+            .bootstrap
+            .write(|cfg: &mut BootstrapConfig| {
+                cfg.data_dir = state.default_data_dir.clone();
+            })
+            .map_err(|e| BridgeError::Io(format!("bootstrap.json 写入失败：{e}")))?;
         tracing::info!("数据目录已恢复系统默认（重启后生效）");
         return Ok(());
     }
     let dir = std::path::PathBuf::from(path.trim());
     std::fs::create_dir_all(&dir).map_err(|e| BridgeError::Io(format!("目录创建失败：{e}")))?;
 
-    state.bootstrap.write(|cfg: &mut BootstrapConfig| {
-        cfg.data_dir = dir.clone();
-    }).map_err(|e| BridgeError::Io(format!("bootstrap.json 写入失败：{e}")))?;
+    state
+        .bootstrap
+        .write(|cfg: &mut BootstrapConfig| {
+            cfg.data_dir = dir.clone();
+        })
+        .map_err(|e| BridgeError::Io(format!("bootstrap.json 写入失败：{e}")))?;
 
     tracing::info!(dir = %dir.display(), "数据目录已设置（重启后生效）");
     Ok(())
@@ -962,9 +947,12 @@ pub fn migrate_data_dir(
 
     // 提交点：写 bootstrap.json（指向新目录），重启后生效
     use crate::bootstrap::BootstrapConfig;
-    state.bootstrap.write(|cfg: &mut BootstrapConfig| {
-        cfg.data_dir = dst.clone();
-    }).map_err(|e| BridgeError::Io(format!("bootstrap.json 写入失败：{e}")))?;
+    state
+        .bootstrap
+        .write(|cfg: &mut BootstrapConfig| {
+            cfg.data_dir = dst.clone();
+        })
+        .map_err(|e| BridgeError::Io(format!("bootstrap.json 写入失败：{e}")))?;
 
     // 登记待清理旧目录：本进程的 data_dir 仍是旧目录（启动时解析、运行期不变），
     // 只有经此登记，「删除旧目录」才会被放行（见 delete_old_data_dir）。
@@ -1196,7 +1184,8 @@ mod tests {
     /// 整目录结构原样搬过去：空子目录也保留。
     #[test]
     fn copy_dir_contents_keeps_empty_subdirs() {
-        let base = std::env::temp_dir().join(format!("dc-migrate-empty-sub-{}", std::process::id()));
+        let base =
+            std::env::temp_dir().join(format!("dc-migrate-empty-sub-{}", std::process::id()));
         let src = base.join("src");
         let dst = base.join("dst");
         let _ = std::fs::remove_dir_all(&base);
@@ -1214,7 +1203,8 @@ mod tests {
     /// 顶层跳过指针文件，但子目录里同名的普通文件属于用户数据，必须照搬。
     #[test]
     fn copy_dir_skips_pointer_only_at_root() {
-        let base = std::env::temp_dir().join(format!("dc-migrate-nested-ptr-{}", std::process::id()));
+        let base =
+            std::env::temp_dir().join(format!("dc-migrate-nested-ptr-{}", std::process::id()));
         let src = base.join("src");
         let dst = base.join("dst");
         let _ = std::fs::remove_dir_all(&base);
@@ -1245,16 +1235,18 @@ mod tests {
         std::fs::write(dir.join("config.toml"), b"c").unwrap();
         std::fs::write(dir.join("data_dir.txt"), b"pointer").unwrap();
 
-        let failed = clear_dir_contents(&dir, &[crate::state::POINTER_FILE]);
+        // 旧版指针文件名（data_dir.txt 已被 bootstrap.json 取代，此处验证迁移清理仍保留它）
+        let legacy_pointer = "data_dir.txt";
+        let failed = clear_dir_contents(&dir, &[legacy_pointer]);
 
         assert_eq!(failed, 0);
         assert!(dir.is_dir(), "目录本身保留");
-        assert!(dir.join("data_dir.txt").is_file(), "指针必须留下");
+        assert!(dir.join(legacy_pointer).is_file(), "指针必须留下");
         assert!(!dir.join("logs").exists(), "子目录整棵删除");
         assert!(!dir.join("models").exists());
         assert!(!dir.join("config.toml").exists());
         // 再清一次：已空 → 幂等成功
-        assert_eq!(clear_dir_contents(&dir, &[crate::state::POINTER_FILE]), 0);
+        assert_eq!(clear_dir_contents(&dir, &[legacy_pointer]), 0);
         let _ = std::fs::remove_dir_all(&base);
     }
 

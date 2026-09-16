@@ -50,14 +50,11 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), ConfigError>
         }
     }
     let tmp = tmp_path(path);
-    let written = fs::File::create(&tmp)
-        .and_then(|mut f| f.write_all(bytes).and_then(|()| f.sync_all()));
+    let written =
+        fs::File::create(&tmp).and_then(|mut f| f.write_all(bytes).and_then(|()| f.sync_all()));
     if let Err(source) = written {
         let _ = fs::remove_file(&tmp);
-        return Err(ConfigError::Io {
-            path: tmp,
-            source,
-        });
+        return Err(ConfigError::Io { path: tmp, source });
     }
     if let Err(source) = rename_with_retry(&tmp, path) {
         let _ = fs::remove_file(&tmp);

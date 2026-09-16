@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use tauri::Manager;
 
+use dc_bridge::layout::DataLayout;
 use dc_bridge::state::AppState;
 use dc_bridge::stats::DailyStats;
 use dc_core::logging::{LogCenter, LogOptions};
@@ -35,9 +36,12 @@ pub fn bootstrap(app: &tauri::AppHandle) -> Arc<AppState> {
     // 清理旧指针文件 data_dir.txt（忽略错误）
     dc_bridge::bootstrap::cleanup_legacy_pointer(&default_dir);
 
+    // 数据目录布局：配置路径与类型化文档句柄的唯一来源（先于一切使用方构建）。
+    let layout = DataLayout::open(&data_dir).expect("数据目录布局打开失败");
+
     // 1) 日志（最先：一切后续步骤可观测）
     let log_center = LogCenter::init(LogOptions {
-        dir: data_dir.join("logs"),
+        dir: layout.logs_dir(),
         prefix: "danger".into(),
         // debug 构建：info（开发可观测）；release：仅 warn 以上（终端用户无需 info 噪音）
         level: if cfg!(debug_assertions) {
@@ -55,9 +59,11 @@ pub fn bootstrap(app: &tauri::AppHandle) -> Arc<AppState> {
     .ok();
     tracing::info!(dir = %data_dir.display(), "危信启动");
 
-    // 2) 配置中心（模块 schema 注册 + finalize）
-    let config =
-        Arc::new(ConfigCenter::open(data_dir.join("config.json")).expect("配置中心打开失败"));
+    // 2) 配置中心（模块 schema 注册 + finalize；config.json 路径亦经 layout 推导）
+    let config = Arc::new(
+        ConfigCenter::open(layout.data_dir().join(dc_core::paths::CONFIG_JSON))
+            .expect("配置中心打开失败"),
+    );
     {
         // intercept 的配置面是自由函数（含 target.process_name 等装配前需要的键）
         config
@@ -132,14 +138,14 @@ pub fn bootstrap(app: &tauri::AppHandle) -> Arc<AppState> {
     }
 
     // 3) 模型仓库（models/，权重 gitignore）
-    let models = Arc::new(ModelStore::new(data_dir.join("models")));
+    let models = Arc::new(ModelStore::new(layout.models_dir()));
 
     // 3.5) 图片存储（调试模式）
     let image_store = if config.snapshot().bool_or("debug.save_images", false) {
         let limit = config.snapshot().i64_or("debug.image_dirs_limit", 50) as u32;
         let cursor = bootstrap_store.with(|cfg| cfg.images_cursor);
         let store = dc_core::RollingImageStore::new(
-            data_dir.join("logs").join("images"),
+            layout.logs_dir().join("images"),
             limit.clamp(10, 100),
             cursor,
         );
@@ -167,6 +173,9 @@ pub fn bootstrap(app: &tauri::AppHandle) -> Arc<AppState> {
         .snapshot()
         .str_or("target.process_name", "WeChat.exe")
         .to_string();
+    // 先取好依赖 layout 的路径，再将其移入 AppState（避免 move 后借用）
+    let scenes_path = layout.scenes_path();
+    let stats_path = layout.stats_path();
     let state = Arc::new(AppState {
         sys,
         log_center,
@@ -175,12 +184,13 @@ pub fn bootstrap(app: &tauri::AppHandle) -> Arc<AppState> {
         config: Arc::clone(&config),
         models,
         intercept: Arc::clone(&intercept),
+        layout,
         guard: std::sync::Mutex::new(None),
         target_process: std::sync::Mutex::new(target.clone()),
         scenarios: std::sync::Mutex::new(dc_pipeline::sem::scenarios::ScenarioManager::load(
-            &data_dir.join("scenes.json"),
+            &scenes_path,
         )),
-        stats: DailyStats::load(data_dir.join("stats.json")),
+        stats: DailyStats::load(stats_path),
         countdown_secs: std::sync::Mutex::new(
             config.snapshot().i64_or("alert.timeout_secs", 10).max(1) as u64,
         ),
@@ -195,34 +205,6 @@ pub fn bootstrap(app: &tauri::AppHandle) -> Arc<AppState> {
         // logo 基础色相（暖红）：前端主题色切换时经 set_tray_hue 覆盖
         tray_hue_deg: std::sync::atomic::AtomicU32::new(11),
     });
-
-    // 6) 默认规则库/画像（首启空文件，sem 模块容忍缺失）
-    let rules = data_dir.join("rules.toml");
-    if !rules.is_file() {
-        let _ = std::fs::write(
-            &rules,
-            r#"[[rule]]
-pattern = "sb"
-match = "word"
-applies_to = ["formal"]
-
-[[rule]]
-pattern = "(傻|沙)(比|逼|雕)"
-match = "regex"
-applies_to = ["formal"]
-
-[[rule]]
-pattern = "卧槽"
-match = "substring"
-applies_to = ["all"]
-"#,
-        );
-    }
-    let contacts = data_dir.join("contacts.toml");
-    if !contacts.is_file() {
-        let _ = std::fs::write(&contacts, "");
-    }
-    // scenes.toml：缺失时由 ScenarioManager::load 兜底为仅内置场景，无需建文件
 
     tracing::info!(target = %target, "装配完成（等待目标窗口发现）");
     state

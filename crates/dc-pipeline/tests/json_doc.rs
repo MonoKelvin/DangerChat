@@ -1,10 +1,10 @@
 //! JSON 文档序列化测试
 
-use dc_pipeline::sem::doc::{RuleDoc, ContactDoc, SceneDoc};
-use dc_pipeline::sem::rules::{RuleDef, MatchKind};
 use dc_pipeline::sem::contacts::ContactDef;
-use dc_pipeline::sem::scenarios::SceneDef;
+use dc_pipeline::sem::doc::{ContactDoc, RuleDoc, SceneDoc};
 use dc_pipeline::sem::rules::Profile;
+use dc_pipeline::sem::rules::{MatchKind, RuleDef};
+use dc_pipeline::sem::scenarios::SceneDef;
 
 #[test]
 fn scene_doc_json_roundtrip() {
@@ -34,13 +34,11 @@ fn scene_doc_json_roundtrip() {
 #[test]
 fn rule_doc_json_roundtrip() {
     let doc = RuleDoc {
-        rule: vec![
-            RuleDef {
-                pattern: "敏感词".into(),
-                r#match: MatchKind::Word,
-                applies_to: vec!["all".into()],
-            },
-        ],
+        rule: vec![RuleDef {
+            pattern: "敏感词".into(),
+            r#match: MatchKind::Word,
+            applies_to: vec!["all".into()],
+        }],
     };
 
     let json = serde_json::to_string_pretty(&doc).expect("序列化失败");

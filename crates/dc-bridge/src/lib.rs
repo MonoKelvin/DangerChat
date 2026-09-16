@@ -18,6 +18,7 @@ pub mod commands;
 pub mod dir_watch;
 pub mod dto;
 pub mod events;
+pub mod layout;
 pub mod pump;
 pub mod state;
 pub mod stats;

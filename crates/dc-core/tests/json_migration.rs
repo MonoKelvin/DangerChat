@@ -28,7 +28,9 @@ fn config_center_json_roundtrip() {
     config.finalize().expect("finalize 失败");
 
     // 修改配置
-    config.set("test.value", ConfigValue::Int(88)).expect("set 失败");
+    config
+        .set("test.value", ConfigValue::Int(88))
+        .expect("set 失败");
 
     // 重新加载
     config.reload().expect("reload 失败");
@@ -44,4 +46,3 @@ fn config_center_json_roundtrip() {
 
     let _ = std::fs::remove_file(&tmp);
 }
-

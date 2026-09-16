@@ -424,10 +424,7 @@ fn ut_int_10_cooldown_routes_alert_shortcuts() {
     let _ = h.intercept.alerts().try_recv(); // 消费 Show
     assert_eq!(h.intercept.state(), GuardState::Cooldown);
 
-    for (vk, want) in [
-        (0x31u16, AlertAction::Cancel),
-        (0x32, AlertAction::Snooze),
-    ] {
+    for (vk, want) in [(0x31u16, AlertAction::Cancel), (0x32, AlertAction::Snooze)] {
         assert_eq!(h.press(vk), HookAction::Swallow, "vk={vk:#X} 必须被截获");
         match h.intercept.alerts().try_recv() {
             Some(AlertMessage::Action(got)) => assert_eq!(got, want),

@@ -249,7 +249,10 @@ impl LogCenter {
     }
 
     /// 为某一轮分析创建图片日志句柄。从 AppState.image_store 传入。
-    pub fn image_sink(&self, store: Option<Arc<std::sync::Mutex<crate::image_store::RollingImageStore>>>) -> ImageLogSink {
+    pub fn image_sink(
+        &self,
+        store: Option<Arc<std::sync::Mutex<crate::image_store::RollingImageStore>>>,
+    ) -> ImageLogSink {
         match store {
             Some(s) => ImageLogSink::from_store(s),
             None => ImageLogSink::noop(),

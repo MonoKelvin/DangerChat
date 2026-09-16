@@ -62,8 +62,7 @@ impl RollingImageStore {
     /// 获取下一个目录索引（1-based），并自动循环。
     pub fn next_index(&self) -> u32 {
         let current = self.cursor.fetch_add(1, Ordering::SeqCst);
-        let idx = ((current - 1) % self.limit as u64 + 1) as u32;
-        idx
+        ((current - 1) % self.limit as u64 + 1) as u32
     }
 
     /// 当前游标值（用于持久化到 bootstrap.json）。

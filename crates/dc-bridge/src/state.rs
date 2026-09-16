@@ -8,6 +8,7 @@ use dc_pipeline::intercept::Intercept;
 use dc_sys::SysApi;
 
 use crate::bootstrap::BootstrapConfig;
+use crate::layout::DataLayout;
 use crate::stats::DailyStats;
 
 /// 退出原因：目标窗口消失后 Guard 被 window_watch 回收，带原因供状态事件展示。
@@ -30,6 +31,8 @@ pub struct AppState {
     pub config: Arc<ConfigCenter>,
     pub models: Arc<ModelStore>,
     pub intercept: Arc<Intercept>,
+    /// 数据目录布局：配置路径与类型化文档句柄的唯一来源（§5.1）。
+    pub layout: DataLayout,
     /// Guard 句柄：window_watch 单线程独占写，commands 只读。
     pub guard: Mutex<Option<Guard>>,
     /// 目标进程名（config 快照的缓存，热更新经 set_config 生效）。

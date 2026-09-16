@@ -14,42 +14,22 @@ use super::rules::RuleDef;
 use super::scenarios::SceneDef;
 
 /// rules.json 顶层结构
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RuleDoc {
     #[serde(default)]
     pub rule: Vec<RuleDef>,
 }
 
-impl Default for RuleDoc {
-    fn default() -> Self {
-        Self { rule: Vec::new() }
-    }
-}
-
 /// contacts.json 顶层结构
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ContactDoc {
     #[serde(default)]
     pub contact: Vec<ContactDef>,
 }
 
-impl Default for ContactDoc {
-    fn default() -> Self {
-        Self {
-            contact: Vec::new(),
-        }
-    }
-}
-
 /// scenes.json 顶层结构
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SceneDoc {
     #[serde(default)]
     pub scene: Vec<SceneDef>,
-}
-
-impl Default for SceneDoc {
-    fn default() -> Self {
-        Self { scene: Vec::new() }
-    }
 }

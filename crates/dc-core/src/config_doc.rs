@@ -231,10 +231,10 @@ impl ConfigManager {
     {
         self.reserve(name);
         let store = Arc::new(JsonStore::open(name, self.document_path(name))?);
-        self.typed
-            .write()
-            .expect("typed poisoned")
-            .insert(name.to_string(), Arc::clone(&store.inner) as Arc<dyn Any + Send + Sync>);
+        self.typed.write().expect("typed poisoned").insert(
+            name.to_string(),
+            Arc::clone(&store.inner) as Arc<dyn Any + Send + Sync>,
+        );
         self.documents
             .write()
             .expect("documents poisoned")

@@ -81,7 +81,7 @@ fn best_run(
     let mut gap = 0u32;
     let mut in_run = false;
     let update_best = |best: &mut Option<(u32, usize, usize)>, c: u32, s: usize, e: usize| {
-        if c >= min_run && best.map_or(true, |b| c > b.0) {
+        if c >= min_run && best.is_none_or(|b| c > b.0) {
             *best = Some((c, s, e));
         }
     };
@@ -305,10 +305,8 @@ mod tests {
     #[test]
     fn gap_tolerant_run() {
         let (buf, w, h) = solid(200, 100, |x, y| {
-            if y < 50 {
-                [255, 255, 255]
-            } else if y == 50 && (90..96).contains(&x) {
-                [255, 255, 255] // 模拟打断边界的 6px 图标
+            if y < 50 || (y == 50 && (90..96).contains(&x)) {
+                [255, 255, 255] // y<50 整行 + y==50 上 6px 图标（模拟打断边界）均为亮色
             } else {
                 [120, 120, 120]
             }

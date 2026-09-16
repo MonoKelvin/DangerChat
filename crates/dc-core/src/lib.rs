@@ -16,8 +16,8 @@
 pub mod config;
 pub mod config_doc;
 pub mod image_store;
-pub mod logging;
 mod json_file;
+pub mod logging;
 pub mod model_store;
 pub mod paths;
 pub mod plugin;

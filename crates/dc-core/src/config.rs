@@ -175,9 +175,11 @@ impl ConfigValue {
                 .map(serde_json::Value::Number)
                 .unwrap_or(serde_json::Value::Null),
             ConfigValue::Str(s) => serde_json::Value::String(s.clone()),
-            ConfigValue::StrList(v) => {
-                serde_json::Value::Array(v.iter().map(|s| serde_json::Value::String(s.clone())).collect())
-            }
+            ConfigValue::StrList(v) => serde_json::Value::Array(
+                v.iter()
+                    .map(|s| serde_json::Value::String(s.clone()))
+                    .collect(),
+            ),
         }
     }
 }
@@ -559,7 +561,8 @@ impl ConfigCenter {
         for (key, value) in values {
             insert_json_path(&mut obj, key, value.to_json());
         }
-        let text = serde_json::to_string_pretty(&obj).map_err(|e| ConfigError::Parse(e.to_string()))?;
+        let text =
+            serde_json::to_string_pretty(&obj).map_err(|e| ConfigError::Parse(e.to_string()))?;
         json_file::write_atomic(&self.inner.path, text.as_bytes())
     }
 
@@ -580,7 +583,10 @@ impl ConfigCenter {
             let key = &field.key;
             merged.insert(
                 key.clone(),
-                loaded.get(key).cloned().unwrap_or_else(|| field.default.clone()),
+                loaded
+                    .get(key)
+                    .cloned()
+                    .unwrap_or_else(|| field.default.clone()),
             );
         }
 
@@ -696,13 +702,15 @@ fn flatten_json(
             out.insert(prefix.to_string(), ConfigValue::StrList(list));
             Ok(())
         }
-        serde_json::Value::Null => Err(ConfigError::Parse(format!(
-            "`{prefix}` 取值为 null"
-        ))),
+        serde_json::Value::Null => Err(ConfigError::Parse(format!("`{prefix}` 取值为 null"))),
     }
 }
 
-fn insert_json_path(obj: &mut serde_json::Map<String, serde_json::Value>, key: &str, value: serde_json::Value) {
+fn insert_json_path(
+    obj: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    value: serde_json::Value,
+) {
     match key.split_once('.') {
         None => {
             obj.insert(key.to_string(), value);

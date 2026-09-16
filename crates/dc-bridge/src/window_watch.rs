@@ -99,12 +99,13 @@ fn watch_loop(app: AppHandle) {
     }
 }
 
-/// ModuleContext 工厂：models 根 = data_dir/models。
+/// ModuleContext 工厂：models 根 = data_dir/models，log_dir = data_dir/logs。
+/// 两者均经 `DataLayout` 统一推导，与 sem 模块读 rules/contacts/scenes 的路径同源。
 fn module_ctx(state: &AppState) -> dc_core::ModuleContext {
     dc_core::ModuleContext {
         config: state.config.snapshot(),
         models: Arc::clone(&state.models),
-        log_dir: state.data_dir.join("logs"),
+        log_dir: state.layout.logs_dir(),
         image_store: state.image_store.clone(),
     }
 }

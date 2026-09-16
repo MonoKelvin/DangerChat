@@ -13,12 +13,19 @@ pub struct DraftTracker {
     snooze_epoch: AtomicU64,
 }
 
-impl DraftTracker {
-    pub fn new() -> Self {
+impl Default for DraftTracker {
+    /// 初始：纪元 0、未 snooze（snooze_epoch 置 u64::MAX 表示「不等于任何当前纪元」）。
+    fn default() -> Self {
         Self {
             epoch: AtomicU64::new(0),
             snooze_epoch: AtomicU64::new(u64::MAX),
         }
+    }
+}
+
+impl DraftTracker {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn epoch(&self) -> u64 {

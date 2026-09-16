@@ -183,7 +183,10 @@ fn ut_core_03_corrupt_config_recovers() {
 
     // 恢复后的文件是合法 JSON
     let text = std::fs::read_to_string(&path).unwrap();
-    assert!(serde_json::from_str::<serde_json::Value>(&text).is_ok(), "text = {text}");
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&text).is_ok(),
+        "text = {text}"
+    );
 }
 
 /// UT-CORE-04 并发写配置无丢失（rename 原子性）
