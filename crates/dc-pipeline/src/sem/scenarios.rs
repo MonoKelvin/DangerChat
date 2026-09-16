@@ -95,21 +95,17 @@ impl ScenarioManager {
         }
     }
 
-    /// 过滤非法条目：id 与内置冲突 / 空 id / 空名 / 重名 → 丢弃（warn）。
+    /// 过滤非法条目：id 与内置冲突 / 空 id / 空名 / 重复 id → 丢弃（warn）。
     fn sanitize(scenes: Vec<SceneDef>) -> Vec<Scenario> {
         let builtin = builtin();
         let mut out = Vec::new();
         for s in scenes {
             let invalid = s.id.trim().is_empty()
                 || s.name.trim().is_empty()
-                || builtin
-                    .iter()
-                    .any(|b| b.id == s.id || b.name == s.name.trim())
-                || out
-                    .iter()
-                    .any(|e: &Scenario| e.id == s.id || e.name == s.name.trim());
+                || builtin.iter().any(|b| b.id == s.id)
+                || out.iter().any(|e: &Scenario| e.id == s.id);
             if invalid {
-                tracing::warn!(id = %s.id, "scenes.json 含非法/重复场景条目，已忽略");
+                tracing::warn!(id = %s.id, name = %s.name, "scenes.json 含非法/重复场景条目，已忽略");
                 continue;
             }
             out.push(Scenario {
@@ -340,22 +336,25 @@ mod tests {
         let path = tmp("sanitize");
         std::fs::write(
             &path,
-            r#"
-[[scene]]
-id = "formal"
-name = "冒充内置"
-base = "casual"
-
-[[scene]]
-id = "s1"
-name = "正常"
-base = "formal"
-
-[[scene]]
-id = "s1"
-name = "重复id"
-base = "formal"
-"#,
+            r#"{
+  "scene": [
+    {
+      "id": "formal",
+      "name": "冒充内置",
+      "base": "casual"
+    },
+    {
+      "id": "s1",
+      "name": "正常",
+      "base": "formal"
+    },
+    {
+      "id": "s1",
+      "name": "重复id",
+      "base": "formal"
+    }
+  ]
+}"#,
         )
         .unwrap();
         let m = ScenarioManager::load(&path);
