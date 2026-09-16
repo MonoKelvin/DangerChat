@@ -138,6 +138,19 @@ pub fn set_config(
                 state.intercept.set_verdict_ttl_ms(*ms as u64);
             }
         }
+        "debug.image_dirs_limit" => {
+            if let ConfigValue::Int(limit) = &applied {
+                if let Some(store) = &state.image_store {
+                    if let Ok(mut s) = store.lock() {
+                        if let Err(e) = s.adjust_limit((*limit as u32).clamp(10, 100)) {
+                            tracing::error!(error = %e, "调整图片目录上限失败");
+                        } else {
+                            tracing::info!(new_limit = limit, "图片目录上限已更新");
+                        }
+                    }
+                }
+            }
+        }
         _ => {}
     }
     Ok(value_json(&applied))

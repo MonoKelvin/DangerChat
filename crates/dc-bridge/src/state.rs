@@ -113,7 +113,7 @@ impl AppState {
         if let Some(store) = &self.image_store {
             if let Ok(s) = store.lock() {
                 let cursor = s.current_index();
-                let _ = self.bootstrap.update(|cfg| {
+                let _ = self.bootstrap.write(|cfg| {
                     cfg.images_cursor = cursor as u64;
                 });
                 tracing::debug!(cursor, "图片存储游标已持久化到 bootstrap.json");
