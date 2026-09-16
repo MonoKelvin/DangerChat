@@ -147,7 +147,8 @@ pub fn build(app: &AppHandle) -> tauri::Result<TrayIcon> {
 
     let tray = TrayIconBuilder::with_id("main")
         .icon(initial)
-        .tooltip("危信")
+        // 名称唯一来源：src-tauri/tauri.conf.json 的 productName
+        .tooltip(app.config().product_name.clone().unwrap_or_else(|| "DangerChat".into()))
         .menu(&menu)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "pause" => {

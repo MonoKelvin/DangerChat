@@ -176,7 +176,7 @@ impl Module for LayoutStage {
             ConfigField {
                 key: "layout.model".into(),
                 ty: ConfigType::Text { max_len: 64 },
-                default: ConfigValue::Str("layout-wechat".into()),
+                default: ConfigValue::Str("dc-layout-wechat".into()),
                 label: "区域模型".into(),
                 help: "models/ 下的模型目录名".into(),
                 group: "模型与设备".into(),
@@ -208,7 +208,7 @@ impl Module for LayoutStage {
 
     /// 经 ModelStore 加载模型并校验类别覆盖（UT-LAY-05：不覆盖 → Fatal）。
     fn init(&mut self, mctx: &ModuleContext) -> Result<(), ModuleError> {
-        let model_name = mctx.config.str_or("layout.model", "layout-wechat");
+        let model_name = mctx.config.str_or("layout.model", "dc-layout-wechat");
         let info = mctx.models.get(model_name).ok_or_else(|| {
             ModuleError::Fatal(format!("layout 模型不存在：{model_name}（请在设置中导入）"))
         })?;

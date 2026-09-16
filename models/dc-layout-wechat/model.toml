@@ -1,0 +1,6 @@
+kind = "layout"
+file = "yolo11n-dc-layout-wechat-v1.onnx"
+version = "yolo11n-dc-layout-wechat-v1"
+input_size = 640
+classes = ['chat_list', 'chat_window', 'chat_target', 'msg_input']
+note = "基于 YOLO11n 微调的微信界面区域检测模型，四类功能区域"

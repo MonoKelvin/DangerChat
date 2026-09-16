@@ -196,9 +196,13 @@ fn restart_app(app: AppHandle) -> Result<(), String> {
 /// 返回 `Some(lock)` 表示本进程是唯一实例（**必须把 lock 持有到进程结束**，
 /// 提前 drop 会释放锁导致后续实例误判）；返回 `None` 表示已有实例，应立即退出。
 ///
+/// 锁名从 bundle identifier 派生（`<identifier>-guard`），**不写死**：官方插件的
+/// Mutex 名同样取自 identifier，两者必须同源，否则改了 tauri.conf.json 里的
+/// identifier 后，本锁仍按旧名互斥 —— 新旧实例各自为「唯一」，钩子照样装两套。
+///
 /// Win32 调用封装在 dc-sys（架构纪律：Win32 只允许出现在 dc-sys）。
-fn acquire_fallback_lock() -> Option<dc_sys::InstanceLock> {
-    let lock = dc_sys::acquire_instance_lock("com.dangerchat.app-guard");
+fn acquire_fallback_lock(app: &AppHandle) -> Option<dc_sys::InstanceLock> {
+    let lock = dc_sys::acquire_instance_lock(&format!("{}-guard", app.config().identifier));
     if lock.is_owner() {
         Some(lock)
     } else {
@@ -266,7 +270,7 @@ pub fn run() {
             // 0) 兜底单实例锁：**必须在 bootstrap（装配全局键盘钩子）之前**。
             //    官方插件在「找不到已有实例隐藏窗口」时会放行新实例，
             //    此处补上，确保任何情况下都只有一个进程装钩子。
-            let lock = match acquire_fallback_lock() {
+            let lock = match acquire_fallback_lock(app.handle()) {
                 Some(l) => l,
                 None => {
                     // 已有实例在跑：本进程静默退出（不弹窗、不报错，与双击图标预期一致）

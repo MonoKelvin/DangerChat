@@ -14,6 +14,7 @@ import {
   IconZoomOut,
 } from '@tabler/icons-react';
 import { useStore } from './store';
+import { APP_NAME } from './lib/meta';
 import { ImageList } from './components/ImageList';
 import { TagPalette } from './components/TagPalette';
 import { AnnoCanvas } from './components/AnnoCanvas';
@@ -197,9 +198,9 @@ function App() {  const init = useStore((s) => s.init);
           }}
         >
           <div className="mr-1 flex items-center gap-2.5" data-tauri-drag-region>
-            <img src="app-icon.png" alt="UiTag" className="size-6 rounded-md shadow-sm" />
+            <img src="app-icon.png" alt={APP_NAME} className="size-6 rounded-md shadow-sm" />
             <span className="text-[13px] font-semibold tracking-tight" data-tauri-drag-region>
-              UiTag
+              {APP_NAME}
             </span>
           </div>
 

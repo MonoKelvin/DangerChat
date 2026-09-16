@@ -36,11 +36,6 @@ resources/training_set/wechat_snapcaptures/
 resources/training_set/*.zip
 *.tsbuildinfo
 
-# ONNX 模型权重与字典（models/README.md 记下载源）
-models/**/*.onnx
-models/**/ppocr_keys_v1.txt
-yolo11n.pt
-models/layout-wechat/best.pt
-models/layout-wechat/*.onnx
-resources/training_set/uitag-dataset.zip
+# 训练用的原始权重与数据集（成品 ONNX 已随 models/ 入库，各目录附 LICENSE）
+models/dc-layout-wechat/best.pt
 weights/

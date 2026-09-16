@@ -13,6 +13,7 @@ import { Combobox, type ComboOption } from '../components/Combobox';
 import { SettingsGroup, SettingsRow, SettingsSection } from '../components/SettingsGroup';
 import { AboutHero } from './AboutHero';
 import { TrainingDialog } from './TrainingDialog';
+import { APP_NAME, APP_VERSION, AUTHOR, AUTHOR_URL, LICENSE, REPO_URL } from '../lib/meta';
 import {
   ACCENTS,
   getAccent,
@@ -147,7 +148,7 @@ export function SettingsRoot() {
       return (
         <LayoutModelRow
           key={key}
-          value={String(values[key] ?? byKey.get(key)?.default ?? 'layout-wechat')}
+          value={String(values[key] ?? byKey.get(key)?.default ?? 'dc-layout-wechat')}
           onChange={(v) => change(key, v)}
         />
       );
@@ -171,12 +172,12 @@ export function SettingsRoot() {
         <div className="mb-5 flex items-center gap-3 px-2 pt-1">
           <img
             src="app-icon.png"
-            alt="危信"
+            alt={APP_NAME}
             className="size-9 rounded-xl object-cover shadow-[var(--shadow-sm)] transition-[filter] duration-300"
             style={{ filter: logoFilter }}
           />
           <div className="flex flex-1 flex-col leading-tight">
-            <span className="text-[15px] font-semibold tracking-tight text-[var(--text-primary)]">危信</span>
+            <span className="text-[15px] font-semibold tracking-tight text-[var(--text-primary)]">{APP_NAME}</span>
             <div className="mt-0.5 flex items-center gap-1.5 text-xs">
               <StateIcon className={cn('size-3.5', stateColor)} strokeWidth={2} />
               <span className="text-[var(--text-tertiary)]">{stateText}</span>
@@ -1075,17 +1076,16 @@ function ExtLink({ url, children }: { url: string; children: ReactNode }) {
 const WECHAT_AGREEMENT =
   'https://weixin.qq.com/cgi-bin/readtemplate?lang=zh_CN&t=weixin_agreement&s=default';
 const WECHAT_PERSONAL_RULES = 'https://weixin.qq.com/agreement/personal_account?lang=zh_CN';
-const REPO_URL = 'https://github.com/MonoKelvin/DangerChat';
 
 function AboutPage() {
   return (
     <div className="mx-auto max-w-2xl">
-      <AboutHero name="危信" version="0.1.0" />
+      <AboutHero name={APP_NAME} version={APP_VERSION} />
       <SettingsSection>
         <SettingsGroup label="简介">
           <SettingsRow stacked>
             <p className="text-sm leading-relaxed text-[var(--text-secondary)]">
-              危信是一款危险言语提前拦截工具：在消息发出前截取屏幕画面、在本机识别文字，
+                {APP_NAME}是一款危险言语提前拦截工具：在消息发出前截取屏幕画面、在本机识别文字，
               发现可能引发风险的措辞时弹窗提醒，帮你避免一时冲动发出不当言论。
               全程纯本地运行，不依赖任何网络服务。
             </p>
@@ -1125,10 +1125,10 @@ function AboutPage() {
             <ExtLink url={REPO_URL}>{REPO_URL.replace('https://', '')}</ExtLink>
           </SettingsRow>
           <SettingsRow label="作者">
-            <ExtLink url="https://github.com/MonoKelvin">Mono Kelvin</ExtLink>
+            <ExtLink url={AUTHOR_URL}>{AUTHOR}</ExtLink>
           </SettingsRow>
           <SettingsRow label="许可证">
-            <ExtLink url={`${REPO_URL}/blob/main/LICENSE`}>MIT License</ExtLink>
+            <ExtLink url={`${REPO_URL}/blob/main/LICENSE`}>{LICENSE} License</ExtLink>
           </SettingsRow>
         </SettingsGroup>
       </SettingsSection>

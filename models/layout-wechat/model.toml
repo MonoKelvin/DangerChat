@@ -1,6 +1,0 @@
-kind = "layout"
-file = "layout-wechat.onnx"
-version = "yolo11n-wechat-73"
-input_size = 640
-classes = ['chat_list', 'chat_window', 'chat_target', 'msg_input']
-note = "dc_uitag 标注 73 张训练；增广禁用（UI 截图语义）"

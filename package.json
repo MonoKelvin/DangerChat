@@ -1,13 +1,24 @@
 {
   "name": "dangerchat",
+  "version": "1.0.0",
   "private": true,
+  "author": "MonoKelvin",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MonoKelvin/DangerChat.git"
+  },
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",
     "dev:uitag": "pnpm -F uitag exec tauri dev",
     "build": "tauri build",
     "build:uitag": "pnpm -F uitag exec tauri build",
-    "test": "cargo test --workspace && pnpm -r test"
+    "test": "cargo nextest run --workspace && pnpm -r test",
+    "test:rust": "cargo nextest run --workspace",
+    "test:fast": "node tools/test_select.mjs",
+    "test:golden": "cargo nextest run --workspace -E \"binary(golden_layout) + binary(golden_ocr)\"",
+    "test:manual": "cargo nextest run --workspace --run-ignored only"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.4"

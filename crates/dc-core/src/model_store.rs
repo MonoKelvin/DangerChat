@@ -4,9 +4,9 @@
 //!
 //! ```text
 //! models/
-//!   layout-wechat/            # 一个模型一个目录
+//!   dc-layout-wechat/        # 一个模型一个目录
 //!     model.toml              # 元信息：kind / version / file / input_size / classes
-//!     layout-wechat.onnx
+//!     yolo11n-dc-layout-wechat-v1.onnx
 //! ```
 //!
 //! 内置模型随发布物携带；用户自训练模型经 `import_model` 导入（M6），导入时校验

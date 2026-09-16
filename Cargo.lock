@@ -1041,7 +1041,7 @@ checksum = "52560adf09603e58c9a7ee1fe1dcb95a16927b17c127f0ac02d6e768a0e25bc1"
 
 [[package]]
 name = "dangerchat"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "dc-bridge",
  "dc-core",
@@ -1149,7 +1149,7 @@ dependencies = [
 
 [[package]]
 name = "dc-bridge"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "crossbeam-channel",
  "dc-core",
@@ -1167,7 +1167,7 @@ dependencies = [
 
 [[package]]
 name = "dc-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "crossbeam-channel",
  "image",
@@ -1181,7 +1181,7 @@ dependencies = [
 
 [[package]]
 name = "dc-pipeline"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "aho-corasick",
  "arc-swap",
@@ -1203,7 +1203,7 @@ dependencies = [
 
 [[package]]
 name = "dc-sys"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "crossbeam-channel",
  "dc-core",
@@ -2965,7 +2965,7 @@ checksum = "e20f57f9918e5bd7bc58c22cdd70a6afc7375d4dd9683af5f2b34bd3d2bba619"
 
 [[package]]
 name = "m3-inference"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "image",
  "ort",
@@ -4314,7 +4314,7 @@ checksum = "03251193000f4bd3b042892be858ee50e8b3719f2b08e5833ac4353724632430"
 
 [[package]]
 name = "redline_scan"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "tempfile",
 ]
@@ -6024,7 +6024,7 @@ dependencies = [
 
 [[package]]
 name = "uitag"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "image",
  "imageproc",

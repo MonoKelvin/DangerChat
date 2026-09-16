@@ -1,7 +1,7 @@
 """M4：layout 区域模型训练（设计文档 §8 离线工具链）。
 
 消费 dc_uitag 导出的 YOLO 数据集 zip（images/ + labels/ + classes.txt + tags.json），
-用 ultralytics YOLO11n 迁移学习，产出 models/layout-wechat/{model.toml, *.onnx}。
+用 ultralytics YOLO11n 迁移学习，产出 models/dc-layout-wechat/{model.toml, yolo11n-*.onnx}。
 
 关键决策（M4 计划拍板）：
   · 增广**禁用**：UI 截图的颜色与几何是语义（深浅主题是特征不是噪声），
@@ -82,7 +82,8 @@ def main() -> int:
     ap.add_argument("--epochs", type=int, default=EPOCHS)
     ap.add_argument("--out", type=Path, default=None,
                     help="models 根目录（默认仓库 models/；主程序自助训练传数据目录 models/）")
-    ap.add_argument("--name", type=str, default="layout-wechat", help="产出模型目录名")
+    ap.add_argument("--name", type=str, default="dc-layout-wechat", help="产出模型目录名")
+    ap.add_argument("--ver", type=str, default="v1", help="版本标记（权重文件名与 model.toml version 后缀）")
     args = ap.parse_args()
 
     import torch
@@ -126,21 +127,22 @@ def main() -> int:
         print(f"[smoke] 指标：{results.results_dict}")
         return 0
 
-    # 导出 ONNX + 组装 models/layout-wechat/
+    # 导出 ONNX + 组装模型目录（命名约定：<基座>-<模型名>-<版本>.onnx）
     onnx_path = best.with_suffix(".onnx")
     exported = model.export(format="onnx", opset=12, simplify=True)
     exported_path = Path(exported)
 
     dest = (args.out if args.out is not None else REPO / "models") / args.name
     dest.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(exported_path, dest / f"{args.name}.onnx")
+    weight_name = f"yolo11n-{args.name}-{args.ver}"
+    shutil.copy2(exported_path, dest / f"{weight_name}.onnx")
     (dest / "model.toml").write_text(
         "kind = \"layout\"\n"
-        f"file = \"{args.name}.onnx\"\n"
-        f"version = \"yolo11n-{args.name}\"\n"
+        f"file = \"{weight_name}.onnx\"\n"
+        f"version = \"{weight_name}\"\n"
         "input_size = 640\n"
         f"classes = {EXPECTED_CLASSES}\n"
-        f'note = "dc_uitag 数据集 {args.dataset.name} 训练；增广禁用（UI 截图语义）"\n',
+        'note = "基于 YOLO11n 微调的微信界面区域检测模型，四类功能区域"\n',
         encoding="utf-8",
     )
     print(f"已产出 {dest}")
