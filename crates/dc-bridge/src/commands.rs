@@ -187,9 +187,13 @@ fn trigger_sem_reload(state: &AppState) {
 
 #[tauri::command]
 pub fn list_contacts(state: State<'_, Arc<AppState>>) -> CmdResult<Vec<ContactDto>> {
-    let path = state.data_dir.join("contacts.toml");
+    let path = state.data_dir.join("contacts.json");
     let text = std::fs::read_to_string(&path).unwrap_or_default();
-    let parsed: TomlContacts = toml_parse(&text)?;
+    if text.is_empty() {
+        return Ok(Vec::new());
+    }
+    let parsed: dc_pipeline::sem::doc::ContactDoc = serde_json::from_str(&text)
+        .map_err(|e| BridgeError::Config(format!("contacts.json 解析失败：{e}")))?;
     Ok(parsed
         .contact
         .into_iter()
@@ -204,22 +208,6 @@ pub fn list_contacts(state: State<'_, Arc<AppState>>) -> CmdResult<Vec<ContactDt
 pub struct ContactDto {
     pub name: String,
     pub profile: String,
-}
-
-#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
-struct TomlContacts {
-    #[serde(default)]
-    contact: Vec<ContactDef>,
-}
-
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-struct ContactDef {
-    name: String,
-    profile: String,
-}
-
-fn toml_parse<T: serde::de::DeserializeOwned>(text: &str) -> CmdResult<T> {
-    toml::from_str(text).map_err(|e| BridgeError::Config(format!("toml 解析失败：{e}")))
 }
 
 #[tauri::command]
@@ -239,18 +227,23 @@ pub fn set_contact_profile(
             "画像非法：{profile}（不存在的场景）"
         )));
     }
-    let path = state.data_dir.join("contacts.toml");
+    let path = state.data_dir.join("contacts.json");
     let text = std::fs::read_to_string(&path).unwrap_or_default();
-    let mut parsed: TomlContacts = toml_parse(&text)?;
+    let mut parsed: dc_pipeline::sem::doc::ContactDoc = if text.is_empty() {
+        dc_pipeline::sem::doc::ContactDoc { contact: Vec::new() }
+    } else {
+        serde_json::from_str(&text)
+            .map_err(|e| BridgeError::Config(format!("contacts.json 解析失败：{e}")))?
+    };
     parsed.contact.retain(|c| c.name != name);
     if profile != "none" {
-        parsed.contact.push(ContactDef {
+        parsed.contact.push(dc_pipeline::sem::contacts::ContactDef {
             name: name.clone(),
             profile: profile.clone(),
         });
     }
-    let out = toml::to_string_pretty(&parsed)
-        .map_err(|e| BridgeError::Config(format!("toml 序列化失败：{e}")))?;
+    let out = serde_json::to_string_pretty(&parsed)
+        .map_err(|e| BridgeError::Config(format!("json 序列化失败：{e}")))?;
     std::fs::write(&path, out).map_err(|e| BridgeError::Io(e.to_string()))?;
     tracing::info!(contact = %name, profile = %profile, "画像已更新");
     trigger_sem_reload(&state);
@@ -266,17 +259,25 @@ pub struct RuleDto {
     pub applies_to: Vec<String>,
 }
 
-#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
-struct TomlRules {
-    #[serde(default)]
-    rule: Vec<RuleDto>,
-}
-
 #[tauri::command]
 pub fn get_rules(state: State<'_, Arc<AppState>>) -> CmdResult<Vec<RuleDto>> {
-    let path = state.data_dir.join("rules.toml");
+    let path = state.data_dir.join("rules.json");
     let text = std::fs::read_to_string(&path).unwrap_or_default();
-    Ok(toml_parse::<TomlRules>(&text)?.rule)
+    if text.is_empty() {
+        return Ok(Vec::new());
+    }
+    let doc: dc_pipeline::sem::doc::RuleDoc = serde_json::from_str(&text)
+        .map_err(|e| BridgeError::Config(format!("rules.json 解析失败：{e}")))?;
+    // 转换 RuleDef → RuleDto（MatchKind → String）
+    Ok(doc.rule.into_iter().map(|r| RuleDto {
+        pattern: r.pattern,
+        r#match: match r.r#match {
+            dc_pipeline::sem::rules::MatchKind::Word => "word".to_string(),
+            dc_pipeline::sem::rules::MatchKind::Substring => "substring".to_string(),
+            dc_pipeline::sem::rules::MatchKind::Regex => "regex".to_string(),
+        },
+        applies_to: r.applies_to,
+    }).collect())
 }
 
 #[tauri::command]
@@ -287,25 +288,26 @@ pub fn save_rules(state: State<'_, Arc<AppState>>, rules: Vec<RuleDto>) -> CmdRe
         .filter(|r| !r.pattern.trim().is_empty())
         .collect();
 
+    // 转换 RuleDto → RuleDef 用于校验和序列化
+    let rule_defs: Vec<dc_pipeline::sem::rules::RuleDef> = rules
+        .iter()
+        .map(|r| dc_pipeline::sem::rules::RuleDef {
+            pattern: r.pattern.clone(),
+            r#match: serde_json::from_value(serde_json::Value::String(r.r#match.clone()))
+                .unwrap_or(dc_pipeline::sem::rules::MatchKind::Substring),
+            applies_to: r.applies_to.clone(),
+        })
+        .collect();
+
     // 先校验全部可解析（整批原子：任一非法拒绝保存）
-    let ruleset = dc_pipeline::sem::rules::RuleSet::from_defs(
-        rules
-            .iter()
-            .map(|r| dc_pipeline::sem::rules::RuleDef {
-                pattern: r.pattern.clone(),
-                r#match: serde_json::from_value(serde_json::Value::String(r.r#match.clone()))
-                    .unwrap_or(dc_pipeline::sem::rules::MatchKind::Substring),
-                applies_to: r.applies_to.clone(),
-            })
-            .collect(),
-    )
-    .map_err(|e| BridgeError::Config(format!("规则校验失败：{e}")))?;
+    let ruleset = dc_pipeline::sem::rules::RuleSet::from_defs(rule_defs.clone())
+        .map_err(|e| BridgeError::Config(format!("规则校验失败：{e}")))?;
     let _ = ruleset;
-    let out = toml::to_string_pretty(&TomlRules {
-        rule: rules.clone(),
-    })
-    .map_err(|e| BridgeError::Config(format!("toml 序列化失败：{e}")))?;
-    let path = state.data_dir.join("rules.toml");
+
+    let doc = dc_pipeline::sem::doc::RuleDoc { rule: rule_defs };
+    let out = serde_json::to_string_pretty(&doc)
+        .map_err(|e| BridgeError::Config(format!("json 序列化失败：{e}")))?;
+    let path = state.data_dir.join("rules.json");
     std::fs::write(&path, out).map_err(|e| BridgeError::Io(e.to_string()))?;
     tracing::info!(count = rules.len(), path = %path.display(), "规则库已保存");
 
