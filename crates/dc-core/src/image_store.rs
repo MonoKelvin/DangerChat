@@ -26,7 +26,7 @@ pub struct RollingImageStore {
     root: PathBuf,
     limit: u32,
     cursor: Arc<AtomicU64>,
-    tx: Sender<SaveRequest>,
+    tx: Option<Sender<SaveRequest>>,
     worker: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -54,7 +54,7 @@ impl RollingImageStore {
             root,
             limit,
             cursor,
-            tx,
+            tx: Some(tx),
             worker: Some(worker),
         }
     }
@@ -80,8 +80,10 @@ impl RollingImageStore {
             image,
         };
         // try_send：队列满时立即返回错误，不阻塞
-        if let Err(e) = self.tx.try_send(req) {
-            tracing::warn!(error = ?e, "图片保存队列已满，丢弃当前帧");
+        if let Some(tx) = &self.tx {
+            if let Err(e) = tx.try_send(req) {
+                tracing::warn!(error = ?e, "图片保存队列已满，丢弃当前帧");
+            }
         }
     }
 
@@ -143,10 +145,11 @@ impl RollingImageStore {
 
 impl Drop for RollingImageStore {
     fn drop(&mut self) {
-        // 关闭发送端，后台线程会在队列排空后自然退出
-        drop(self.tx.clone());
-        if let Some(handle) = self.worker.take() {
-            let _ = handle.join();
+        // 显式关闭 channel：take() 丢弃 Sender，让 rx.recv() 返回断开错误
+        drop(self.tx.take());
+        // 再 join worker 线程（此时 worker_loop 的 recv() 已收到断开信号）
+        if let Some(h) = self.worker.take() {
+            let _ = h.join();
         }
     }
 }
