@@ -167,17 +167,17 @@ fn trigger_sem_reload(state: &AppState) {
         if let Some(guard) = guard_opt.as_ref() {
             let rules_path = state
                 .data_dir
-                .join("rules.json")
+                .join(dc_core::paths::RULES_JSON)
                 .to_string_lossy()
                 .to_string();
             let contacts_path = state
                 .data_dir
-                .join("contacts.json")
+                .join(dc_core::paths::CONTACTS_JSON)
                 .to_string_lossy()
                 .to_string();
             let scenes_path = state
                 .data_dir
-                .join("scenes.json")
+                .join(dc_core::paths::SCENES_JSON)
                 .to_string_lossy()
                 .to_string();
             guard.reload_rules(&rules_path, &contacts_path, &scenes_path);
@@ -187,7 +187,7 @@ fn trigger_sem_reload(state: &AppState) {
 
 #[tauri::command]
 pub fn list_contacts(state: State<'_, Arc<AppState>>) -> CmdResult<Vec<ContactDto>> {
-    let path = state.data_dir.join("contacts.json");
+    let path = state.data_dir.join(dc_core::paths::CONTACTS_JSON);
     let text = std::fs::read_to_string(&path).unwrap_or_default();
     if text.is_empty() {
         return Ok(Vec::new());
@@ -227,7 +227,7 @@ pub fn set_contact_profile(
             "画像非法：{profile}（不存在的场景）"
         )));
     }
-    let path = state.data_dir.join("contacts.json");
+    let path = state.data_dir.join(dc_core::paths::CONTACTS_JSON);
     let text = std::fs::read_to_string(&path).unwrap_or_default();
     let mut parsed: dc_pipeline::sem::doc::ContactDoc = if text.is_empty() {
         dc_pipeline::sem::doc::ContactDoc { contact: Vec::new() }
@@ -261,7 +261,7 @@ pub struct RuleDto {
 
 #[tauri::command]
 pub fn get_rules(state: State<'_, Arc<AppState>>) -> CmdResult<Vec<RuleDto>> {
-    let path = state.data_dir.join("rules.json");
+    let path = state.data_dir.join(dc_core::paths::RULES_JSON);
     let text = std::fs::read_to_string(&path).unwrap_or_default();
     if text.is_empty() {
         return Ok(Vec::new());
@@ -307,7 +307,7 @@ pub fn save_rules(state: State<'_, Arc<AppState>>, rules: Vec<RuleDto>) -> CmdRe
     let doc = dc_pipeline::sem::doc::RuleDoc { rule: rule_defs };
     let out = serde_json::to_string_pretty(&doc)
         .map_err(|e| BridgeError::Config(format!("json 序列化失败：{e}")))?;
-    let path = state.data_dir.join("rules.json");
+    let path = state.data_dir.join(dc_core::paths::RULES_JSON);
     std::fs::write(&path, out).map_err(|e| BridgeError::Io(e.to_string()))?;
     tracing::info!(count = rules.len(), path = %path.display(), "规则库已保存");
 

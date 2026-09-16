@@ -8,6 +8,7 @@
 //! - [`image_store`]：循环目录图片存储（调试模式专用，异步写入）
 //! - [`plugin`]：插件注册机制，模块统一生命周期契约（FR-SYS-04）
 //! - [`model_store`]：ONNX 模型目录管理与导入校验
+//! - [`paths`]：配置文件名常量（单一来源）
 //!
 //! 依赖方向（§3.3）：上层（dc-pipeline / dc-bridge）依赖本 crate；本 crate 不依赖任何上层，
 //! 也不触碰 Win32（平台能力一律经 `dc-sys`）。
@@ -18,6 +19,7 @@ pub mod image_store;
 pub mod logging;
 mod json_file;
 pub mod model_store;
+pub mod paths;
 pub mod plugin;
 pub mod time;
 

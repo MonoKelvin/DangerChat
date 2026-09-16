@@ -247,8 +247,8 @@ impl Module for SemStage {
         let rules_path = mctx
             .log_dir
             .parent()
-            .map(|d| d.join("rules.json"))
-            .unwrap_or_else(|| std::path::PathBuf::from("rules.json"));
+            .map(|d| d.join(dc_core::paths::RULES_JSON))
+            .unwrap_or_else(|| std::path::PathBuf::from(dc_core::paths::RULES_JSON));
         match std::fs::read_to_string(&rules_path) {
             Ok(text) => match RuleSet::from_json(&text) {
                 Ok(rs) => {
@@ -273,8 +273,8 @@ impl Module for SemStage {
         let contacts_path = mctx
             .log_dir
             .parent()
-            .map(|d| d.join("contacts.json"))
-            .unwrap_or_else(|| std::path::PathBuf::from("contacts.json"));
+            .map(|d| d.join(dc_core::paths::CONTACTS_JSON))
+            .unwrap_or_else(|| std::path::PathBuf::from(dc_core::paths::CONTACTS_JSON));
         match std::fs::read_to_string(&contacts_path) {
             Ok(text) => match ContactBook::from_json(&text) {
                 Ok(cb) => {
@@ -300,8 +300,8 @@ impl Module for SemStage {
         let scenes_path = mctx
             .log_dir
             .parent()
-            .map(|d| d.join("scenes.json"))
-            .unwrap_or_else(|| std::path::PathBuf::from("scenes.json"));
+            .map(|d| d.join(dc_core::paths::SCENES_JSON))
+            .unwrap_or_else(|| std::path::PathBuf::from(dc_core::paths::SCENES_JSON));
         if let Ok(mut w) = self.scenarios.write() {
             *w = ScenarioManager::load(&scenes_path);
         }
