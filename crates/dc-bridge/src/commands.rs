@@ -167,17 +167,17 @@ fn trigger_sem_reload(state: &AppState) {
         if let Some(guard) = guard_opt.as_ref() {
             let rules_path = state
                 .data_dir
-                .join("rules.toml")
+                .join("rules.json")
                 .to_string_lossy()
                 .to_string();
             let contacts_path = state
                 .data_dir
-                .join("contacts.toml")
+                .join("contacts.json")
                 .to_string_lossy()
                 .to_string();
             let scenes_path = state
                 .data_dir
-                .join("scenes.toml")
+                .join("scenes.json")
                 .to_string_lossy()
                 .to_string();
             guard.reload_rules(&rules_path, &contacts_path, &scenes_path);

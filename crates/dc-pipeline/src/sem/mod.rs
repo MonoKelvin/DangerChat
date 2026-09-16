@@ -300,8 +300,8 @@ impl Module for SemStage {
         let scenes_path = mctx
             .log_dir
             .parent()
-            .map(|d| d.join("scenes.toml"))
-            .unwrap_or_else(|| std::path::PathBuf::from("scenes.toml"));
+            .map(|d| d.join("scenes.json"))
+            .unwrap_or_else(|| std::path::PathBuf::from("scenes.json"));
         if let Ok(mut w) = self.scenarios.write() {
             *w = ScenarioManager::load(&scenes_path);
         }
