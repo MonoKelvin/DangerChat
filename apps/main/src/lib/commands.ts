@@ -134,3 +134,28 @@ export async function setTrayHue(hue: number): Promise<void> {
 export async function openExternal(url: string): Promise<void> {
   return invoke('open_external', { url });
 }
+
+/** models/ 全部有效模型（区域模型下拉框数据源） */
+export async function listModels(): Promise<import('./types').ModelDto[]> {
+  return invoke('list_models');
+}
+
+/** datasets/ 下的训练数据 zip（训练对话框数据源） */
+export async function listDatasets(): Promise<import('./types').DatasetDto[]> {
+  return invoke('list_datasets');
+}
+
+/** 当前训练任务状态 */
+export async function trainingStatus(): Promise<import('./types').TrainingStatus> {
+  return invoke('training_status');
+}
+
+/** 启动 uitag 打标工具（独立进程） */
+export async function launchUitag(): Promise<void> {
+  return invoke('launch_uitag');
+}
+
+/** 发起自助训练（立即返回，进度走 training://status 事件） */
+export async function startTraining(dataset: string): Promise<void> {
+  return invoke('start_training', { dataset });
+}

@@ -45,6 +45,8 @@ pub struct AppState {
     /// 旧目录会被永久拒绝删除（迁移后的清理需求无法满足）。
     /// 改为白名单：只有「刚迁移走的那个目录」可删，安全边界反而更紧。
     pub pending_cleanup: Mutex<Option<std::path::PathBuf>>,
+    /// 自助训练任务状态（start_training 线程写，training_status / 前端读）。
+    pub training: Mutex<crate::dto::TrainingStatusDto>,
     /// 托盘图标主题色相（度数）：前端主题色切换时同步，图标按此色相着色。
     pub tray_hue_deg: std::sync::atomic::AtomicU32,
     /// 进程退出信号：置位后各后台线程（pump/window-watch）退出循环。

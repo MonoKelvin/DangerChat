@@ -7,7 +7,8 @@ use tauri::{Manager, State};
 use dc_core::{ConfigType, ConfigValue};
 use dc_pipeline::intercept::{AlertAction, GuardState};
 
-use crate::dto::StatusPayload;
+use crate::dto::{DatasetDto, ModelDto, StatusPayload, TrainingStatusDto};
+use crate::events;
 use crate::state::AppState;
 
 #[derive(Debug, thiserror::Error, serde::Serialize)]
@@ -412,6 +413,279 @@ pub fn import_model(state: State<'_, Arc<AppState>>, kind: String, path: String)
         .import(k, std::path::Path::new(&path), &required)
         .map_err(|e| BridgeError::Model(e.to_string()))?;
     tracing::info!(kind = %kind, path = %path, "模型已导入");
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// 模型 / 训练数据 / 自助训练（FR-ROI-04）
+// ---------------------------------------------------------------------------
+
+/// 扫描 models/ 全部有效模型（dir_watch 与 list_models 共用；非法目录由 ModelStore 跳过）。
+pub fn scan_models(state: &AppState) -> Vec<ModelDto> {
+    state
+        .models
+        .list()
+        .into_iter()
+        .map(|m| ModelDto {
+            name: m.name,
+            kind: m.meta.kind,
+            version: m.meta.version,
+            note: m.meta.note,
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub fn list_models(state: State<'_, Arc<AppState>>) -> CmdResult<Vec<ModelDto>> {
+    Ok(scan_models(&state))
+}
+
+/// 扫描数据目录 datasets/ 下的训练数据 zip（按修改时间倒序，最新导出的在前）。
+pub fn scan_datasets(state: &AppState) -> Vec<DatasetDto> {
+    let dir = state.data_dir.join("datasets");
+    let _ = std::fs::create_dir_all(&dir);
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut out: Vec<DatasetDto> = entries
+        .flatten()
+        .filter(|e| {
+            e.path()
+                .extension()
+                .is_some_and(|x| x.eq_ignore_ascii_case("zip"))
+        })
+        .filter_map(|e| {
+            let size = e.metadata().ok().map(|m| m.len()).unwrap_or(0);
+            e.file_name().to_str().map(|n| DatasetDto {
+                name: n.to_string(),
+                size_bytes: size,
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| b.name.cmp(&a.name));
+    out
+}
+
+#[tauri::command]
+pub fn list_datasets(state: State<'_, Arc<AppState>>) -> CmdResult<Vec<DatasetDto>> {
+    Ok(scan_datasets(&state))
+}
+
+#[tauri::command]
+pub fn training_status(state: State<'_, Arc<AppState>>) -> CmdResult<TrainingStatusDto> {
+    Ok(state
+        .training
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone())
+}
+
+/// 找 uitag.exe：发布布局（主程序旁）→ 仓库开发布局（apps/uitag 的 target 产物）。
+fn find_uitag_exe() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let exe_dir = exe.parent()?;
+    for cand in [
+        exe_dir.join("uitag.exe"),
+        exe_dir.join("tools/uitag/uitag.exe"),
+    ] {
+        if cand.is_file() {
+            return Some(cand);
+        }
+    }
+    exe.ancestors().skip(1).find_map(|root| {
+        ["release", "debug"].iter().find_map(|profile| {
+            let p = root
+                .join("apps/uitag/src-tauri/target")
+                .join(profile)
+                .join("uitag.exe");
+            p.is_file().then_some(p)
+        })
+    })
+}
+
+/// 启动 uitag 打标工具（独立进程；找不到可执行文件时给出指引）。
+#[tauri::command]
+pub fn launch_uitag() -> CmdResult<()> {
+    let exe = find_uitag_exe()
+        .ok_or_else(|| BridgeError::Io("未找到 uitag.exe（开发布局需先构建 apps/uitag）".into()))?;
+    std::process::Command::new(&exe)
+        .spawn()
+        .map_err(|e| BridgeError::Io(format!("uitag 启动失败：{e}")))?;
+    tracing::info!(exe = %exe.display(), "uitag 已启动");
+    Ok(())
+}
+
+/// 找训练脚本：发布布局（exe 旁 tools/）→ 仓库开发布局（exe 向上找仓库根）。
+fn find_training_script() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let exe_dir = exe.parent()?;
+    let bundled = exe_dir.join("tools/training/train_layout.py");
+    if bundled.is_file() {
+        return Some(bundled);
+    }
+    exe.ancestors()
+        .skip(1)
+        .map(|root| root.join("tools/training/train_layout.py"))
+        .find(|p| p.is_file())
+}
+
+/// 控制台子进程抑制黑框（python 是控制台程序，GUI 父进程直接 spawn 会闪 cmd 窗口）。
+fn no_console(cmd: &mut std::process::Command) {
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+}
+
+/// 取输出尾部（训练失败时给用户看 Python 的报错摘要）。
+fn output_tail(bytes: &[u8]) -> String {
+    let text = String::from_utf8_lossy(bytes);
+    let chars: Vec<char> = text.chars().collect();
+    let start = chars.len().saturating_sub(400);
+    chars[start..].iter().collect::<String>().trim().to_string()
+}
+
+/// 数据集 zip 主干 → 模型目录名（只留安全字符，防路径注入）。
+fn model_name_of(dataset: &str) -> String {
+    let stem = dataset.trim_end_matches(".zip");
+    let cleaned: String = stem
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let name = format!("layout-{cleaned}");
+    name.chars().take(64).collect()
+}
+
+/// 后台执行训练：python train_layout.py <zip> --out <models/> --name <layout-*>。
+/// 状态经 `training` 字段 + `training://status` 事件同步前端。
+fn run_training(app: tauri::AppHandle, state: Arc<AppState>, zip: std::path::PathBuf) {
+    let dataset = zip
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default()
+        .to_string();
+    let model_name = model_name_of(&dataset);
+
+    let set_status = |s: TrainingStatusDto| {
+        if let Ok(mut t) = state.training.lock() {
+            *t = s.clone();
+        }
+        use tauri::Emitter as _;
+        let _ = app.emit(events::EVENT_TRAINING, &s);
+    };
+
+    let Some(script) = find_training_script() else {
+        set_status(TrainingStatusDto {
+            state: "error".into(),
+            dataset,
+            model: None,
+            message: Some("未找到训练脚本 tools/training/train_layout.py".into()),
+        });
+        return;
+    };
+
+    let mut last_err = String::new();
+    for py in ["python", "py"] {
+        let mut cmd = std::process::Command::new(py);
+        cmd.arg(&script)
+            .arg(&zip)
+            .arg("--out")
+            .arg(state.models.root())
+            .arg("--name")
+            .arg(&model_name)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        no_console(&mut cmd);
+        match cmd.output() {
+            Ok(o) if o.status.success() => {
+                tracing::info!(model = %model_name, "自助训练完成");
+                set_status(TrainingStatusDto {
+                    state: "success".into(),
+                    dataset,
+                    model: Some(model_name),
+                    message: None,
+                });
+                return;
+            }
+            Ok(o) => {
+                // 解释器在但训练失败（缺依赖/数据非法）：带 Python 报错摘要返回
+                last_err = format!(
+                    "训练失败：{}",
+                    if output_tail(&o.stderr).is_empty() {
+                        output_tail(&o.stdout)
+                    } else {
+                        output_tail(&o.stderr)
+                    }
+                );
+                break;
+            }
+            Err(_) => continue, // 该解释器不存在，试下一个
+        }
+    }
+
+    let message = if last_err.is_empty() {
+        "未找到 Python（需要 python 或 py 在 PATH，且已安装 ultralytics）".to_string()
+    } else {
+        last_err
+    };
+    tracing::warn!(model = %model_name, %message, "自助训练失败");
+    set_status(TrainingStatusDto {
+        state: "error".into(),
+        dataset,
+        model: None,
+        message: Some(message),
+    });
+}
+
+/// 发起自助训练（立即返回，进度走 `training://status` 事件）。
+#[tauri::command]
+pub fn start_training(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+    dataset: String,
+) -> CmdResult<()> {
+    // dataset 只允许文件名（拼接 datasets/ 前缀，防 ../ 逃逸）
+    if dataset.is_empty()
+        || dataset.contains(['/', '\\'])
+        || dataset.contains("..")
+        || !dataset.to_ascii_lowercase().ends_with(".zip")
+    {
+        return Err(BridgeError::Model(format!("训练数据名非法：{dataset}")));
+    }
+    let zip = state.data_dir.join("datasets").join(&dataset);
+    if !zip.is_file() {
+        return Err(BridgeError::Model(format!("训练数据不存在：{dataset}")));
+    }
+
+    // 并发拒绝：同一时间只允许一个训练任务
+    {
+        let mut t = state.training.lock().unwrap_or_else(|e| e.into_inner());
+        if t.state == "running" {
+            return Err(BridgeError::Model("已有训练任务进行中".into()));
+        }
+        *t = TrainingStatusDto {
+            state: "running".into(),
+            dataset: dataset.clone(),
+            model: None,
+            message: None,
+        };
+    }
+
+    let handle = app.app_handle().clone();
+    let state = state.inner().clone();
+    std::thread::Builder::new()
+        .name("layout-training".into())
+        .spawn(move || run_training(handle, state, zip))
+        .map_err(|e| BridgeError::Io(format!("训练线程启动失败：{e}")))?;
+    tracing::info!(%dataset, "自助训练开始");
     Ok(())
 }
 

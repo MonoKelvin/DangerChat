@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState, useRef, type ReactNode } from 'react';
-import { Shield, ShieldAlert, ShieldOff, Plus, Trash2, Pencil, FolderOpen, FolderCog, Loader2, Moon, Sun, Monitor } from 'lucide-react';
+import { Shield, ShieldAlert, ShieldOff, Plus, Trash2, Pencil, FolderOpen, FolderCog, Loader2, Moon, Sun, Monitor, GraduationCap } from 'lucide-react';
 import { cn } from '../lib/utils';
-import type { ConfigFieldDto, ScenarioDto, StatusPayload } from '../lib/types';
+import type { ConfigFieldDto, ModelDto, ScenarioDto, StatusPayload } from '../lib/types';
 import * as api from '../lib/commands';
-import { onStats, onStatus } from '../lib/events';
+import { onStats, onStatus, onModels } from '../lib/events';
 import { SchemaField } from './SchemaField';
 import { Switch } from '../components/Switch';
 import { Checkbox } from '../components/Checkbox';
@@ -12,6 +12,7 @@ import { IconButton } from '../components/IconButton';
 import { Combobox, type ComboOption } from '../components/Combobox';
 import { SettingsGroup, SettingsRow, SettingsSection } from '../components/SettingsGroup';
 import { AboutHero } from './AboutHero';
+import { TrainingDialog } from './TrainingDialog';
 import {
   ACCENTS,
   getAccent,
@@ -131,13 +132,22 @@ export function SettingsRoot() {
             ? 'saturate(0.1) brightness(1.45)'
             : 'saturate(0.1) brightness(1.45)';
 
-  /** 渲染一组 schema 字段（目标程序特殊渲染为内置下拉） */
+  /** 渲染一组 schema 字段（目标程序/区域模型特殊渲染为自定义行） */
   const renderField = (key: string) => {
     if (key === 'target.process_name') {
       return (
         <TargetAppRow
           key={key}
           value={values[key] ?? byKey.get(key)?.default}
+          onChange={(v) => change(key, v)}
+        />
+      );
+    }
+    if (key === 'layout.model') {
+      return (
+        <LayoutModelRow
+          key={key}
+          value={String(values[key] ?? byKey.get(key)?.default ?? 'layout-wechat')}
           onChange={(v) => change(key, v)}
         />
       );
@@ -211,12 +221,17 @@ export function SettingsRoot() {
           <div className="mx-auto max-w-2xl">
             <h2 className="mb-5 text-xl font-semibold tracking-tight text-[var(--text-primary)]">消息防护</h2>
             <SettingsSection>
-              {WECHAT_GROUPS.map((g) => (
+              {WECHAT_GROUPS.slice(0, 2).map((g) => (
                 <SettingsGroup key={g.title} label={g.title}>
                   {g.keys.map(renderField)}
                 </SettingsGroup>
               ))}
               <ContactsGroup />
+              {WECHAT_GROUPS.slice(2).map((g) => (
+                <SettingsGroup key={g.title} label={g.title}>
+                  {g.keys.map(renderField)}
+                </SettingsGroup>
+              ))}
             </SettingsSection>
           </div>
         )}
@@ -557,6 +572,39 @@ function TargetAppRow({
   return (
     <SettingsRow label="防护应用" subtitle="当前仅支持微信；记事本可用于验证防护是否生效">
       <Combobox value={current} options={TARGET_APPS} onChange={(v) => onChange(v)} className="w-44" />
+    </SettingsRow>
+  );
+}
+
+/** 区域模型行：下拉列出 models/ 有效 layout 模型（目录监听自动刷新）+ 自助训练入口 */
+function LayoutModelRow({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [models, setModels] = useState<ModelDto[]>([]);
+  const [trainingOpen, setTrainingOpen] = useState(false);
+
+  useEffect(() => {
+    void api.listModels().then(setModels);
+    const un = onModels(setModels);
+    return () => void un.then((f) => f());
+  }, []);
+
+  const options: ComboOption[] = models
+    .filter((m) => m.kind === 'layout')
+    .map((m) => ({ value: m.name, label: m.name, hint: m.version }));
+
+  return (
+    <SettingsRow label="区域模型" subtitle="models/ 下的模型目录名；界面识别不准时可训练自定义模型">
+      <div className="flex gap-1.5">
+        <Combobox value={value} options={options} onChange={onChange} className="w-52" />
+        <IconButton
+          variant="ghost"
+          size="sm"
+          data-tip="训练自定义模型"
+          onClick={() => setTrainingOpen(true)}
+        >
+          <GraduationCap className="size-4" />
+        </IconButton>
+      </div>
+      <TrainingDialog open={trainingOpen} onClose={() => setTrainingOpen(false)} />
     </SettingsRow>
   );
 }

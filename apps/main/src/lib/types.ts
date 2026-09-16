@@ -63,3 +63,26 @@ export interface ScenarioDto {
   /** 内置场景不可修改/删除 */
   fixed: boolean;
 }
+
+/** models/ 下的有效模型（fs://models 载荷） */
+export interface ModelDto {
+  /** 目录名（配置 layout.model 引用的值） */
+  name: string;
+  kind: string;
+  version: string;
+  note: string;
+}
+
+/** datasets/ 下的训练数据 zip（fs://datasets 载荷） */
+export interface DatasetDto {
+  name: string;
+  size_bytes: number;
+}
+
+/** 训练任务状态（training://status 载荷） */
+export interface TrainingStatus {
+  state: 'idle' | 'running' | 'success' | 'error';
+  dataset: string;
+  model: string | null;
+  message: string | null;
+}

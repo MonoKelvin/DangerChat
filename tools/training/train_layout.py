@@ -80,6 +80,9 @@ def main() -> int:
     ap.add_argument("dataset", type=Path, help="dc_uitag 导出的数据集 zip")
     ap.add_argument("--smoke", action="store_true", help="1 epoch 链路验证（不写入 models/）")
     ap.add_argument("--epochs", type=int, default=EPOCHS)
+    ap.add_argument("--out", type=Path, default=None,
+                    help="models 根目录（默认仓库 models/；主程序自助训练传数据目录 models/）")
+    ap.add_argument("--name", type=str, default="layout-wechat", help="产出模型目录名")
     args = ap.parse_args()
 
     import torch
@@ -128,16 +131,16 @@ def main() -> int:
     exported = model.export(format="onnx", opset=12, simplify=True)
     exported_path = Path(exported)
 
-    dest = REPO / "models" / "layout-wechat"
+    dest = (args.out if args.out is not None else REPO / "models") / args.name
     dest.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(exported_path, dest / "layout-wechat.onnx")
+    shutil.copy2(exported_path, dest / f"{args.name}.onnx")
     (dest / "model.toml").write_text(
         "kind = \"layout\"\n"
-        "file = \"layout-wechat.onnx\"\n"
-        "version = \"yolo11n-wechat-73\"\n"
+        f"file = \"{args.name}.onnx\"\n"
+        f"version = \"yolo11n-{args.name}\"\n"
         "input_size = 640\n"
         f"classes = {EXPECTED_CLASSES}\n"
-        'note = "dc_uitag 标注 73 张训练；增广禁用（UI 截图语义）"\n',
+        f'note = "dc_uitag 数据集 {args.dataset.name} 训练；增广禁用（UI 截图语义）"\n',
         encoding="utf-8",
     )
     print(f"已产出 {dest}")

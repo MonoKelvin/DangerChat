@@ -253,6 +253,11 @@ pub fn run() {
             dc_bridge::commands::migrate_data_dir,
             dc_bridge::commands::delete_old_data_dir,
             dc_bridge::commands::open_data_dir,
+            dc_bridge::commands::list_models,
+            dc_bridge::commands::list_datasets,
+            dc_bridge::commands::training_status,
+            dc_bridge::commands::launch_uitag,
+            dc_bridge::commands::start_training,
             set_tray_hue,
             open_external,
             restart_app,
@@ -289,6 +294,12 @@ pub fn run() {
                 .name("window-watch-main".into())
                 .spawn(move || dc_bridge::window_watch::spawn(handle))
                 .map_err(|e| format!("window-watch 启动失败：{e}"))?;
+            // 5) 数据目录监听（models/ 与 datasets/ 清单 → 前端下拉框自动刷新）
+            let handle = app.handle().clone();
+            std::thread::Builder::new()
+                .name("dir-watch-main".into())
+                .spawn(move || dc_bridge::dir_watch::spawn(handle))
+                .map_err(|e| format!("dir-watch 启动失败：{e}"))?;
 
             // 4) 主窗口位置/大小记忆（关窗=隐藏到托盘，无退出时机可挂——
             //    Moved/Resized 节流落盘 + 失焦即存 + 真退出兜底）。
@@ -304,7 +315,9 @@ pub fn run() {
                 win.on_window_event(move |e| match e {
                     tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
                         // 拖动/缩放期间事件连发，1s 节流
-                        let Ok(mut last) = last_ref.lock() else { return };
+                        let Ok(mut last) = last_ref.lock() else {
+                            return;
+                        };
                         if last.elapsed() >= std::time::Duration::from_secs(1) {
                             *last = std::time::Instant::now();
                             window_state::snapshot(&win_for_events, &data_dir);

@@ -140,6 +140,8 @@ pub fn bootstrap(app: &tauri::AppHandle) -> Arc<AppState> {
         default_data_dir: default_dir,
         // 待清理旧目录：迁移成功后才写入（见 migrate_data_dir）
         pending_cleanup: std::sync::Mutex::new(None),
+        // 自助训练状态（idle 起步，start_training 线程迁移）
+        training: std::sync::Mutex::new(Default::default()),
         // 退出信号：托盘「退出」置位，后台线程据此收敛（否则进程不终止）
         shutdown: std::sync::atomic::AtomicBool::new(false),
         // logo 基础色相（暖红）：前端主题色切换时经 set_tray_hue 覆盖

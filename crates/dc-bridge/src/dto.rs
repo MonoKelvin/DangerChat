@@ -59,6 +59,47 @@ pub struct StatsPayload {
     pub last_sem_ms: Option<f64>,
 }
 
+/// models/ 下的有效模型（`fs://models` 载荷；model.toml 非法的目录由 ModelStore 跳过）。
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ModelDto {
+    /// 目录名（配置 `layout.model` 引用的值）。
+    pub name: String,
+    pub kind: String,
+    pub version: String,
+    pub note: String,
+}
+
+/// datasets/ 下的训练数据 zip（`fs://datasets` 载荷；uitag 导出物）。
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct DatasetDto {
+    /// zip 文件名（含扩展名）。
+    pub name: String,
+    pub size_bytes: u64,
+}
+
+/// 训练任务状态（`training://status` 载荷）。
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TrainingStatusDto {
+    /// idle | running | success | error
+    pub state: String,
+    /// 本次训练的数据集名。
+    pub dataset: String,
+    /// 产出的模型目录名（success 时）。
+    pub model: Option<String>,
+    pub message: Option<String>,
+}
+
+impl Default for TrainingStatusDto {
+    fn default() -> Self {
+        Self {
+            state: "idle".into(),
+            dataset: String::new(),
+            model: None,
+            message: None,
+        }
+    }
+}
+
 fn level_str(l: VerdictLevel) -> &'static str {
     match l {
         VerdictLevel::Safe => "safe",

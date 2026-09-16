@@ -7,11 +7,13 @@
 //! - [`events`]：事件名常量与载荷；
 //! - [`pump`]：AlertBus 泵线程（Show → Tauri 事件 + 弹窗定位显示；Action → 代转）；
 //! - [`stats`]：今日拦截数按日累加器（stats.json 落盘）；
-//! - [`window_watch`]：目标窗口发现状态机（唯一持有 Guard spawn 权）。
+//! - [`window_watch`]：目标窗口发现状态机（唯一持有 Guard spawn 权）；
+//! - [`dir_watch`]：models/ 与 datasets/ 清单监听（自助训练数据流）。
 //!
 //! 依赖 tauri 2（command 宏 + Emitter trait）；tauri 不进 dc-core/pipeline/sys。
 
 pub mod commands;
+pub mod dir_watch;
 pub mod dto;
 pub mod events;
 pub mod pump;
