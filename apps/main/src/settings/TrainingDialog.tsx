@@ -88,7 +88,6 @@ export function TrainingDialog({ open, onClose }: { open: boolean; onClose: () =
             onChange={setSelected}
             disabled={running}
             className="w-full"
-            panelClassName="w-[calc(100%-2rem)] min-w-64"
           />
           {datasets.length === 0 ? (
             <p className="mt-2 text-xs leading-relaxed text-[var(--text-tertiary)]">

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useRef, type ReactNode } from 'react';
 import { Shield, ShieldAlert, ShieldOff, Plus, Trash2, Pencil, FolderOpen, FolderCog, Loader2, Moon, Sun, Monitor, GraduationCap } from 'lucide-react';
 import { cn } from '../lib/utils';
-import type { ConfigFieldDto, ModelDto, ScenarioDto, StatusPayload } from '../lib/types';
+import type { ConfigFieldDto, ContactDto, ModelDto, RuleDto, ScenarioDto, StatusPayload } from '../lib/types';
 import * as api from '../lib/commands';
 import { onStats, onStatus, onModels } from '../lib/events';
 import { SchemaField } from './SchemaField';
@@ -36,16 +36,24 @@ const ADVANCED_KEYS = new Set([
   'guard.foreground_debounce_ms',
 ]);
 
-/** 内置目标程序（下拉选择，不允许输入） */
+/** 内置目标程序（下拉选择）。
+ *  展示名 = 中文名（进程名），与任务管理器一致；value 必须与后端
+ *  `target.process_name` 匹配的可执行文件名。 */
 const TARGET_APPS: ComboOption[] = [
-  { value: 'Weixin.exe', label: '微信' },
-  { value: 'notepad.exe', label: '记事本', hint: '验证用' },
+  { value: 'Weixin.exe', label: '微信（Weixin.exe）' },
+  { value: 'notepad.exe', label: '记事本（notepad.exe）', hint: '验证用' },
 ];
+
+/** 下拉哨兵值：仅表示「进入自定义输入态」，永远不会写进配置 */
+const CUSTOM_APP_VALUE = '__custom__';
 
 /** 消息防护页的分组顺序与标题 */
 const WECHAT_GROUPS: { title: string; keys: string[] }[] = [
   { title: '目标程序', keys: ['target.process_name'] },
-  { title: '拦截行为', keys: ['guard.enabled', 'guard.send_key', 'alert.timeout_secs'] },
+  {
+    title: '拦截行为',
+    keys: ['guard.enabled', 'guard.send_key', 'alert.timeout_secs', 'alert.shake'],
+  },
   { title: '语义判定', keys: ['sem.l2_enabled', 'sem.threshold.formal', 'sem.threshold.casual'] },
 ];
 
@@ -54,6 +62,7 @@ const ADVANCED_GROUPS: { title: string; keys: string[] }[] = [
   { title: '拦截引擎', keys: [...ADVANCED_KEYS] },
   { title: '区域识别', keys: ['layout.model', 'layout.conf_threshold', 'layout.nms_iou'] },
   { title: '文字识别', keys: ['ocr.upscale', 'ocr.min_conf', 'ocr.noise_words'] },
+  { title: '诊断', keys: ['debug.save_images', 'debug.image_dirs_limit'] },
 ];
 
 export function SettingsRoot() {
@@ -564,7 +573,11 @@ function MigrateResultDialog({
 
 /* ── 消息防护：目标程序下拉 + 画像 ── */
 
-/** 目标程序行：内置应用下拉（不允许输入），替代 SchemaField 的自由文本框 */
+/** 目标程序行：内置应用下拉 + 自定义进程名输入。
+ *
+ *  `target.process_name` 是后端热更新的唯一数据源：下拉选中即写该键；
+ *  自定义进程名走输入框写回同一键，不另开「自定义键」——否则「当前生效的是哪个」会有两个答案。
+ */
 function TargetAppRow({
   value,
   onChange,
@@ -573,9 +586,55 @@ function TargetAppRow({
   onChange: (v: unknown) => void;
 }) {
   const current = String(value ?? '');
+  const isKnown = TARGET_APPS.some((o) => o.value.toLowerCase() === current.toLowerCase());
+  // 当前值不在内置库内 → 默认展开输入态；用户主动选「自定义…」也进入输入态
+  const [customMode, setCustomMode] = useState(!isKnown);
+  const [custom, setCustom] = useState(current);
+
+  // 外部值变化时（如初次加载完成、热更新回流）同步草稿，避免残留旧值
+  useEffect(() => {
+    setCustom(current);
+    setCustomMode(!TARGET_APPS.some((o) => o.value.toLowerCase() === current.toLowerCase()));
+  }, [current]);
+
+  const applyCustom = () => {
+    const v = custom.trim();
+    if (v && v !== current) onChange(v);
+  };
+
   return (
-    <SettingsRow label="防护应用" subtitle="当前仅支持微信；记事本可用于验证防护是否生效">
-      <Combobox value={current} options={TARGET_APPS} onChange={(v) => onChange(v)} className="w-44" />
+    <SettingsRow label="防护应用" subtitle="仅拦截该窗口的发送按键">
+      <div className="flex flex-col items-end gap-2">
+        <Combobox
+          value={customMode ? CUSTOM_APP_VALUE : current}
+          options={[
+            ...TARGET_APPS,
+            { value: CUSTOM_APP_VALUE, label: '自定义…', hint: '手动填写进程名' },
+          ]}
+          onChange={(v) => {
+            if (v === CUSTOM_APP_VALUE) {
+              setCustomMode(true);
+              setCustom(current);
+            } else {
+              setCustomMode(false);
+              onChange(v);
+            }
+          }}
+          className="w-40"
+        />
+        {customMode && (
+          <input
+            autoFocus
+            className="h-9 w-40 rounded-lg bg-[var(--input-bg)] px-3.5 text-sm text-[var(--text-primary)] outline-none transition-all duration-150 placeholder:text-[var(--text-tertiary)] hover:bg-[var(--active-overlay)] focus:bg-[var(--panel-bg)] focus:shadow-[inset_0_0_0_1.5px_var(--brand)]"
+            value={custom}
+            placeholder="如 MsgTest.exe（含扩展名）"
+            maxLength={128}
+            onChange={(e) => setCustom(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && applyCustom()}
+            onBlur={applyCustom}
+          />
+        )}
+      </div>
     </SettingsRow>
   );
 }
@@ -598,7 +657,7 @@ function LayoutModelRow({ value, onChange }: { value: string; onChange: (v: stri
   return (
     <SettingsRow label="区域模型" subtitle="models/ 下的模型目录名；界面识别不准时可训练自定义模型">
       <div className="flex gap-1.5">
-        <Combobox value={value} options={options} onChange={onChange} className="w-52" />
+        <Combobox value={value} options={options} onChange={onChange} className="w-40" />
         <IconButton
           variant="ghost"
           size="sm"
@@ -613,38 +672,78 @@ function LayoutModelRow({ value, onChange }: { value: string; onChange: (v: stri
   );
 }
 
+/** 聊天对象画像：内联可编辑行（名称输入框 + 画像下拉 + 删除），与词库条目同构。
+ *
+ *  后端只有 `set_contact_profile(name, profile)` 一个写入口（profile="none" 即删除），
+ *  「改名」因此是一次「新名写入 + 旧名删除」的迁移——故名称失焦时整体提交，
+ *  而非逐字符写盘。
+ */
 function ContactsGroup() {
-  const [contacts, setContacts] = useState<import('../lib/types').ContactDto[]>([]);
+  const [contacts, setContacts] = useState<ContactDto[]>([]);
   const [scenarios, setScenarios] = useState<ScenarioDto[]>([]);
   const [name, setName] = useState('');
-  const [profile, setProfile] = useState('casual');
-  const [saving, setSaving] = useState<string | null>(null);
+  const [profile, setProfile] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<ContactDto | null>(null);
 
   useEffect(() => {
     void api.listContacts().then(setContacts);
-    void api.listScenarios().then(setScenarios);
+    void api.listScenarios().then((s) => {
+      setScenarios(s);
+      // 默认画像取实际存在的场景，空值会被后端拒绝
+      setProfile((prev) => (s.some((x) => x.id === prev) ? prev : (s[0]?.id ?? '')));
+    });
   }, []);
 
-  const setProfileOf = (n: string, p: string) => {
-    setSaving(n);
-    void api
-      .setContactProfile(n, p)
+  /** 统一写路径：失败落到 error 并回读真实状态（杜绝乐观残影）。 */
+  const commit = (key: string, write: () => Promise<unknown>) => {
+    setBusy(key);
+    setError(null);
+    return write()
       .then(() => api.listContacts())
       .then(setContacts)
-      .finally(() => setSaving(null));
+      .catch((e: Error) => {
+        setError(e.message || '保存失败');
+        return api.listContacts().then(setContacts);
+      })
+      .finally(() => setBusy(null));
   };
 
   const addContact = () => {
-    if (!name.trim()) return;
-    setProfileOf(name.trim(), profile);
-    setName('');
+    const n = name.trim();
+    if (!n || !profile) return;
+    void commit(n, () => api.setContactProfile(n, profile)).then(() => setName(''));
   };
 
-  /** 画像下拉：未标记（删除条目，回落正式）+ 全部场景 */
-  const profileOptions: ComboOption[] = [
-    { value: 'none', label: '未标记', hint: '按正式处理' },
-    ...scenarios.map((s) => ({ value: s.id, label: s.name })),
-  ];
+  const removeContact = (c: ContactDto) => {
+    void commit(c.name, () => api.setContactProfile(c.name, 'none')).then(() => setConfirming(null));
+  };
+
+  /** 改名 = 写入新名 + 删除旧名；名称未变时只更新画像。 */
+  const renameContact = (from: string, to: string, p: string) => {
+    if (!to || to === from) return;
+    void commit(to, async () => {
+      await api.setContactProfile(to, p);
+      await api.setContactProfile(from, 'none');
+    });
+  };
+
+  /** 画像下拉：只有各场景。删除是独立动作（右侧垃圾桶 → 确认框），不在这里表达——
+   *  `profile="none"` 在后端即「删除该条目」，把它做成一个选项等于给了「删除」第二条入口，
+   *  且条目一旦写入就不会以 `none` 形态存在，该选项永远选不中也永远显示不出来。 */
+  const profileOptions: ComboOption[] = scenarios.map((s) => ({ value: s.id, label: s.name }));
+  const scenarioOptions: ComboOption[] = scenarios.map((s) => ({ value: s.id, label: s.name }));
+
+  /** 引用已删除场景的残留画像：后端 `base_profile` 会回落 Formal（保守），
+   *  但 `Combobox` 找不到匹配项时会把**原始 id** 当标签显示（如 `custom-3`）。
+   *  这里补一个回落项，让界面显示可读文案而不是内部标识符。 */
+  const missingProfiles: ComboOption[] = [
+    ...new Set(contacts.map((c) => c.profile).filter((p) => !scenarios.some((s) => s.id === p))),
+  ].map((p) => ({ value: p, label: `${p}（已删除，按正式处理）` }));
+
+  const inputCls =
+    'h-9 min-w-0 rounded-lg bg-[var(--input-bg)] px-3 text-sm text-[var(--text-primary)] outline-none transition-all duration-150 hover:bg-[var(--active-overlay)] focus:bg-[var(--panel-bg)] focus:shadow-[inset_0_0_0_1.5px_var(--brand)]';
 
   return (
     <SettingsGroup label="聊天对象画像">
@@ -655,38 +754,97 @@ function ContactsGroup() {
       >
         <div className="flex gap-2">
           <input
-            className="h-9 min-w-0 flex-1 rounded-lg bg-[var(--input-bg)] px-3.5 text-sm text-[var(--text-primary)] outline-none transition-all duration-150 placeholder:text-[var(--text-tertiary)] hover:bg-[var(--active-overlay)] focus:bg-[var(--panel-bg)] focus:shadow-[inset_0_0_0_1.5px_var(--brand)]"
+            className={cn(inputCls, 'flex-1 px-3.5')}
             value={name}
             placeholder="对象名（与聊天窗口显示名一致）"
+            maxLength={64}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && addContact()}
           />
-          <Combobox
-            value={profile}
-            options={scenarios.map((s) => ({ value: s.id, label: s.name }))}
-            onChange={setProfile}
-            className="w-32"
-          />
+          <Combobox value={profile} options={scenarioOptions} onChange={setProfile} className="w-32" />
           <button
             className="shrink-0 rounded-lg bg-[var(--brand)] px-4 text-sm font-medium text-[var(--brand-text)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--brand-hover)] disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
-            disabled={!name.trim()}
+            disabled={!name.trim() || !profile || busy !== null}
             onClick={addContact}
           >
-            标记
+            添加
           </button>
         </div>
       </SettingsRow>
-      {contacts.map((c) => (
-        <SettingsRow key={c.name} label={c.name}>
-          <Combobox
-            value={c.profile}
-            options={profileOptions}
-            disabled={saving === c.name}
-            onChange={(v) => setProfileOf(c.name, v)}
-            className="w-40"
-          />
-        </SettingsRow>
-      ))}
+
+      {error && (
+        <div className="mx-5 mb-3 rounded-lg bg-[var(--danger-soft)] px-4 py-2 text-sm text-[var(--danger)]">
+          {error}
+        </div>
+      )}
+
+      {/* 左右与 SettingsRow 的 px-5 对齐：条目卡片外缘应落在 20px（= SettingsRow 的 px-5），
+          而行自身还有 px-3 内边距，故外层取 20 - 12 = 8px（px-2）。
+          这样条目里第一个控件距卡片边缘 = 8 + 12 = 20px，与上方「新增对象」齐平。 */}
+      <div className="space-y-2 px-2 pt-3 pb-4">
+        {contacts.map((c) => (
+          <div
+            key={c.name}
+            className="flex items-center gap-2 rounded-xl bg-[var(--group-bg)] px-3 py-2"
+          >
+            <input
+              className={cn(inputCls, 'flex-1')}
+              defaultValue={c.name}
+              maxLength={64}
+              disabled={busy !== null}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                if (e.key === 'Escape') {
+                  (e.target as HTMLInputElement).value = c.name;
+                  (e.target as HTMLInputElement).blur();
+                }
+              }}
+              onBlur={(e) => renameContact(c.name, e.target.value.trim(), c.profile)}
+            />
+            <Combobox
+              value={c.profile}
+              options={[...profileOptions, ...missingProfiles]}
+              disabled={busy !== null}
+              onChange={(v) => commit(c.name, () => api.setContactProfile(c.name, v))}
+              className="w-32"
+            />
+            <IconButton
+              variant="ghost"
+              data-tip="删除"
+              disabled={busy !== null}
+              onClick={() => setConfirming(c)}
+            >
+              <Trash2 className="size-4 text-[var(--danger)]" />
+            </IconButton>
+          </div>
+        ))}
+        {contacts.length === 0 && (
+          <p className="py-8 text-center text-sm text-[var(--text-tertiary)]">
+            暂无对象，全部按「正式」基线处理
+          </p>
+        )}
+      </div>
+
+      {confirming && (
+        <Modal
+          open
+          title="删除对象"
+          onClose={() => setConfirming(null)}
+          footer={
+            <>
+              <ModalButton
+                className="bg-[var(--danger)] text-white hover:opacity-90"
+                onClick={() => removeContact(confirming)}
+              >
+                删除
+              </ModalButton>
+              <ModalButton onClick={() => setConfirming(null)}>取消</ModalButton>
+            </>
+          }
+        >
+          <p>删除「{confirming.name}」后，该对象不再有专属画像，一律按「正式」基线处理。</p>
+        </Modal>
+      )}
     </SettingsGroup>
   );
 }
@@ -880,7 +1038,7 @@ function ScenarioDialog({
       />
       <div className="mt-4 flex items-center gap-3">
         <label className="shrink-0 text-[13px] font-medium text-[var(--text-secondary)]">判定基线</label>
-        <Combobox value={base} options={BASE_OPTIONS} onChange={(v) => setBase(v as 'formal' | 'casual')} className="w-44" />
+        <Combobox value={base} options={BASE_OPTIONS} onChange={(v) => setBase(v as 'formal' | 'casual')} className="w-40" />
       </div>
       <p className="mt-3 text-xs leading-relaxed text-[var(--text-tertiary)]">
         基线决定语义模型的判定阈值（正式较严、个人较宽），词库规则始终按场景本身生效。
@@ -898,7 +1056,7 @@ const MATCH_OPTIONS: ComboOption[] = [
 
 /** 词库编辑器（即时保存，移除显式保存按钮）。场景管理页的子分类。 */
 function RulesEditor({ scenarios }: { scenarios: ScenarioDto[] }) {
-  const [rules, setRules] = useState<import('../lib/types').RuleDto[]>([]);
+  const [rules, setRules] = useState<RuleDto[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const saveTimeoutRef = useRef<number | null>(null);
@@ -907,7 +1065,7 @@ function RulesEditor({ scenarios }: { scenarios: ScenarioDto[] }) {
     void api.getRules().then(setRules);
   }, []);
 
-  const save = (updatedRules: import('../lib/types').RuleDto[]) => {
+  const save = (updatedRules: RuleDto[]) => {
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     saveTimeoutRef.current = window.setTimeout(() => {
       setSaving(true);
@@ -922,7 +1080,7 @@ function RulesEditor({ scenarios }: { scenarios: ScenarioDto[] }) {
     }, 600);
   };
 
-  const update = (i: number, patch: Partial<import('../lib/types').RuleDto>) => {
+  const update = (i: number, patch: Partial<RuleDto>) => {
     const updated = rules.map((r, j) => (j === i ? { ...r, ...patch } : r));
     setRules(updated);
     save(updated);
@@ -988,7 +1146,7 @@ function RulesEditor({ scenarios }: { scenarios: ScenarioDto[] }) {
               value={r.match}
               options={MATCH_OPTIONS}
               onChange={(v) => update(i, { match: v })}
-              className="w-24"
+              className="w-32"
             />
             <Combobox
               value={r.applies_to[0] ?? 'all'}

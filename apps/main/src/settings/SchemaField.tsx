@@ -37,11 +37,15 @@ export function SchemaField({ field, value, onChange }: FieldProps) {
       case 'int':
       case 'float': {
         const num = typeof value === 'number' ? value : Number(value ?? 0);
-        const step = field.ty === 'float' ? 0.05 : 1;
+        // 范围与步长取自 schema（后端 ConfigType 透出），前端不硬编码：
+        // 步长同时决定显示小数位（float → 0.05 → 两位小数）。
+        const step = field.step ?? (field.ty === 'float' ? 0.05 : 1);
         return (
           <NumberInput
             value={Number.isFinite(num) ? num : 0}
             onChange={(v) => onChange(v)}
+            min={field.min}
+            max={field.max}
             step={step}
           />
         );
@@ -52,7 +56,7 @@ export function SchemaField({ field, value, onChange }: FieldProps) {
             value={String(value ?? '')}
             options={field.options.map((o) => ({ value: o, label: capitalizeKey(o) }))}
             onChange={(v) => onChange(v)}
-            className="w-52"
+            className="w-40"
           />
         );
       case 'strlist': {

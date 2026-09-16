@@ -19,6 +19,14 @@ function decimalsOf(step: number): number {
   return dot === -1 ? 0 : s.length - dot - 1;
 }
 
+/** 按步长的小数位格式化显示值；只影响输入框文本，不改写存储精度。
+ *  导出供单测（UT-UI-05：阈值类配置不得露出浮点尾数）。 */
+export function formatByStep(v: number, step: number): string {
+  if (!Number.isFinite(v)) return '';
+  const d = decimalsOf(step);
+  return d > 0 ? v.toFixed(d) : String(Math.round(v));
+}
+
 /** 数字输入（参考 Wanwu WwNumberInput）：右侧堆叠步进按钮 + 悬停滚轮调节 + 范围钳制。 */
 export function NumberInput({
   value,
@@ -59,7 +67,9 @@ export function NumberInput({
     return () => root.removeEventListener('wheel', onWheel);
   });
 
-  const display = draft ?? String(value);
+  // 显示态按步长定小数位：value 是后端 f64 往返值（如 f32 常量 0.35 宽化成
+  // 0.3499999940395355），直接 String() 会露出 10+ 位尾数。只格式化显示。
+  const display = draft ?? formatByStep(value, step);
 
   return (
     <div

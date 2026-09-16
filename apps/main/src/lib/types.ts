@@ -41,6 +41,11 @@ export interface ConfigFieldDto {
   label: string;
   help: string;
   group: string;
+  /** 数值下限/上限（仅 int/float；后端从 ConfigType 透出，控件据此钳制输入） */
+  min?: number;
+  max?: number;
+  /** 数值步长（仅 int/float）：float 决定显示小数位（0.05 → 两位），int 恒为 1 */
+  step?: number;
 }
 
 export interface ContactDto {
