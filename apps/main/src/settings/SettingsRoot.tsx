@@ -424,6 +424,8 @@ function DataDirRow() {
     setError(null);
     try {
       const r = await api.migrateDataDir(picked);
+      // 目标与当前目录相同：后端原样返回（files=0），不弹回执，静默结束
+      if (r.files === 0 && r.bytes === 0 && r.target === r.previous) return;
       setInfo({ current: r.target, custom: true });
       setReport(r);
     } catch (e) {
@@ -620,7 +622,7 @@ function TargetAppRow({
               onChange(v);
             }
           }}
-          className="w-40"
+          fitContent
         />
         {customMode && (
           <input
@@ -652,7 +654,11 @@ function LayoutModelRow({ value, onChange }: { value: string; onChange: (v: stri
 
   const options: ComboOption[] = models
     .filter((m) => m.kind === 'layout')
-    .map((m) => ({ value: m.name, label: m.name, hint: m.version }));
+    .map((m) => ({
+      value: m.name,
+      label: m.name,
+      hint: m.source === 'builtin' ? '内置' : '用户',
+    }));
 
   return (
     <SettingsRow label="区域模型" subtitle="models/ 下的模型目录名；界面识别不准时可训练自定义模型">
@@ -1247,8 +1253,7 @@ function AboutPage() {
           <SettingsRow stacked>
             <p className="text-sm leading-relaxed text-[var(--text-secondary)]">
                 {APP_NAME}是一款危险言语提前拦截工具：在消息发出前截取屏幕画面、在本机识别文字，
-              发现可能引发风险的措辞时弹窗提醒，帮你避免一时冲动发出不当言论。
-              全程纯本地运行，不依赖任何网络服务。
+              发现可能引发风险的措辞时弹窗提醒，尽可能帮你避免误发、错发。
             </p>
           </SettingsRow>
         </SettingsGroup>
