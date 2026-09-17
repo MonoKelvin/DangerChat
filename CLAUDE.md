@@ -29,6 +29,7 @@ pnpm -F main test   # 单独跑主前端 vitest
 - 依赖真实模型权重的测试放独立 `tests/golden_*.rs` 目标（文件名即过滤键 `binary(golden_*)`）。
 - nextest 过滤式里 `-` 优先级高于 `+`，排除并集要加括号：`-E "binary(golden_layout) + binary(golden_ocr)"` 要写成 `not (a + b)` 形式。
 - 首次增量跑 dc-core 相关改动 3~4 分钟是编译（下游全要重编），不是测试慢。
+- 没有特殊要求不要跑测试，简单代码逻辑修改、前端UI修改建议不要跑测试。
 
 ## 架构
 

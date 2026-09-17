@@ -181,7 +181,7 @@ fn ut_sem_08_missing_head_degrades_not_errors() {
 #[test]
 #[ignore = "需要 models/bge 真实权重（gitignore；见 models/README）"]
 fn real_bge_embedding() {
-    let dir = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../models/bge"));
+    let dir = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../resources/models/bge"));
     let emb = dc_pipeline::sem::embedder::Embedder::load(dir).expect("BGE 加载失败");
 
     let v = emb.embed("这是一条测试消息").expect("嵌入失败");

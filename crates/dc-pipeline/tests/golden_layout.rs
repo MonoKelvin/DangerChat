@@ -30,7 +30,7 @@ fn run_ctx() -> PipelineContext {
 #[test]
 fn ut_lay_01_golden_regions_iou() {
     /// 模型根：仓库根的 models/。
-    const MODELS_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../models");
+    const MODELS_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../resources/models");
     let model_dir = Path::new(MODELS_ROOT).join("dc-layout-wechat");
     if !model_dir.join("model.toml").is_file() {
         eprintln!("跳过 UT-LAY-01：models/dc-layout-wechat 缺失（tools/training/train_layout.py）");

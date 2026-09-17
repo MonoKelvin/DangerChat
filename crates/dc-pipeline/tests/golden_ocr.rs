@@ -19,7 +19,7 @@ use dc_sys::Rect;
 
 const SLICES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/ocr_slices");
 /// 模型根：仓库根的 models/（三件套 + 字典）。
-const MODELS_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../models");
+const MODELS_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../resources/models");
 
 fn models_ready() -> bool {
     let root = Path::new(MODELS_ROOT);

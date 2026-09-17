@@ -67,7 +67,7 @@ fn main() {
         .first()
         .map(String::as_str)
         .unwrap_or("resources/training_set/wechat_snapcaptures/Snipaste_2026-09-13_10-56-17.png");
-    let models_root = std::path::PathBuf::from("models");
+    let models_root = std::path::PathBuf::from("resources/models");
 
     let img = image::open(img_path).expect("读图失败");
     println!("输入：{img_path}（{}×{}）", img.width(), img.height());
