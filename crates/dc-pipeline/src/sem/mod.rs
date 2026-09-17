@@ -316,10 +316,16 @@ impl Module for SemStage {
                 .f64_or("sem.threshold.casual", THRESHOLD_CASUAL as f64) as f32;
 
         if self.l2_enabled {
-            let root = mctx.models.root().to_path_buf();
-            match embedder::Embedder::load(&root.join("bge")) {
-                Ok(emb) => {
-                    self.heads = head::Heads::load(&root.join("bge"));
+            // bge 是内置模型（随安装包 resources/models/）：按名解析，
+            // 用户层存在优先（允许用户覆盖），否则用内置层。
+            let result = mctx
+                .models
+                .resolve_dir("bge")
+                .ok_or_else(|| "bge 模型目录不存在（内置层与用户层均未找到）".to_string())
+                .and_then(|dir| embedder::Embedder::load(&dir).map(|emb| (dir, emb)));
+            match result {
+                Ok((dir, emb)) => {
+                    self.heads = head::Heads::load(&dir);
                     self.embedder = Some(emb);
                     tracing::info!(
                         heads = self.heads.describe(),

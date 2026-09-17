@@ -31,18 +31,26 @@ pub struct SemDocs {
 /// 数据目录布局。装配期一次性构建，运行期只读。
 pub struct DataLayout {
     data_dir: PathBuf,
+    /// 内置模型目录（exe 同目录 resources/models/，只读，程序资源）。
+    builtin_models_dir: PathBuf,
     rules: Arc<JsonStore<dc_pipeline::sem::doc::RuleDoc>>,
     contacts: Arc<JsonStore<dc_pipeline::sem::doc::ContactDoc>>,
 }
 
 impl DataLayout {
     /// 打开数据目录下的全部配置文档。目录不存在时逐文档容错（JsonStore 内部已兜底）。
-    pub fn open(data_dir: impl Into<PathBuf>) -> Result<Self, ConfigError> {
+    ///
+    /// `builtin_models_dir`：内置模型根目录（exe 同目录 resources/models/）。
+    pub fn open(
+        data_dir: impl Into<PathBuf>,
+        builtin_models_dir: impl Into<PathBuf>,
+    ) -> Result<Self, ConfigError> {
         let data_dir = data_dir.into();
         Ok(Self {
             rules: open_doc(&data_dir, dc_core::paths::RULES_JSON)?,
             contacts: open_doc(&data_dir, dc_core::paths::CONTACTS_JSON)?,
             data_dir,
+            builtin_models_dir: builtin_models_dir.into(),
         })
     }
 
@@ -55,8 +63,19 @@ impl DataLayout {
         self.data_dir.join("logs")
     }
 
-    pub fn models_dir(&self) -> PathBuf {
+    /// 用户模型目录（数据目录 models/）：自训练产物的读写位置。
+    pub fn user_models_dir(&self) -> PathBuf {
         self.data_dir.join("models")
+    }
+
+    /// 内置模型目录（exe 同目录 resources/models/，只读）。
+    pub fn builtin_models_dir(&self) -> &Path {
+        &self.builtin_models_dir
+    }
+
+    /// 兼容旧调用：语义同 `user_models_dir`（导入/训练输出目标）。
+    pub fn models_dir(&self) -> PathBuf {
+        self.user_models_dir()
     }
 
     pub fn datasets_dir(&self) -> PathBuf {

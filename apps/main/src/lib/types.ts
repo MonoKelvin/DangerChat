@@ -76,6 +76,8 @@ export interface ModelDto {
   kind: string;
   version: string;
   note: string;
+  /** 来源：'builtin'（内置，程序资源）或 'user'（用户自训练） */
+  source: string;
 }
 
 /** datasets/ 下的训练数据 zip（fs://datasets 载荷） */

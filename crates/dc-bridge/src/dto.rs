@@ -67,6 +67,8 @@ pub struct ModelDto {
     pub kind: String,
     pub version: String,
     pub note: String,
+    /// 来源：`builtin`（内置，exe 同目录 resources/models/）或 `user`（数据目录 models/）。
+    pub source: String,
 }
 
 /// datasets/ 下的训练数据 zip（`fs://datasets` 载荷；uitag 导出物）。

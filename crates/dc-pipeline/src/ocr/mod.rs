@@ -165,10 +165,16 @@ impl Module for OcrStage {
     }
 
     fn init(&mut self, mctx: &ModuleContext) -> Result<(), ModuleError> {
-        let root = mctx.models.root().to_path_buf();
-        let det = root.join("ocr-det-ppocrv4");
-        let cls = root.join("ocr-cls-ppocrv20");
-        let rec = root.join("ocr-rec-ppocrv4");
+        // OCR 三件套是内置模型（随安装包 resources/models/）：按名解析，
+        // 用户层存在优先（允许用户覆盖），否则用内置层。
+        let resolve = |name: &str| {
+            mctx.models
+                .resolve_dir(name)
+                .ok_or_else(|| ModuleError::Fatal(format!("OCR 模型目录不存在：{name}")))
+        };
+        let det = resolve("ocr-det-ppocrv4")?;
+        let cls = resolve("ocr-cls-ppocrv20")?;
+        let rec = resolve("ocr-rec-ppocrv4")?;
         let paths = engine::resolve_paths(&det, &cls, &rec).map_err(ModuleError::Fatal)?;
         let intra = mctx.config.i64_or("device.intra_threads", 2).clamp(1, 4) as usize;
         let gpu = mctx.config.str_or("ocr.device", "direct-ml") == "direct-ml";

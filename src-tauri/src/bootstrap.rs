@@ -24,6 +24,25 @@ fn default_data_dir(app: &tauri::AppHandle) -> std::path::PathBuf {
         .expect("app_data_dir 解析失败（%APPDATA% 不可用）")
 }
 
+/// exe 定位失败时的兜底内置模型目录（开发环境 cargo run 时 exe 在 target/debug/）。
+fn layout_fallback_models_dir() -> std::path::PathBuf {
+    // 开发环境：target/debug/dangerchat.exe → 仓库根 resources/models/
+    // 发布环境：current_exe 必然成功，此分支不触发
+    if cfg!(debug_assertions) {
+        if let Ok(exe) = std::env::current_exe() {
+            // target/debug/xxx.exe → 上两级到仓库根，再进 resources/models/
+            if let Some(root) = exe.parent().and_then(|p| p.parent()).and_then(|p| p.parent()) {
+                let dev_models = root.join("resources").join("models");
+                if dev_models.is_dir() {
+                    return dev_models;
+                }
+            }
+        }
+    }
+    // 最终兜底：空路径（ModelStore 会跳过空根目录）
+    std::path::PathBuf::new()
+}
+
 pub fn bootstrap(app: &tauri::AppHandle) -> Arc<AppState> {
     let default_dir = default_data_dir(app);
     let _ = std::fs::create_dir_all(&default_dir);
@@ -33,11 +52,20 @@ pub fn bootstrap(app: &tauri::AppHandle) -> Arc<AppState> {
         dc_bridge::bootstrap::load_or_create(&default_dir).expect("bootstrap.json 加载失败");
     let _ = std::fs::create_dir_all(&data_dir);
 
+    // 优化：迁移目录功能：同一个目录迁移不用给提示，相当于直接返回没有任何效果
+    // 已在 migrate_data_dir 中处理（if same_path return Err("相同目录")）
+
     // 清理旧指针文件 data_dir.txt（忽略错误）
     dc_bridge::bootstrap::cleanup_legacy_pointer(&default_dir);
 
     // 数据目录布局：配置路径与类型化文档句柄的唯一来源（先于一切使用方构建）。
-    let layout = DataLayout::open(&data_dir).expect("数据目录布局打开失败");
+    // 内置模型在 exe 同目录 resources/models/（程序资源，只读）；
+    // 用户模型在数据目录 models/（自训练产物，可写）。
+    let builtin_models_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("resources").join("models")))
+        .unwrap_or_else(|| layout_fallback_models_dir());
+    let layout = DataLayout::open(&data_dir, &builtin_models_dir).expect("数据目录布局打开失败");
 
     // 1) 日志（最先：一切后续步骤可观测）
     let log_center = LogCenter::init(LogOptions {
@@ -137,8 +165,11 @@ pub fn bootstrap(app: &tauri::AppHandle) -> Arc<AppState> {
         config.finalize().expect("配置 finalize 失败");
     }
 
-    // 3) 模型仓库（models/，权重 gitignore）
-    let models = Arc::new(ModelStore::new(layout.models_dir()));
+    // 3) 模型仓库：内置层（exe/resources/models/，只读）+ 用户层（数据目录 models/，可写）
+    let models = Arc::new(ModelStore::with_builtin(
+        layout.builtin_models_dir().to_path_buf(),
+        layout.user_models_dir(),
+    ));
 
     // 3.5) 图片存储（调试模式）
     let image_store = if config.snapshot().bool_or("debug.save_images", false) {

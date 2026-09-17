@@ -479,6 +479,7 @@ pub fn scan_models(state: &AppState) -> Vec<ModelDto> {
             kind: m.meta.kind,
             version: m.meta.version,
             note: m.meta.note,
+            source: m.source.as_str().to_string(),
         })
         .collect()
 }
@@ -882,35 +883,60 @@ pub struct MigrateReport {
     pub previous: String,
 }
 
+/// 内置模型目录名（kind 前缀匹配）：迁移数据目录时跳过，这些应随程序资源走 exe 侧。
+fn is_builtin_model_dir(name: &std::ffi::OsStr) -> bool {
+    let n = name.to_string_lossy();
+    n == "bge"
+        || n.starts_with("ocr-")
+        || (n.starts_with("dc-layout-") && !n.starts_with("dc-layout-user"))
+}
+
 /// 递归复制目录内容（不复制子目录本身，只复制其内容）。
 /// 返回 (文件数, 总字节数)。已存在的同名文件直接覆盖。
+/// 数据目录根下 models/ 子目录里的内置模型目录会被跳过（它们是程序资源，应随 exe 走）。
 fn copy_dir_contents(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<(u64, u64)> {
-    copy_dir_inner(src, dst, true)
+    copy_dir_inner(src, dst, true, false)
 }
 
 /// 空目录也会被创建（`create_dir_all`），确保整棵目录结构原样搬过去。
+///
+/// `skip_pointer_files`：仅最外层（数据目录根）为 true，用于跳过 bootstrap.json / data_dir.txt。
+/// `in_models_subtree`：当前递归是否处于「数据目录根的 models/ 子树」中。
+/// 若是，则其直接子目录里的内置模型（bge/、ocr-*、dc-layout-*）跳过复制——
+/// 这些是程序资源，应随 exe 走 resources/models/，不该随数据目录迁移。
 fn copy_dir_inner(
     src: &std::path::Path,
     dst: &std::path::Path,
-    root: bool,
+    skip_pointer_files: bool,
+    in_models_subtree: bool,
 ) -> std::io::Result<(u64, u64)> {
     let mut files = 0u64;
     let mut bytes = 0u64;
     std::fs::create_dir_all(dst)?;
+    // 当前目录是否是「数据目录根下的 models/」——其直接子目录可能是内置模型。
+    // 由调用方在递归进入 models/ 时置 true。
+    let this_is_models_root = src.file_name().is_some_and(|n| n == "models") && !in_models_subtree;
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
         let from = entry.path();
         let to = dst.join(entry.file_name());
         let meta = entry.metadata()?;
         if meta.is_dir() {
-            let (f, b) = copy_dir_inner(&from, &to, false)?;
+            // 内置模型目录跳过（程序资源，不该随数据目录迁移）：
+            // 仅当当前目录是 models/ 根、且子目录命中内置名单时跳过。
+            if this_is_models_root && is_builtin_model_dir(&entry.file_name()) {
+                continue;
+            }
+            // 递归：进入 models/ 时标记子树；models/ 内部继续传 true。
+            let child_in_models = in_models_subtree || this_is_models_root;
+            let (f, b) = copy_dir_inner(&from, &to, false, child_in_models)?;
             files += f;
             bytes += b;
         } else if meta.is_file() {
             // 跳过 bootstrap.json：它固定在 Roaming 目录，不跟随数据目录迁移
             // 跳过 data_dir.txt：旧版指针文件，防止自引用
             let fname = entry.file_name();
-            if root && (fname == "bootstrap.json" || fname == "data_dir.txt") {
+            if skip_pointer_files && (fname == "bootstrap.json" || fname == "data_dir.txt") {
                 continue;
             }
             std::fs::copy(&from, &to)?;
@@ -979,9 +1005,14 @@ pub fn migrate_data_dir(
     let dst = std::path::PathBuf::from(target);
     let src = state.data_dir.clone();
 
-    // 目标与当前相同（含规范化后相同）→ 无事可做
+    // 目标与当前相同（含规范化后相同）→ 无事可做（直接返回成功，无任何提示/弹窗）
     if same_path(&src, &dst) {
-        return Err(BridgeError::Config("目标目录与当前数据目录相同".into()));
+        return Ok(MigrateReport {
+            files: 0,
+            bytes: 0,
+            target: src.display().to_string(),
+            previous: src.display().to_string(),
+        });
     }
 
     std::fs::create_dir_all(&dst).map_err(|e| BridgeError::Io(format!("目标目录创建失败：{e}")))?;

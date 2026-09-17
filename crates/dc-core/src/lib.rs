@@ -31,7 +31,7 @@ pub use image_store::{ImageStoreError, RollingImageStore, SaveRequest};
 pub use logging::{
     ImageLogError, ImageLogSink, LogCenter, LogError, LogOptions, PruneReport, RunId,
 };
-pub use model_store::{ModelError, ModelInfo, ModelKind, ModelMeta, ModelStore};
+pub use model_store::{ModelError, ModelInfo, ModelKind, ModelMeta, ModelSource, ModelStore};
 pub use plugin::{
     MetricsRecorder, Module, ModuleContext, ModuleError, ModuleMetrics, PluginRegistry,
 };
