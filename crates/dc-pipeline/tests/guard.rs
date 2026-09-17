@@ -47,6 +47,7 @@ fn ocr_result(draft: &str) -> OcrResult {
         chat_target: Some("测试对象".into()),
         draft_text: draft.into(),
         blocks: Vec::new(),
+        chat_context: None,
     }
 }
 
@@ -108,6 +109,7 @@ fn fixture() -> Fixture {
         draft_epoch: Arc::new(|| 7),
         fatal: std::sync::atomic::AtomicBool::new(false),
         target_cache: std::sync::Mutex::new(None),
+        context_cache: std::sync::Mutex::new(None),
         layout_cache: std::sync::Mutex::new(None),
         ctx_factory,
         heartbeat_probe: None,
@@ -282,6 +284,7 @@ fn ut_grd_06_heartbeat_phash() {
         draft_epoch: Arc::new(|| 7),
         fatal: std::sync::atomic::AtomicBool::new(false),
         target_cache: std::sync::Mutex::new(None),
+        context_cache: std::sync::Mutex::new(None),
         layout_cache: std::sync::Mutex::new(None),
         ctx_factory: f.core.ctx_factory.clone(),
         heartbeat_probe: Some(Arc::new(move |_snap, _layout| *cell.lock().unwrap())),
@@ -352,4 +355,34 @@ fn ut_grd_07_layout_cache_conditions() {
         c.reusable(HWND, Rect::new(0, 0, 100, 100), 30_999),
         "30s 内有效"
     );
+}
+
+/// UT-GRD-08：聊天上下文缓存 —— 慢环缓存 context，快环沿用。
+#[test]
+fn ut_grd_08_context_cache() {
+    let f = fixture();
+    // Slow 循环：ocr 输出带 chat_context → 缓存
+    f.ocr.outputs.lock().unwrap().push_front(Ok(OcrResult {
+        chat_target: Some("测试对象".into()),
+        draft_text: "你好世界".into(),
+        blocks: Vec::new(),
+        chat_context: Some("之前聊天内容".into()),
+    }));
+    let out = f.core.run_trigger(Trigger::Slow, request());
+    assert_eq!(out, TickOutcome::Stored);
+
+    // context_cache 已填充
+    let cached = f.core.context_cache.lock().unwrap().clone();
+    assert_eq!(cached, Some("之前聊天内容".to_string()));
+
+    // 快环：缓存命中 → with_cached_context 沿用慢环 context（ocr 输出无 context）
+    f.ocr
+        .outputs
+        .lock()
+        .unwrap()
+        .push_front(Ok(ocr_result("快环草稿")));
+    let before_sem_calls = f.sem.call_count();
+    let out = f.core.run_trigger(Trigger::Fast, request());
+    assert_eq!(out, TickOutcome::Stored);
+    assert_eq!(f.sem.call_count(), before_sem_calls + 1, "快环仍需 sem");
 }

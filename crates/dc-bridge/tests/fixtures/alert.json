@@ -5,6 +5,7 @@
     "命中违禁词「sb」(severity=block)"
   ],
   "chat_target": "张总",
+  "chat_context": "昨天的报告怎么样\n已经完成了",
   "draft_text": "你是 sb",
   "draft_fingerprint": 42,
   "draft_epoch": 3,

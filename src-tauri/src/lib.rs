@@ -249,6 +249,8 @@ pub fn run() {
             dc_bridge::commands::pause_guard,
             dc_bridge::commands::resume_guard,
             dc_bridge::commands::get_guard_status,
+            dc_bridge::commands::get_notice_agreed,
+            dc_bridge::commands::ack_notice,
             dc_bridge::commands::clear_logs,
             dc_bridge::commands::alert_action,
             dc_bridge::commands::get_data_dir,
@@ -335,15 +337,24 @@ pub fn run() {
                 });
             }
 
-            // 5) 静默启动（FR-UI-07）：silent_start（默认 true）或 --silent 参数
+            // 5) 主窗口显示决策。
+            //
+            //    FR-UI-08（P0，合规 §5.1 强制项）优先于 FR-UI-07（P1 静默启动）：
+            //    **未勾选同意前必须把窗口显示出来**，不得静默。此前只判断 silent_start，
+            //    而 silent_start 默认 true → 首启表现为静默启动、告知页永不出现。
+            //    已同意后才退回 silent_start 语义（默认静默到托盘）。
+            let notice_agreed = dc_bridge::notice::agreed(&state.config);
             let silent = state
                 .config
                 .snapshot()
                 .bool_or("general.silent_start", true)
                 || std::env::args().any(|a| a == "--silent");
-            if !silent {
+            if !notice_agreed || !silent {
                 if let Some(win) = app.get_webview_window("main") {
                     win.show()?;
+                }
+                if !notice_agreed {
+                    tracing::info!("首次启动未确认告知页，强制显示主窗口（不静默）");
                 }
             }
             Ok(())

@@ -246,12 +246,12 @@ impl ModelStore {
 
     /// 读取某目录的模型元信息（来源推断：在内置根下=Builtin，否则=User）。
     pub fn load_dir(&self, dir: &Path) -> Result<ModelInfo, ModelError> {
-        let source = if !self.builtin_root.as_os_str().is_empty() && dir.starts_with(&self.builtin_root)
-        {
-            ModelSource::Builtin
-        } else {
-            ModelSource::User
-        };
+        let source =
+            if !self.builtin_root.as_os_str().is_empty() && dir.starts_with(&self.builtin_root) {
+                ModelSource::Builtin
+            } else {
+                ModelSource::User
+            };
         self.load_dir_at(dir, source)
     }
 

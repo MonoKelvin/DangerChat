@@ -95,6 +95,8 @@ where
     pub fatal: std::sync::atomic::AtomicBool,
     /// 慢环缓存的 chat_target（快环沿用，§5.8）。
     pub target_cache: std::sync::Mutex<Option<String>>,
+    /// 慢环缓存的 chat_context（快环沿用，§5.7-context）。
+    pub context_cache: std::sync::Mutex<Option<String>>,
     pub layout_cache: std::sync::Mutex<Option<LayoutCache>>,
     /// 一次 tick 内构造 PipelineContext 的工厂（run_id/日志/取消注入）。
     pub ctx_factory: Arc<dyn Fn(LoopKind) -> PipelineContext + Send + Sync>,
@@ -179,6 +181,8 @@ where
         };
         let cached_target = self.target_cache.lock().ok().and_then(|t| t.clone());
         let ocr = ocr.with_cached_target(cached_target.as_deref());
+        let cached_context = self.context_cache.lock().ok().and_then(|c| c.clone());
+        let ocr = ocr.with_cached_context(cached_context.as_deref());
         let verdict = match self.sem.process(ocr, &ctx) {
             Ok(v) => v,
             Err(e) => return self.stage_failed(e),
@@ -204,6 +208,9 @@ where
         };
         if let Ok(mut t) = self.target_cache.lock() {
             *t = ocr.chat_target.clone();
+        }
+        if let Ok(mut c) = self.context_cache.lock() {
+            *c = ocr.chat_context.clone();
         }
         if let Ok(mut c) = self.layout_cache.lock() {
             *c = Some(LayoutCache {
@@ -270,6 +277,9 @@ where
         };
         if let Ok(mut t) = self.target_cache.lock() {
             *t = ocr.chat_target.clone();
+        }
+        if let Ok(mut c) = self.context_cache.lock() {
+            *c = ocr.chat_context.clone();
         }
         if let Ok(mut c) = self.layout_cache.lock() {
             *c = Some(LayoutCache {

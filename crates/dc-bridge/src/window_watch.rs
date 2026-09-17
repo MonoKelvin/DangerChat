@@ -3,12 +3,15 @@
 //!
 //! 状态循环：
 //! ```text
-//! Discovering ──(find_window 命中)──► spawn Guard ──► Watching
-//!     ▲                                                    │
+//! Discovering ──(find_window 命中 **且已确认首启告知页**)──► spawn Guard ──► Watching
+//!     ▲                                                                    │
 //!     └─────(窗口消失/最小化 2 次确认)──── Guard::stop ───┘
 //! ```
 //! 2s 轮询；前台事件不直接驱动（发现是主动查询语义，避免与 watch_foreground
 //! 的多消费者语义纠缠）。目标进程名从 AppState 读（set_config 热更即时生效）。
+//!
+//! 同意门控见 [`crate::notice`]：FR-UI-08（P0）要求「勾选同意后方可使用」，
+//! 故未确认告知页时即便目标窗口在前台也不启用拦截。
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -37,13 +40,20 @@ pub fn spawn(app: AppHandle) -> std::thread::JoinHandle<()> {
 fn watch_loop(app: AppHandle) {
     // state 引用不能跨 loop 持有（State<'_, _> 借用 app）——每轮重取
     let mut misses: u32 = 0;
+    // 「因未确认告知页而暂不启用拦截」只记一次日志（2s 一轮直接打会刷屏）
+    let mut blocked_logged = false;
     loop {
         let state = app.state::<Arc<AppState>>();
         let process = state.target_process();
         let found = SysApi::find_window_by_process(state.sys.as_ref(), &process);
 
+        // FR-UI-08（P0）「勾选同意后方可使用」：未确认首启告知页前不启动 Guard。
+        // 每轮重新判定（读 Arc 快照，无锁竞争）——用户在告知页点「开始使用」后，
+        // 最迟下一轮 POLL 内自动进入守护态，无需额外的唤醒通道。
+        let notice_agreed = crate::notice::agreed(&state.config);
+
         match (state.guard_running(), found) {
-            (false, Some(hwnd)) => {
+            (false, Some(hwnd)) if notice_agreed => {
                 // 发现 → spawn Guard（此线程唯一写者）
                 let ctx_state = Arc::clone(&state);
                 match dc_pipeline::guard::Guard::spawn(
@@ -65,6 +75,17 @@ fn watch_loop(app: AppHandle) {
                         tracing::warn!(error = %e, "Guard 启动失败（下轮重试）");
                     }
                 }
+            }
+            (false, Some(_)) => {
+                // 目标窗口已在，但用户尚未确认首启告知页：保持空闲，不 spawn、不拦截。
+                if !blocked_logged {
+                    blocked_logged = true;
+                    tracing::info!(
+                        process = %process,
+                        "目标窗口已发现，但首启告知页未确认：暂不启用拦截（FR-UI-08）"
+                    );
+                }
+                misses = 0;
             }
             (true, Some(_)) => {
                 misses = 0;

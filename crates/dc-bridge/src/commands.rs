@@ -744,6 +744,27 @@ pub fn pause_guard(state: State<'_, Arc<AppState>>) -> CmdResult<()> {
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// 首启风险告知（FR-UI-08，P0 强制项）
+// ---------------------------------------------------------------------------
+
+/// 是否已勾选同意首启告知页。后端是权威副本（见 [`crate::notice`]）。
+#[tauri::command]
+pub fn get_notice_agreed(state: State<'_, Arc<AppState>>) -> CmdResult<bool> {
+    Ok(crate::notice::agreed(&state.config))
+}
+
+/// 记录「已同意并落盘」。
+///
+/// 落盘失败必须让前端看到：界面若继续进设置页，会出现「用户以为已生效、
+/// 后端仍按未同意门控拦截」的分裂状态（静默失败）。
+#[tauri::command]
+pub fn ack_notice(state: State<'_, Arc<AppState>>) -> CmdResult<()> {
+    crate::notice::ack(&state.config).map_err(|e| BridgeError::Config(e.to_string()))?;
+    tracing::info!("首启告知页已确认（shell.notice_agreed=true）");
+    Ok(())
+}
+
 #[tauri::command]
 pub fn resume_guard(state: State<'_, Arc<AppState>>) -> CmdResult<()> {
     state.intercept.set_paused(false);

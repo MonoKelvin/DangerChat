@@ -242,6 +242,9 @@ pub struct OcrResult {
     pub draft_text: String,
     /// 全部文本块（含坐标、置信度）。
     pub blocks: Vec<TextBlock>,
+    /// 聊天窗口最近对话摘要（仅慢环 OCR chat_window 区域时填充；快环沿用缓存）。
+    /// 供语义判定提供上下文，消歧 L1 漏判 / L2 升级判定。
+    pub chat_context: Option<String>,
 }
 
 impl OcrResult {
@@ -249,6 +252,14 @@ impl OcrResult {
     pub fn with_cached_target(mut self, cached: Option<&str>) -> Self {
         if self.chat_target.is_none() {
             self.chat_target = cached.map(str::to_string);
+        }
+        self
+    }
+
+    /// 快环沿用慢环缓存的聊天上下文（§5.7-context）。
+    pub fn with_cached_context(mut self, cached: Option<&str>) -> Self {
+        if self.chat_context.is_none() {
+            self.chat_context = cached.map(str::to_string);
         }
         self
     }

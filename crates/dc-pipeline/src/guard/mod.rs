@@ -105,6 +105,7 @@ impl Guard {
             draft_epoch,
             fatal: std::sync::atomic::AtomicBool::new(false),
             target_cache: std::sync::Mutex::new(None),
+            context_cache: std::sync::Mutex::new(None),
             layout_cache: std::sync::Mutex::new(None),
             ctx_factory,
             heartbeat_probe: None,

@@ -6,6 +6,10 @@ use dc_pipeline::verdict::{Verdict, VerdictLevel};
 use dc_sys::Rect;
 
 fn ocr(draft: &str, target: Option<&str>) -> OcrResult {
+    ocr_with_context(draft, target, None)
+}
+
+fn ocr_with_context(draft: &str, target: Option<&str>, context: Option<&str>) -> OcrResult {
     OcrResult {
         chat_target: target.map(str::to_string),
         draft_text: draft.into(),
@@ -14,6 +18,7 @@ fn ocr(draft: &str, target: Option<&str>) -> OcrResult {
             rect: Rect::new(0, 0, 10, 10),
             confidence: 0.9,
         }],
+        chat_context: context.map(str::to_string),
     }
 }
 
@@ -159,6 +164,29 @@ fn stage_process_attaches_metadata() {
     assert!(v.draft_fingerprint != 0);
 }
 
+/// Stage 适配面：context 通过 process 流转到 Verdict。
+#[test]
+fn stage_process_passes_context() {
+    use dc_core::{ConfigSnapshot, ImageLogSink, RunId};
+    use std::sync::Arc;
+    let rules = RuleSet::from_defs(vec![RuleDef {
+        pattern: "sb".into(),
+        r#match: MatchKind::Word,
+        applies_to: vec!["all".into()],
+    }])
+    .unwrap();
+    let stage = SemStage::l1_only(rules, ContactBook::default());
+    let ctx = PipelineContext::new(
+        RunId::from_raw("20260914-000000-00002"),
+        dc_pipeline::contract::LoopKind::Slow,
+        ImageLogSink::noop(),
+        Arc::new(ConfigSnapshot::default()),
+    );
+    let input = ocr_with_context("你是 sb", Some("张总"), Some("之前聊天内容"));
+    let v = stage.process(input, &ctx).expect("sem process");
+    assert_eq!(v.chat_context.as_deref(), Some("之前聊天内容"));
+}
+
 /// UT-SEM-08：头文件缺失 → 模板兜底；头维度不符 → 降级兜底（不 Err）。
 /// 直接构造 head::Heads 场景（文件级）在 src/sem/head.rs 单测覆盖；
 /// 这里验证 Stage 层：embedder 缺失 + 头缺失 → L2 整体跳过，仅 L1。
@@ -181,7 +209,10 @@ fn ut_sem_08_missing_head_degrades_not_errors() {
 #[test]
 #[ignore = "需要 models/bge 真实权重（gitignore；见 models/README）"]
 fn real_bge_embedding() {
-    let dir = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../resources/models/bge"));
+    let dir = std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../resources/models/bge"
+    ));
     let emb = dc_pipeline::sem::embedder::Embedder::load(dir).expect("BGE 加载失败");
 
     let v = emb.embed("这是一条测试消息").expect("嵌入失败");
@@ -196,4 +227,80 @@ fn real_bge_embedding() {
     let v3 = emb.embed("完全无关的句子").unwrap();
     let cos2: f32 = v.iter().zip(v3.iter()).map(|(a, b)| a * b).sum();
     assert!(cos2 < 0.999, "异句余弦 {cos2}");
+}
+
+// ---------------------------------------------------------------------------
+// UT-SEM-10~12：上下文感知判定（§5.7-context）
+// ---------------------------------------------------------------------------
+
+/// UT-SEM-10：上下文不影响 L1 规则判定（L1 短路前不看 context）。
+/// L1 规则命中 draft_text → 立即 Block，context 被忽略。
+#[test]
+fn ut_sem_10_l1_unaffected_by_context() {
+    let rules = RuleSet::from_toml(
+        r#"
+[[rule]]
+pattern = "sb"
+match = "word"
+severity = "block"
+applies_to = ["all"]
+"#,
+    )
+    .unwrap();
+    let stage = SemStage::l1_only(rules, ContactBook::default());
+
+    // 草稿命中规则 → Block，context 被忽略
+    let input = ocr_with_context("你是 sb", Some("同事"), Some("最近项目进展顺利"));
+    let v = stage.judge(&input);
+    assert_eq!(v.level, VerdictLevel::Block);
+    assert!(v.reasons[0].contains("sb"));
+}
+
+/// UT-SEM-11：上下文在 L2 判定中的融合（§5.7-context）。
+/// L2 嵌入时，将 context 拼接到 draft 之前，改变判分结果。
+///
+/// 设计验证：
+/// - 无模型（l1_only）→ context 不参与任何判定；
+/// - 有模型场景下，context 改变嵌入输入 → 分数不同。
+///
+/// 由于真模型需要 --ignored，此处验证 L1-only 路径下 context 不影响结果。
+#[test]
+fn ut_sem_11_context_in_l1_only() {
+    let stage = SemStage::l1_only(
+        RuleSet::from_defs(Vec::new()).unwrap(),
+        ContactBook::default(),
+    );
+    // 无规则 + 无模型 → context 无法影响 → Safe
+    let v = stage.judge(&ocr_with_context("普通消息", None, Some("上下文内容")));
+    assert_eq!(v.level, VerdictLevel::Safe);
+    assert_eq!(v.score, 0.0);
+}
+
+/// UT-SEM-12：context 为空 / None 时行为与之前完全一致（回归）。
+/// 确保新增 chat_context 字段不改变现有判定逻辑。
+#[test]
+fn ut_sem_12_context_absent_no_behavior_change() {
+    let rules = RuleSet::from_defs(vec![RuleDef {
+        pattern: "sb".into(),
+        r#match: MatchKind::Word,
+        applies_to: vec!["all".into()],
+    }])
+    .unwrap();
+    let stage = SemStage::l1_only(rules, ContactBook::default());
+
+    // context = None → 同 UT-SEM-01 行为
+    let v1 = stage.judge(&ocr("你是 sb", Some("张总")));
+    assert_eq!(v1.level, VerdictLevel::Block);
+
+    // context = Some("") → 视为无上下文（空字符串跳过拼接）
+    let v2 = stage.judge(&ocr_with_context("你是 sb", Some("张总"), Some("")));
+    assert_eq!(v2.level, VerdictLevel::Block);
+
+    // context = Some(非空) → L1 仍短路（规则命中不看 context）
+    let v3 = stage.judge(&ocr_with_context(
+        "你是 sb",
+        Some("张总"),
+        Some("之前聊天内容"),
+    ));
+    assert_eq!(v3.level, VerdictLevel::Block);
 }

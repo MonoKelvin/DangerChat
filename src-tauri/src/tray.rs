@@ -138,9 +138,9 @@ pub fn build(app: &AppHandle) -> tauri::Result<TrayIcon> {
     let menu = Menu::with_items(
         app,
         &[
-            &MenuItem::with_id(app, "pause", "暂停守护", true, None::<&str>)?,
-            &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "open", "打开设置", true, None::<&str>)?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, "pause", "暂停守护", true, None::<&str>)?,
             &MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?,
         ],
     )?;
@@ -203,7 +203,12 @@ pub fn build(app: &AppHandle) -> tauri::Result<TrayIcon> {
                 {
                     let app = tray.app_handle();
                     if let Some(win) = app.get_webview_window("main") {
-                        if win.is_visible().unwrap_or(false) {
+                        // 「已显示」= 可见**且未最小化**：Windows 下最小化窗口仍带 WS_VISIBLE，
+                        // 只看 is_visible 会把「点了托盘让它出来」判成「已显示 → 隐藏」，
+                        // 用户看到的是窗口（任务栏按钮）反而消失。
+                        let shown = win.is_visible().unwrap_or(false)
+                            && !win.is_minimized().unwrap_or(false);
+                        if shown {
                             let _ = win.hide();
                         } else {
                             show_main(app);
@@ -230,6 +235,10 @@ pub fn build(app: &AppHandle) -> tauri::Result<TrayIcon> {
 /// `show_main_async`。
 pub fn show_main(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
+        // 必须先 unminimize（SW_RESTORE）再 show：窗口处于最小化态时，
+        // show()（SW_SHOW）只是「显示为最小化」，任务栏留个按钮而窗口依旧不出现。
+        // 托盘左键在 hide/show 间切换，用户很容易走到「最小化 → 点托盘」这条路径上。
+        let _ = win.unminimize();
         let _ = win.show();
         let _ = win.set_focus();
     }

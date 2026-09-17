@@ -8,6 +8,7 @@
 //! - [`events`]：事件名常量与载荷；
 //! - [`pump`]：AlertBus 泵线程（Show → Tauri 事件 + 弹窗定位显示；Action → 代转）；
 //! - [`stats`]：今日拦截数按日累加器（stats.json 落盘）；
+//! - [`notice`]：首启风险告知的同意状态（FR-UI-08，P0）——后端持权威副本；
 //! - [`window_watch`]：目标窗口发现状态机（唯一持有 Guard spawn 权）；
 //! - [`dir_watch`]：models/ 与 datasets/ 清单监听（自助训练数据流）。
 //!
@@ -19,6 +20,7 @@ pub mod dir_watch;
 pub mod dto;
 pub mod events;
 pub mod layout;
+pub mod notice;
 pub mod pump;
 pub mod state;
 pub mod stats;

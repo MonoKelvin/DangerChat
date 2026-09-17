@@ -31,7 +31,11 @@ fn layout_fallback_models_dir() -> std::path::PathBuf {
     if cfg!(debug_assertions) {
         if let Ok(exe) = std::env::current_exe() {
             // target/debug/xxx.exe → 上两级到仓库根，再进 resources/models/
-            if let Some(root) = exe.parent().and_then(|p| p.parent()).and_then(|p| p.parent()) {
+            if let Some(root) = exe
+                .parent()
+                .and_then(|p| p.parent())
+                .and_then(|p| p.parent())
+            {
                 let dev_models = root.join("resources").join("models");
                 if dev_models.is_dir() {
                     return dev_models;
@@ -64,7 +68,7 @@ pub fn bootstrap(app: &tauri::AppHandle) -> Arc<AppState> {
     let builtin_models_dir = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.join("resources").join("models")))
-        .unwrap_or_else(|| layout_fallback_models_dir());
+        .unwrap_or_else(layout_fallback_models_dir);
     let layout = DataLayout::open(&data_dir, &builtin_models_dir).expect("数据目录布局打开失败");
 
     // 1) 日志（最先：一切后续步骤可观测）

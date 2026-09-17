@@ -130,6 +130,12 @@ impl SemStage {
     }
 
     /// 融合判定（§5.7 判定算法；纯逻辑，可脱离 Stage 单测）。
+    ///
+    /// 上下文感知（§5.7-context）：
+    /// - L1 规则仅对 draft_text 判定（毫秒级，短路）；
+    /// - L2 嵌入时，若 `chat_context` 存在，则将其与 draft_text 拼接为
+    ///   `"之前的对话：{context}\n现在要发送：{draft}"` 再嵌入，
+    ///   让线性头在对话语境下判定危险概率。
     pub fn judge(&self, input: &OcrResult) -> Verdict {
         let draft = input.draft_text.trim();
 
@@ -154,14 +160,21 @@ impl SemStage {
             }
         }
 
-        // 空草稿 → Safe
+        // 空草稫 → Safe
         if draft.is_empty() {
             return Verdict::safe();
         }
 
         // L2（可开关；Embedder 缺失 = fail-open 仅 L1）
         if self.l2_enabled && self.embedder.is_some() {
-            if let Some(score) = self.l2_score(draft, base) {
+            // 上下文感知：拼接对话历史提升判定准确率
+            let scored_text = match &input.chat_context {
+                Some(ctx) if !ctx.is_empty() => {
+                    format!("之前的对话：{ctx}\n现在要发送：{draft}")
+                }
+                _ => draft.to_string(),
+            };
+            if let Some(score) = self.l2_score(&scored_text, base) {
                 let threshold = match base {
                     Profile::Formal => self.threshold_formal,
                     Profile::Casual => self.threshold_casual,
@@ -200,7 +213,8 @@ impl SemStage {
                 input.draft_text.clone(),
                 crate::verdict::draft_fingerprint(&input.draft_text),
             )
-            .with_target(input.chat_target.clone().unwrap_or_default()))
+            .with_target(input.chat_target.clone().unwrap_or_default())
+            .with_context(input.chat_context.clone()))
     }
 }
 
@@ -386,6 +400,7 @@ mod tests {
                 rect: Rect::new(0, 0, 10, 10),
                 confidence: 0.9,
             }],
+            chat_context: None,
         }
     }
 

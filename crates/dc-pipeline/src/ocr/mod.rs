@@ -2,7 +2,8 @@
 //!
 //! 算法（§5.6）：
 //! - 快环（ctx.loop_kind == Fast）：仅 msg_input ROI（layout 需已 `input_only()`）；
-//! - 慢环：chat_target + msg_input 双 ROI；
+//! - 慢环：chat_target + chat_window + msg_input 三 ROI；
+//!   `chat_context` 取 chat_window 区域最近 N 行拼接，供 L2 语义判定消歧（§5.7-context）
 //! - ROI 高度 < 32px 时 2× Lanczos 超分（`ocr.upscale`）；
 //! - `draft_text` 行拼接 + 噪声过滤（assemble 纯函数）；`chat_target` 取置信度最高行；
 //! - 错误矩阵：ROI 空/过小 → 对应字段空值（**非 Err**）；推理异常 → Recoverable。
@@ -23,7 +24,7 @@ use dc_core::{
 
 use crate::contract::{
     Module, OcrResult, PipelineContext, RegionLayout, Stage, StageError, WindowSnapshot,
-    TAG_CHAT_TARGET, TAG_MSG_INPUT,
+    TAG_CHAT_TARGET, TAG_CHAT_WINDOW, TAG_MSG_INPUT,
 };
 
 /// ROI 高度低于此值时 2× 超分（PaddleOCR rec 输入高 48，小图直接识别质量差）。
@@ -36,6 +37,9 @@ pub struct OcrStage {
     upscale: bool,
     metrics: MetricsRecorder,
 }
+
+/// 聊天窗口上下文摘要最大行数（BGE 嵌入输入预算 ≈ 64 token）。
+const CONTEXT_MAX_LINES: usize = 5;
 
 impl OcrStage {
     pub fn new() -> Self {
@@ -85,13 +89,14 @@ impl OcrStage {
             return Err(StageError::Fatal("OCR 引擎未初始化".into()));
         };
 
-        // 快环仅输入框；慢环双 ROI（§5.6）
+        // 快环仅输入框；慢环双 ROI + chat_window 上下文（§5.6/§5.7-context）
         let tags: &[&str] = match ctx.loop_kind {
             crate::contract::LoopKind::Fast => &[TAG_MSG_INPUT],
-            _ => &[TAG_CHAT_TARGET, TAG_MSG_INPUT],
+            _ => &[TAG_CHAT_TARGET, TAG_CHAT_WINDOW, TAG_MSG_INPUT],
         };
 
         let mut chat_target: Option<String> = None;
+        let mut chat_context: Option<String> = None;
         let mut draft_blocks: Vec<assemble::RawLine> = Vec::new();
 
         for tag in tags {
@@ -109,6 +114,16 @@ impl OcrStage {
                 TAG_CHAT_TARGET => {
                     chat_target = assemble::pick_chat_target(&lines, self.min_conf as f32)
                 }
+                TAG_CHAT_WINDOW => {
+                    // 噪声词过滤（如发送按钮）后提取最近 N 行上下文
+                    let filtered =
+                        assemble::filter_lines(lines, &self.noise_words, self.min_conf as f32);
+                    chat_context = assemble::extract_chat_context(
+                        &filtered,
+                        self.min_conf as f32,
+                        CONTEXT_MAX_LINES,
+                    )
+                }
                 _ => {}
             }
         }
@@ -117,6 +132,7 @@ impl OcrStage {
 
         let mut result = assemble::assemble(draft_blocks, &self.noise_words, self.min_conf as f32);
         result.chat_target = chat_target;
+        result.chat_context = chat_context;
         Ok(result)
     }
 }

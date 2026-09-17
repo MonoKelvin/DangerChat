@@ -12,6 +12,8 @@ pub struct AlertPayload {
     pub score: f32,
     pub reasons: Vec<String>,
     pub chat_target: Option<String>,
+    /// 聊天窗口最近对话摘要（弹窗辅助判断）。
+    pub chat_context: Option<String>,
     /// 被拦截的消息文本（仅弹窗内存展示；不落日志）。
     pub draft_text: String,
     /// 指纹（日志关联用）。
@@ -28,6 +30,7 @@ impl AlertPayload {
             score: v.score,
             reasons: v.reasons.clone(),
             chat_target: v.chat_target.clone(),
+            chat_context: v.chat_context.clone(),
             draft_text: v.draft_text.clone().unwrap_or_default(),
             draft_fingerprint: v.draft_fingerprint,
             draft_epoch: v.draft_epoch,
@@ -120,13 +123,15 @@ mod tests {
         let v = Verdict::block("命中违禁词「sb」(severity=block)")
             .with_epoch(3)
             .with_draft("你是 sb", 42)
-            .with_target("张总");
+            .with_target("张总")
+            .with_context(Some("之前聊天内容".to_string()));
         let p = AlertPayload::from_verdict(&v, 10);
         assert_eq!(p.level, "block");
         assert_eq!(p.draft_text, "你是 sb");
         assert_eq!(p.draft_fingerprint, 42);
         assert_eq!(p.draft_epoch, 3);
         assert_eq!(p.chat_target.as_deref(), Some("张总"));
+        assert_eq!(p.chat_context.as_deref(), Some("之前聊天内容"));
         assert_eq!(p.countdown_secs, 10);
         assert!(p.reasons[0].contains("sb"));
     }
