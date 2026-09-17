@@ -79,7 +79,7 @@ export function NumberInput({
         'focus-within:bg-[var(--panel-bg)] focus-within:shadow-[inset_0_0_0_1.5px_var(--brand)]',
         'hover:bg-[var(--active-overlay)] focus-within:hover:bg-[var(--panel-bg)]',
         disabled && 'pointer-events-none opacity-40',
-        className ?? 'w-36',
+        className ?? 'w-40',
       )}
     >
       <input

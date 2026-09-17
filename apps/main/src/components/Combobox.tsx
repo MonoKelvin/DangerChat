@@ -17,6 +17,8 @@ interface ComboboxProps {
   disabled?: boolean;
   /** 触发器宽度 class，默认 w-40；面板宽度独立按内容自适应，不受此项影响 */
   className?: string;
+  /** 触发器宽度自适应内容（按最长选项实测），用于防护应用等长标签场景 */
+  fitContent?: boolean;
 }
 
 /** 面板最大宽度（px）：超过则换行/截断，不无限制撑开。 */
@@ -66,15 +68,35 @@ function measureContentWidth(options: ComboOption[]): number {
   return widest + ITEM_INSET + SCROLLBAR_W;
 }
 
+/** 触发器最小宽度（px）：fitContent 时短标签也保持可点面积。 */
+const TRIGGER_MIN_W = 128;
+/** 触发器最大宽度（px）：fitContent 时长标签不超过此上限，超出 truncate。 */
+const TRIGGER_MAX_W = 280;
+/** 触发器内部不可压缩部分（px）：px-3.5(14)×2 + gap-2(8) + chevron size-4(16)。 */
+const TRIGGER_INSET = 52;
+
+/** 触发器宽度按**当前选中项**实测（不含 hint，因为触发器不渲染 hint）。 */
+function measureTriggerWidth(label: string): number {
+  const probe = document.createElement('div');
+  probe.style.cssText =
+    'position:absolute;visibility:hidden;white-space:nowrap;top:-9999px;left:-9999px;font-size:14px;';
+  probe.textContent = label;
+  document.body.appendChild(probe);
+  const w = probe.getBoundingClientRect().width;
+  probe.remove();
+  return Math.min(TRIGGER_MAX_W, Math.max(TRIGGER_MIN_W, w + TRIGGER_INSET));
+}
+
 /** 下拉选择：不允许输入；面板高斯模糊浮层，选中项打勾。
  *
- *  面板宽度按内容自适应（不跟随触发器），仅在视口内做钳制与左右翻转。 */
+ *  面板宽度按内容自适应（不跟随触发器），仅右对齐触发器并在视口内做钳制与左右翻转。 */
 export function Combobox({
   value,
   options,
   onChange,
   disabled,
   className,
+  fitContent,
 }: ComboboxProps) {
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -94,14 +116,18 @@ export function Combobox({
   }, [open]);
 
   const selected = options.find((o) => o.value === value);
+  const triggerW = fitContent ? measureTriggerWidth(selected?.label ?? value) : undefined;
 
   // 面板宽度：内容实测 → 钳到 [MIN, MAX]；再受视口限制（两侧各留 VIEWPORT_GAP）
   const panelW = Math.max(
     PANEL_MIN_W,
     Math.min(contentW || PANEL_MIN_W, PANEL_MAX_W, window.innerWidth - VIEWPORT_GAP * 2),
   );
-  // 右侧放不下就向左展开，仍放不下则贴右边缘
-  const left = rect ? Math.max(VIEWPORT_GAP, Math.min(rect.left, window.innerWidth - panelW - VIEWPORT_GAP)) : 0;
+  // 优先右对齐触发器；面板比触发器宽时向左伸展，左缘越界则贴视口左缘。
+  // 设置页控件都在行右侧，右对齐让下拉框看起来是从触发器正下方长出来的。
+  const left = rect
+    ? Math.max(VIEWPORT_GAP, Math.min(rect.right - panelW, window.innerWidth - panelW - VIEWPORT_GAP))
+    : 0;
   // 单项高度 = 内容行高(20) + py-2(8)×2；面板上下内边距 p-1.5(6)×2
   const estHeight = Math.min(options.length * ITEM_H + PANEL_PAD_Y, window.innerHeight - VIEWPORT_GAP * 2);
   const top = rect
@@ -121,17 +147,18 @@ export function Combobox({
         type="button"
         disabled={disabled}
         onClick={() => setOpen((v) => !v)}
+        style={triggerW ? { width: triggerW } : undefined}
         className={cn(
           'flex h-9 items-center justify-between gap-2 rounded-lg bg-[var(--input-bg)] px-3.5 text-sm text-[var(--text-primary)] outline-none transition-all duration-150',
           'hover:bg-[var(--active-overlay)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]',
           'disabled:pointer-events-none disabled:opacity-40',
           open && 'bg-[var(--group-bg)] shadow-[inset_0_0_0_1.5px_var(--brand)]',
           // 统一默认宽度：面板已按内容自适应，触发器不必再为「装下长选项」而各自加宽，
-          // 只保证当前选中项可读即可（超长仍 truncate）。
-          className ?? 'w-40',
+          // 只保证当前选中项可读即可（超长仍 truncate）。fitContent 时改用实测内联宽度。
+          triggerW ? 'shrink-0' : (className ?? 'w-40'),
         )}
       >
-        <span className="truncate">{selected?.label ?? value}</span>
+        <span className={cn(!triggerW && 'truncate')}>{selected?.label ?? value}</span>
         <ChevronDown
           className={cn('size-4 shrink-0 text-[var(--text-tertiary)] transition-transform duration-200', open && 'rotate-180')}
           strokeWidth={2}
