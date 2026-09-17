@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { Shield, ShieldAlert, ShieldOff, Plus, Trash2, Pencil, FolderOpen, FolderCog, Loader2, Moon, Sun, Monitor, GraduationCap } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { ConfigFieldDto, ContactDto, ModelDto, RuleDto, ScenarioDto, StatusPayload } from '../lib/types';
@@ -10,6 +10,7 @@ import { Checkbox } from '../components/Checkbox';
 import { Modal, ModalButton } from '../components/Modal';
 import { IconButton } from '../components/IconButton';
 import { Combobox, type ComboOption } from '../components/Combobox';
+import { ExtLink } from '../components/ExtLink';
 import { SettingsGroup, SettingsRow, SettingsSection } from '../components/SettingsGroup';
 import { AboutHero } from './AboutHero';
 import { TrainingDialog } from './TrainingDialog';
@@ -1226,23 +1227,10 @@ function LogsGroup() {
 
 /* ── 关于 ── */
 
-/** 外部链接（主题色文字，点击经后端在外部浏览器打开；后端仅放行 https） */
-function ExtLink({ url, children }: { url: string; children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={() => void api.openExternal(url).catch(() => {})}
-      className="font-medium text-[var(--brand)] underline underline-offset-2 transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
-    >
-      {children}
-    </button>
-  );
-}
-
 /** 微信官方协议（腾讯发布；出处见 docs/合规与风险说明.md §2.1/§2.2） */
-const WECHAT_AGREEMENT =
+export const WECHAT_AGREEMENT =
   'https://weixin.qq.com/cgi-bin/readtemplate?lang=zh_CN&t=weixin_agreement&s=default';
-const WECHAT_PERSONAL_RULES = 'https://weixin.qq.com/agreement/personal_account?lang=zh_CN';
+export const WECHAT_PERSONAL_RULES = 'https://weixin.qq.com/agreement/personal_account?lang=zh_CN';
 
 function AboutPage() {
   return (

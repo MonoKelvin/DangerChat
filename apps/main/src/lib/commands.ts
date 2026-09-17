@@ -116,13 +116,20 @@ export async function openDataDir(): Promise<void> {
   return invoke('open_data_dir');
 }
 
-/** 首启同意状态（localStorage；「不再弹出」= true） */
-export const NOTICE_KEY = 'dangerchat:notice-agreed';
-export function hasAgreedNotice(): boolean {
-  return localStorage.getItem(NOTICE_KEY) === '1';
+/** 首启同意状态查询（FR-UI-08，P0）。
+ *
+ *  **权威副本在后端**（`config.json` 的 `shell.notice_agreed`），不是 localStorage：
+ *  主窗口默认静默启动（`visible: false`），后端必须在 `show()` 之前就知道要不要弹
+ *  告知页，而 localStorage 后端读不到、且随 WebView 缓存一起丢。
+ */
+export async function getNoticeAgreed(): Promise<boolean> {
+  return invoke<boolean>('get_notice_agreed');
 }
-export function agreeNotice(): void {
-  localStorage.setItem(NOTICE_KEY, '1');
+
+/** 确认首启告知页并落盘。失败必须上抛——静默放过会让界面进了设置页、
+ *  而后端仍按「未同意」门控拦截，形成用户看不见的分裂状态。 */
+export async function ackNotice(): Promise<void> {
+  return invoke('ack_notice');
 }
 
 /** 主题色切换 → 托盘图标同步按该色相着色（即时刷新） */

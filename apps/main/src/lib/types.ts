@@ -8,6 +8,7 @@ export interface AlertPayload {
   score: number;
   reasons: string[];
   chat_target: string | null;
+  chat_context: string | null;
   draft_text: string;
   draft_fingerprint: number;
   draft_epoch: number;

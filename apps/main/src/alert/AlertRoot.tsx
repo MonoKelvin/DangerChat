@@ -96,6 +96,14 @@ export function AlertRoot() {
         {payload.draft_text || '（空）'}
       </div>
 
+      {/* 最近聊天上下文（辅助判断） */}
+      {payload.chat_context && (
+        <div className="mb-2.5 max-h-20 overflow-y-auto rounded-lg bg-[var(--card-bg)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text-secondary)]">
+          <div className="mb-1 font-medium text-[var(--text-tertiary)]">最近对话：</div>
+          <div className="whitespace-pre-wrap break-all">{payload.chat_context}</div>
+        </div>
+      )}
+
       {/* 命中原因 */}
       {payload.reasons.length > 0 && (
         <p className="mb-3 truncate text-[11px] text-[var(--text-secondary)]">

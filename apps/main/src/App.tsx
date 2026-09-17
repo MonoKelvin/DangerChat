@@ -6,7 +6,7 @@ import { AlertRoot } from './alert/AlertRoot';
 import { WindowControls } from './components/WindowControls';
 import { TooltipLayer } from './components/TooltipLayer';
 import { CursorFx } from './components/CursorFx';
-import { hasAgreedNotice, setTrayHue } from './lib/commands';
+import { getNoticeAgreed, setTrayHue } from './lib/commands';
 import { getAccent, getTheme, applyAccent, applyTheme, onSystemChange } from './lib/theme';
 
 /** 窗口 label 分支：main = 设置主窗口（含告知页），alert = 拦截弹窗。 */
@@ -19,10 +19,24 @@ export default function App() {
 }
 
 function MainWindow() {
-  const [agreed, setAgreed] = useState(hasAgreedNotice());
+  // 三态：null = 尚未取回。**不能在未知时就渲染设置页**——那正是「未确认却可用」
+  // 的漏洞；也不能默认 false，否则已同意的用户每次从托盘打开都会闪一下告知页。
+  const [agreed, setAgreed] = useState<boolean | null>(null);
   const [cursorFx, setCursorFx] = useState(
     () => localStorage.getItem('main-ui:cursorfx') !== 'off',
   );
+
+  // 同意状态的权威副本在后端（不是 localStorage）：主窗口静默启动时后端要据此
+  // 决定是否 show，前端只跟随。取回失败按未同意处理（保守方向，宁可多弹一次）。
+  useEffect(() => {
+    let alive = true;
+    void getNoticeAgreed()
+      .then((v) => alive && setAgreed(v))
+      .catch(() => alive && setAgreed(false));
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     const theme = getTheme();
@@ -53,7 +67,12 @@ function MainWindow() {
         <WindowControls />
       </header>
       <div className="min-h-0 flex-1">
-        {agreed ? <SettingsRoot /> : <NoticePage onAgree={() => setAgreed(true)} />}
+        {/* agreed === null：状态未知，留白而非渲染设置页（合规门控不允许抢跑） */}
+        {agreed === null ? null : agreed ? (
+          <SettingsRoot />
+        ) : (
+          <NoticePage onAgree={() => setAgreed(true)} />
+        )}
       </div>
       {cursorFx && <CursorFx />}
       <TooltipLayer />
