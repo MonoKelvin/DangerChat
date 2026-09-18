@@ -1,0 +1,4 @@
+kind = "sem"
+file = "model_quantized.onnx"
+version = "bge-large-zh-v1.5-int8"
+note = "BGE 中文大模型，1024 维，int8 量化（Xenova 转换版 model_int8.onnx）；tokenizer.json 同目录。运行时 mmap 权重降常驻内存。"

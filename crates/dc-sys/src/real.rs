@@ -211,7 +211,7 @@ fn sys_thread_main(ctrl: Receiver<SysReq>, event: isize, shutdown: Arc<AtomicBoo
     while !shutdown.load(Ordering::SeqCst) {
         if last_heartbeat.elapsed() >= std::time::Duration::from_secs(5) {
             last_heartbeat = std::time::Instant::now();
-            tracing::info!(
+            tracing::debug!(
                 key_invoked = KEY_PROC_INVOKED.load(Ordering::SeqCst),
                 fg_invoked = FG_PROC_INVOKED.load(Ordering::SeqCst),
                 keyboard_hook = state.keyboard.is_some(),

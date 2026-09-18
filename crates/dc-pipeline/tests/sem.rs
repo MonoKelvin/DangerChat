@@ -229,6 +229,60 @@ fn real_bge_embedding() {
     assert!(cos2 < 0.999, "异句余弦 {cos2}");
 }
 
+/// IT-SEM-01（真模型，`-- --ignored`）：**2048 维（含交互项）的头端到端**。
+///
+/// 验证三件事，缺一即说明「同一句话 × 不同对象」这一能力未真正生效：
+/// 1. 真实 head 被加载为 4×EMBED_DIM（运行时走 草稿 ⊕ 对象 ⊕ 积 ⊕ 差 的装配路径）；
+/// 2. 特征可拼接并按该维度打分（维度守卫不误杀）；
+/// 3. **同一草稿换对象会改变分数**——对象塔与交互项生效的可观测证据。
+#[test]
+#[ignore = "需要 models/bge 真实权重（gitignore；见 models/README）"]
+fn real_heads_two_tower_scoring() {
+    use dc_pipeline::sem::embedder::EMBED_DIM;
+    use dc_pipeline::sem::head::Heads;
+    use dc_pipeline::sem::rules::Profile;
+    use dc_pipeline::sem::{draft_embed_text, object_embed_text};
+
+    let dir = std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../resources/models/bge"
+    ));
+    let emb = dc_pipeline::sem::embedder::Embedder::load(dir).expect("BGE 加载失败");
+    let heads = Heads::load(dir);
+
+    // 1) 激活证明
+    assert_eq!(
+        heads.feature_dim(Profile::Formal),
+        4 * EMBED_DIM,
+        "head-formal.json 不是 2048 维，交互项未激活（跑 tools/training/train_head.py 重训）"
+    );
+    assert_eq!(heads.feature_dim(Profile::Casual), 4 * EMBED_DIM);
+
+    // 2)+3) 同一草稿 + 不同对象
+    let draft_tower = draft_embed_text(None, "宝宝你这么好看");
+    let feats = |obj: &str| -> Vec<f32> {
+        let a = emb.embed(&draft_tower).expect("草稿塔嵌入失败");
+        let b = emb
+            .embed(&object_embed_text(Some(obj)))
+            .expect("对象塔嵌入失败");
+        let mut v = a.to_vec();
+        v.extend_from_slice(&b);
+        v.extend(a.iter().zip(b.iter()).map(|(x, y)| x * y));
+        v.extend(a.iter().zip(b.iter()).map(|(x, y)| x - y));
+        v
+    };
+    let s_partner = heads
+        .score(&feats("女朋友"), Profile::Casual)
+        .expect("打分失败");
+    let s_buddy = heads
+        .score(&feats("好兄弟"), Profile::Casual)
+        .expect("打分失败");
+    assert!(
+        (s_partner - s_buddy).abs() > 1e-4,
+        "同一草稿换对象后分数应不同（对象塔/交互项生效）：女朋友 {s_partner} / 好兄弟 {s_buddy}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // UT-SEM-10~12：上下文感知判定（§5.7-context）
 // ---------------------------------------------------------------------------

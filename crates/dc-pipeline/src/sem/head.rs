@@ -85,13 +85,27 @@ impl Heads {
                 return Head::None;
             }
         };
+        // 允许三种特征维度：
+        // - EMBED_DIM（512）仅草稿塔（引入对象塔之前的旧头）；
+        // - 2×EMBED_DIM（1024）草稿塔 ⊕ 对象塔（**可分离**，只能给每对象一个常数偏移）；
+        // - 4×EMBED_DIM（2048）再叠加 逐元素积 ⊕ 差（**含交互项**，才能表达
+        //   「同一句话 × 不同对象 → 相反判定」）。
+        // 其他维度一律降级模板兜底（只提示不拦截），绝不按错误维度打分。
+        let dim_ok = [EMBED_DIM, 2 * EMBED_DIM, 4 * EMBED_DIM].contains(&parsed.dim);
         match parsed.weights {
-            Some(w) if w.len() == parsed.dim && parsed.dim == EMBED_DIM => Head::Linear {
+            Some(w) if w.len() == parsed.dim && dim_ok => Head::Linear {
                 weights: w,
                 bias: parsed.bias,
             },
             Some(_) => {
-                tracing::warn!(path = %path.display(), "头维度不符（dim={}），降级模板兜底", parsed.dim);
+                tracing::warn!(
+                    path = %path.display(),
+                    dim = parsed.dim,
+                    "头维度不符（应为 {} / {} / {}），降级模板兜底",
+                    EMBED_DIM,
+                    2 * EMBED_DIM,
+                    4 * EMBED_DIM
+                );
                 Self::anchors_from(parsed.templates, embedder)
             }
             None => Self::anchors_from(parsed.templates, embedder),
@@ -125,24 +139,54 @@ impl Heads {
         }
     }
 
+    /// 该基线所需特征维度（由 head 权重长度决定）。
+    /// 无线性头时返回 [`EMBED_DIM`]（仅草稿塔）——调用方据此决定是否拼接对象塔。
+    pub fn feature_dim(&self, profile: Profile) -> usize {
+        match self.head_of(profile) {
+            Head::Linear { weights, .. } => weights.len(),
+            _ => EMBED_DIM,
+        }
+    }
+
     /// 打分：sigmoid(w·x+b)（线性头）或模板最大余弦的补数（兜底）。
     /// 无头/维度不符 → None（调用方 fail-open）。
-    pub fn score(&self, embed: &[f32; EMBED_DIM], profile: Profile) -> Option<f32> {
+    ///
+    /// ⚠️ `features.len()` 必须与 [`Self::feature_dim`] 一致，否则返回 None：
+    /// 若直接 `zip`，1024 维权重配 512 维向量会被静默算成「部分点积」，
+    /// 得到看似合理却错误的分数。
+    pub fn score(&self, features: &[f32], profile: Profile) -> Option<f32> {
         match self.head_of(profile) {
             Head::Linear { weights, bias } => {
+                if weights.len() != features.len() {
+                    tracing::warn!(
+                        expect = weights.len(),
+                        got = features.len(),
+                        "特征维度与头不符，跳过打分（fail-open）"
+                    );
+                    return None;
+                }
                 let z: f32 = weights
                     .iter()
-                    .zip(embed.iter())
+                    .zip(features.iter())
                     .map(|(w, x)| w * x)
                     .sum::<f32>()
                     + bias;
                 Some(1.0 / (1.0 + (-z).exp()))
             }
             Head::Templates { anchors } => {
+                // 模板兜底只用草稿塔（锚点维度固定 EMBED_DIM）
+                if features.len() != EMBED_DIM {
+                    return None;
+                }
                 // 与模板的余弦（embed 与锚点均已 L2 归一化，点积即余弦）
                 let best = anchors
                     .iter()
-                    .map(|a| a.iter().zip(embed.iter()).map(|(u, v)| u * v).sum::<f32>())
+                    .map(|a| {
+                        a.iter()
+                            .zip(features.iter())
+                            .map(|(u, v)| u * v)
+                            .sum::<f32>()
+                    })
                     .fold(f32::MIN, f32::max);
                 if !best.is_finite() {
                     return None;
@@ -205,6 +249,38 @@ mod tests {
         // casual 无头 → None
         assert!(heads.score(&x, Profile::Casual).is_none());
         assert!(!heads.has_weights(Profile::Casual));
+    }
+
+    /// 双塔头：1024 维权重正常打分；维度不符 → None（不做静默的部分点积）。
+    #[test]
+    fn two_tower_head_dim_guard() {
+        let dim = 2 * EMBED_DIM;
+        let mut w = vec![0.0f32; dim];
+        w[EMBED_DIM] = 10.0; // 只让对象塔那一半权重生效
+        let heads = Heads {
+            formal: Head::Linear {
+                weights: w,
+                bias: 0.0,
+            },
+            casual: Head::None,
+        };
+
+        // feature_dim 反映权重长度（调用方据此决定是否拼对象塔）
+        assert_eq!(heads.feature_dim(Profile::Formal), dim);
+        assert_eq!(heads.feature_dim(Profile::Casual), EMBED_DIM);
+
+        // 1024 维特征：对象塔命中 → 接近 1
+        let mut f = vec![0.0f32; dim];
+        f[EMBED_DIM] = 1.0;
+        let s = heads.score(&f, Profile::Formal).unwrap();
+        assert!(s > 0.99, "对象塔正方向应接近 1：{s}");
+
+        // 512 维特征（调用方漏拼对象塔）→ None，不得按部分点积出分
+        let short = vec![0.0f32; EMBED_DIM];
+        assert!(
+            heads.score(&short, Profile::Formal).is_none(),
+            "维度不符必须返回 None"
+        );
     }
 
     /// 头文件 JSON 往返：weights 有/无两种形态。

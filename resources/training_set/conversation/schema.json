@@ -1,0 +1,73 @@
+{
+  "version": 2,
+  "updated": "2026-09-18",
+  "layout": "conversation/<category>/*.jsonl，category 最多一层；每个 category 一份或多份 jsonl",
+  "routing": "每行按其 base 字段(正式=formal|个人=casual)进入对应的线性头；base 缺省时回落所属目录名。",
+  "legacy_dirs": "formal/ 与 casual/ 是 2026-09-18 之前的基线桶目录（无 scene 等扩展字段，只有 text/danger/with_context 三字段），随后续补充逐步迁移到场景目录；新语料一律写入场景目录。",
+  "categories": {
+    "formal_baseline": [
+      "teacher 老师",
+      "boss 领导",
+      "customer 客户",
+      "colleague 同事",
+      "company_group 公司群",
+      "project_group 跨方项目群",
+      "subordinate 下属",
+      "student 学生",
+      "parents_group 家长群",
+      "blind_date 相亲对象",
+      "ex 前任",
+      "estranged_classmate 关系差的同学",
+      "service 服务关系(物业/中介/客服/医生/HR)"
+    ],
+    "casual_baseline": [
+      "parent 父母",
+      "family_group 家族群",
+      "relative 亲戚",
+      "friend 普通朋友",
+      "bestie 死党闺蜜",
+      "partner 男女朋友",
+      "ambiguous 暧昧对象",
+      "secret_lover 情人",
+      "chat_group 闲聊群",
+      "rant_group 吐槽群"
+    ],
+    "cross_scene": [
+      "contrast 跨对象对照：同一草稿在不同对象/语境下的不同判定"
+    ],
+    "content_type": [
+      "daily 日常对话",
+      "awkward 尴尬对话（错发/叫错/说错场合）",
+      "joke 笑话段子",
+      "banter 打趣玩笑",
+      "unhinged 逆天发言（离谱/极端/自曝违法）"
+    ],
+    "paired": [
+      "paired 配对对照：同一草稿 × 多对象、标签相反（intimacy/boundary/banter/private/work）"
+    ]
+  },
+  "baseline_rule": "关系正式或未确立、存在层级或利益差、关系已破裂或需保守处理 → formal；亲近、同侪、私密、随意、非正式群体 → casual。未标记对象在运行时回落 formal。",
+  "text_contract": "草稿塔输入，必须与 crates/dc-pipeline/src/sem/mod.rs::draft_embed_text 逐字一致：(a) with_context=true → `之前的对话：{ctx}\n现在要发送：{draft}`；(b) false → 草稿原文。禁止写入对象名、场景标签、「（截断）」等推理时不存在的文本——否则训练分布与推理分布不一致。截断的上下文仅用省略号 … 自然表达。",
+  "context_contract": "ctx 取自聊天窗口最近不超过 5 行 OCR 文本（crates/dc-pipeline/src/ocr/assemble.rs::extract_chat_context），行间以 \\n 连接；单聊不含发言人昵称，群聊含昵称。",
+  "fields": {
+    "text": "必填。运行时嵌入串，见 text_contract。",
+    "danger": "必填。是否应告警/拦截，恒等于 severity ∈ {medium, high}。",
+    "with_context": "必填。text 是否含上下文。",
+    "scene": "必填。目录分类 id，与所在目录名相同。",
+    "object": "必填。聊天对象/群名（中文备注名或群名，语义需透明，如「张老师」「三年二班家长群」）；未知（OCR 未读到标题）写 `未标记`。**该字段是对象塔的唯一输入，不拼进 text**。",
+    "base": "必填。判定基线 formal|casual，决定进入哪个头、用哪个阈值。",
+    "context": "上下文氛围 none|harmonious|neutral|conflict；none 仅当 with_context=false。",
+    "truncated": "上下文是否为截图截断样本（顶部行被切断，表现为首行以 … 开头）。",
+    "match": "草稿是否匹配当前对象与场景。false 但 severity 为 none/low 表示「不合场景但不值得打扰用户」。",
+    "severity": "误发后果严重度 none|low|medium|high（含尴尬、社死、被另眼看待、隐私外流、纪律或法律后果）。",
+    "why": "短理由，仅用于标注审计，不参与训练。"
+  },
+  "label_rule": "danger = (severity ∈ {medium, high})。match 与 danger 解耦：吐槽群误发工作消息 match=false 但 severity=low → danger=false，用于教会模型区分『不合场景』与『有风险』。",
+  "constraints": [
+    "同一 base 下不得出现 text 完全相同而 danger 相反的样本（标签冲突即噪声）。跨对象歧义（如『宝宝你这么好看』发死党 vs 发恋人）必须由上下文区分 text，或只保留后果明确的一侧。",
+    "danger=true 的样本按 severity 分级：high 描述违法/暴力/隐私外流/亲密与性内容误发/歧视/自伤；medium 描述态度失当、阴阳、俚语错位、抱怨被当事人看到。",
+    "对象与场景的区分度在运行时只体现为 base 与场景表，不进入嵌入串；因此同一 base 内的强歧义样本（同时对 A 危险、对 B 安全）不应成对出现。"
+  ],
+  "object_contract": "对象塔输入，必须与 sem/mod.rs::object_embed_text 逐字一致：`对象：{object}`（object 为 `未标记` 时同样写出，不省略）。head 维度决定启用哪些段：512 仅草稿塔、1024 为草稿⊕对象、2048 再叠加 草稿⊙对象 与 草稿−对象（含交互项）。实测（2026-09-18，1626 条含 85 条配对样本）：含交互项 91.8%/85.8%、组内配对方向正确率 casual 94%；纯拼接 90.2%/83.9%、方向 82%；单塔 86.9%/82.9%、方向≈0。另注：把对象拼进草稿串（同一串内）会因 mean-pooling 稀释而变差（86.2%/81.6%），已回退，勿重试。",
+  "pair_contract": "`paired/` 目录为**配对样本**：同一草稿（草稿塔逐字相同）× 不同对象、标签相反，这是「同一句话按对象反向判定」的唯一学习信号。训练侧去重/冲突键为 (text, object)——同 text 不同 object 属刻意设计，同 (text, object) 标签相反才报错。"
+}

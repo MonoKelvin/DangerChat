@@ -1,0 +1,9 @@
+{"text": "这方案我改不动了", "danger": false, "with_context": false, "scene": "paired", "base": "formal", "object": "同事小李", "context": "none", "truncated": false, "match": true, "severity": "low", "why": "向平级同事表达困难，正常"}
+{"text": "这方案我改不动了", "danger": true, "with_context": false, "scene": "paired", "base": "formal", "object": "张总", "context": "none", "truncated": false, "match": false, "severity": "medium", "why": "向领导直接表达推不动，易被视为不担当"}
+{"text": "客户就是个外行", "danger": false, "with_context": false, "scene": "paired", "base": "casual", "object": "死党", "context": "none", "truncated": false, "match": true, "severity": "low", "why": "对朋友私下吐槽，风险有限"}
+{"text": "客户就是个外行", "danger": true, "with_context": false, "scene": "paired", "base": "formal", "object": "张总", "context": "none", "truncated": false, "match": false, "severity": "high", "why": "在领导面前贬损客户"}
+{"text": "客户就是个外行", "danger": true, "with_context": false, "scene": "paired", "base": "formal", "object": "客户项目群", "context": "none", "truncated": false, "match": false, "severity": "high", "why": "在客户所在的群里贬损客户"}
+{"text": "这个需求我理解不了", "danger": false, "with_context": false, "scene": "paired", "base": "formal", "object": "同事小李", "context": "none", "truncated": false, "match": true, "severity": "low", "why": "向同事请教，正常"}
+{"text": "这个需求我理解不了", "danger": true, "with_context": false, "scene": "paired", "base": "formal", "object": "客户李工", "context": "none", "truncated": false, "match": false, "severity": "medium", "why": "对客户直说理解不了，专业性受损"}
+{"text": "我手上还有三件事，排不下", "danger": false, "with_context": false, "scene": "paired", "base": "formal", "object": "张总", "context": "none", "truncated": false, "match": true, "severity": "low", "why": "向领导说明负荷，属正常沟通"}
+{"text": "我手上还有三件事，排不下", "danger": true, "with_context": false, "scene": "paired", "base": "formal", "object": "客户李工", "context": "none", "truncated": false, "match": false, "severity": "medium", "why": "对客户表达排不下，合作方观感差"}

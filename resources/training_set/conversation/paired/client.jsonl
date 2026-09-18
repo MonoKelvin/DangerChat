@@ -1,0 +1,10 @@
+{"text": "这批货的成本是三万", "danger": false, "with_context": false, "scene": "paired", "base": "formal", "object": "张总", "context": "none", "truncated": false, "match": true, "severity": "none", "why": "向领导汇报成本，属内部信息"}
+{"text": "这批货的成本是三万", "danger": true, "with_context": false, "scene": "paired", "base": "formal", "object": "客户李工", "context": "none", "truncated": false, "match": false, "severity": "high", "why": "对客户泄露成本，议价位置尽失"}
+{"text": "你们的需求老变", "danger": false, "with_context": false, "scene": "paired", "base": "formal", "object": "张总", "context": "none", "truncated": false, "match": true, "severity": "low", "why": "向领导反馈问题，正常"}
+{"text": "你们的需求老变", "danger": true, "with_context": false, "scene": "paired", "base": "formal", "object": "客户李工", "context": "none", "truncated": false, "match": false, "severity": "high", "why": "当面指责客户，合作基础受损"}
+{"text": "我们内部下周要裁员", "danger": false, "with_context": false, "scene": "paired", "base": "casual", "object": "老婆", "context": "none", "truncated": false, "match": true, "severity": "none", "why": "与家人沟通工作变动"}
+{"text": "我们内部下周要裁员", "danger": true, "with_context": false, "scene": "paired", "base": "formal", "object": "客户张经理", "context": "none", "truncated": false, "match": false, "severity": "high", "why": "对客户泄露内部经营风险"}
+{"text": "合同第5条我不认可", "danger": false, "with_context": false, "scene": "paired", "base": "formal", "object": "客户李工", "context": "none", "truncated": false, "match": true, "severity": "low", "why": "商务谈判中的正常表态"}
+{"text": "合同第5条我不认可", "danger": true, "with_context": false, "scene": "paired", "base": "formal", "object": "公司大群", "context": "none", "truncated": false, "match": false, "severity": "medium", "why": "内部群公开不认可，等于当众唱反调"}
+{"text": "这个价我看还能再让", "danger": false, "with_context": false, "scene": "paired", "base": "formal", "object": "张总", "context": "none", "truncated": false, "match": true, "severity": "low", "why": "向领导请示让价空间"}
+{"text": "这个价我看还能再让", "danger": true, "with_context": false, "scene": "paired", "base": "formal", "object": "客户李工", "context": "none", "truncated": false, "match": false, "severity": "high", "why": "未经授权对客户承诺让价"}
