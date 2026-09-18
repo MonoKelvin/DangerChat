@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 
 use dc_core::{ConfigType, ConfigValue};
 use dc_pipeline::intercept::{AlertAction, GuardState};
@@ -762,6 +762,8 @@ pub fn get_notice_agreed(state: State<'_, Arc<AppState>>) -> CmdResult<bool> {
 pub fn ack_notice(state: State<'_, Arc<AppState>>) -> CmdResult<()> {
     crate::notice::ack(&state.config).map_err(|e| BridgeError::Config(e.to_string()))?;
     tracing::info!("首启告知页已确认（shell.notice_agreed=true）");
+    // 通知 src-tauri：同意落盘成功 → 创建常驻托盘（FR-UI-08 首启期跳过托盘）。
+    let _ = state.app_handle.emit(events::EVENT_NOTICE_AGREED, ());
     Ok(())
 }
 

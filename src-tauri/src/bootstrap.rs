@@ -212,6 +212,7 @@ pub fn bootstrap(app: &tauri::AppHandle) -> Arc<AppState> {
     let scenes_path = layout.scenes_path();
     let stats_path = layout.stats_path();
     let state = Arc::new(AppState {
+        app_handle: app.app_handle().clone(),
         sys,
         log_center,
         image_store,

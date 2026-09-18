@@ -166,28 +166,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<TrayIcon> {
             }
             "open" => show_main(app),
             "quit" => {
-                // 退出链路（顺序不可换）：
-                // 1) 置退出信号 → pump/window-watch 线程在下一轮收敛；
-                // 2) 置退出意图 → ExitRequested 不再被 prevent_exit 拦截；
-                // 3) 等待后台线程结束（有限等待，超时则强杀）；
-                // 4) 进程退出。
-                //
-                // 只调 app.exit(0) 是不够的：它仅向事件循环「请求」退出，
-                // 而 pump/window-watch 是**非分离线程**的死循环，主线程返回时
-                // 会等待它们结束 —— 结果就是「托盘退出但后台进程还在」。
-                let state = app.state::<std::sync::Arc<AppState>>();
-                state.request_shutdown();
-                crate::set_exit_intent();
-
-                // 给线程收敛留时间（pump ≤100ms、watch ≤200ms 即响应）
-                let deadline = std::time::Instant::now() + std::time::Duration::from_millis(600);
-                while std::time::Instant::now() < deadline {
-                    std::thread::sleep(std::time::Duration::from_millis(50));
-                }
-                tracing::info!("托盘退出：进程终止");
-                // 强制终止：不依赖事件循环/线程优雅收尾，确保必然退出。
-                // （钩子由 OS 随进程终止回收，符合 §2.1 fail-open）
-                std::process::exit(0);
+                crate::shutdown_and_exit(app);
             }
             _ => {}
         })

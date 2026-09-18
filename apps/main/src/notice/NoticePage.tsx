@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ackNotice } from '../lib/commands';
-import { APP_NAME } from '../lib/meta';
+import { APP_NAME, APP_VERSION } from '../lib/meta';
 import { Checkbox } from '../components/Checkbox';
 import { ExtLink } from '../components/ExtLink';
 
@@ -32,18 +32,20 @@ export function NoticePage({ onAgree }: { onAgree: () => void }) {
   };
 
   return (
-    <div className="flex h-full items-start justify-center overflow-y-auto p-8 pt-12">
+    <div className="flex h-full items-start justify-center overflow-y-auto px-12 py-6">
       <div className="max-w-2xl space-y-6">
         <div>
-          <h1 className="text-xl font-semibold">欢迎使用 {APP_NAME}</h1>
+          <h1 className="text-xl font-semibold">
+            欢迎使用 {APP_NAME}v{APP_VERSION}
+          </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            使用前请务必仔细阅读以下内容。
+            使用前请务必仔细阅读以下内容。了解清楚相关风险后，勾选最下方的同意才能开始使用。
           </p>
         </div>
 
         {/* 协议风险（原文照贴） */}
         <section className="rounded-lg border border-amber-500/40 bg-amber-500/5 px-5 py-4">
-          <h2 className="mb-2 text-sm font-semibold">协议风险</h2>
+          <h2 className="mb-2 text-base font-semibold">协议风险</h2>
           <p className="text-[14px] leading-relaxed text-foreground/90">
             微信《软件许可及服务协议》8.2.1.6 与《微信个人账号使用规范》1.2.6 规定，禁止
             “通过非腾讯开发、授权的第三方软件……对微信软件及其组件、模块、界面、数据等进行访问、读取或控制”。
@@ -61,16 +63,15 @@ export function NoticePage({ onAgree }: { onAgree: () => void }) {
           </p>
         </section>
 
-        {/* 原则与底线（照贴关于页） */}
+        {/* 原则和底线 */}
         <section className="rounded-lg border border-border/50 bg-card/60 px-5 py-4">
-          <h2 className="mb-2 text-sm font-semibold">原则与底线</h2>
+          <h2 className="mb-2 text-base font-semibold">原则和底线</h2>
           <ul className="space-y-1.5 text-[14px] leading-relaxed text-foreground/90">
             <li>· 不注入或修改微信程序</li>
             <li>· 不读取或解密微信聊天记录文件</li>
             <li>· 不替你发送任何消息</li>
             <li>· 不把聊天内容上传到任何服务器</li>
             <li>· 绝不触碰法律法规底线：不开发、不内置任何绕过监管或对抗审查的功能</li>
-            <li>· 绝不采集与拦截无关的数据：识别仅在内存中进行，落盘内容不包含消息原文</li>
           </ul>
         </section>
 

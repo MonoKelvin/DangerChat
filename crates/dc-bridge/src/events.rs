@@ -12,3 +12,5 @@ pub const EVENT_MODELS: &str = "fs://models";
 pub const EVENT_DATASETS: &str = "fs://datasets";
 /// 训练任务状态迁移。
 pub const EVENT_TRAINING: &str = "training://status";
+/// 首启告知页同意落盘成功：src-tauri 在收到此事件后创建托盘（FR-UI-08）。
+pub const EVENT_NOTICE_AGREED: &str = "shell://notice_agreed";

@@ -7,13 +7,40 @@ mod window_state;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use tauri::{AppHandle, Manager, RunEvent};
+use tauri::{AppHandle, Listener, Manager, RunEvent};
 
 /// 退出意图：托盘"退出"设置为 true，允许进程真正退出；窗口关闭不设置，保持托盘常驻。
 static ALLOW_EXIT: AtomicBool = AtomicBool::new(false);
 
 pub fn set_exit_intent() {
     ALLOW_EXIT.store(true, Ordering::SeqCst);
+}
+
+/// 收敛后台线程并终止进程（托盘「退出」与首启页「关闭」共用）。
+///
+/// 退出链路（顺序不可换）：
+/// 1) 置退出信号 → pump/window-watch 线程在下一轮收敛；
+/// 2) 置退出意图 → ExitRequested 不再被 prevent_exit 拦截；
+/// 3) 等待后台线程结束（有限等待，超时则强杀）；
+/// 4) 进程退出。
+///
+/// 只调 app.exit(0) 是不够的：它仅向事件循环「请求」退出，而 pump/window-watch
+/// 是**非分离线程**的死循环，主线程返回时会等待它们结束 —— 结果就是
+/// 「触发退出但后台进程还在」。
+pub fn shutdown_and_exit(app: &AppHandle) -> ! {
+    let state = app.state::<Arc<dc_bridge::state::AppState>>();
+    state.request_shutdown();
+    set_exit_intent();
+
+    // 给线程收敛留时间（pump ≤100ms、watch ≤200ms 即响应）
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(600);
+    while std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    tracing::info!("进程终止");
+    // 强制终止：不依赖事件循环/线程优雅收尾，确保必然退出。
+    // （钩子由 OS 随进程终止回收，符合 §2.1 fail-open）
+    std::process::exit(0);
 }
 
 /// 唤出设置窗口（单实例回调用）。
@@ -131,6 +158,13 @@ fn open_external(app: AppHandle, url: String) -> Result<(), String> {
         .map_err(|e| format!("打开浏览器失败：{e}"))
 }
 
+/// 关闭应用：收敛后台线程并立即退出（FR-UI-08 首启页「关闭」直接Exit）。
+/// `restart_app` 仅 spawn 新实例 —— 本命令直接终止当前进程。
+#[tauri::command]
+fn exit_app(app: AppHandle) -> Result<(), String> {
+    shutdown_and_exit(&app);
+}
+
 /// 重启应用：启动新实例（带接力参数）后退出当前进程（数据目录指针变更后需重启才生效）。
 ///
 /// 为何不直接用 `app.restart()`：
@@ -178,11 +212,13 @@ fn restart_app(app: AppHandle) -> Result<(), String> {
         .spawn()
         .map_err(|e| format!("启动新实例失败：{e}"))?;
 
-    tracing::info!(exe = %exe.display(), pid = std::process::id(), "已启动接力实例，当前进程退出");
+    tracing::info!(exe = %exe.display(), pid = std::process::id(), "已启动接继实例，当前进程退出");
 
-    // 用 std::process::exit 而非 app.exit()：后者需事件循环空闲才生效，
-    // 而此处正处于命令回调中，事件循环被占。新实例已起来，必须立刻让出。
-    std::process::exit(0);
+    // 新实例已起来，必须立刻让出：复用收敛+终止链路。
+    // （钩子交接：std::process::exit 跳过析构，全局键盘钩子由 OS 在进程终止时回收。
+    //  新旧实例短暂并存期间可能各挂一个钩子，最坏导致个别按键漏判 —— 符合
+    //  §2.1「宁漏勿阻（fail-open）」，不会误拦用户输入。）
+    shutdown_and_exit(&app);
 }
 
 /// 兜底单实例锁：在 setup 真正装配钩子前再确认一次归属。
@@ -267,6 +303,7 @@ pub fn run() {
             set_tray_hue,
             open_external,
             restart_app,
+            exit_app,
         ])
         .setup(|app| {
             // 0) 兜底单实例锁：**必须在 bootstrap（装配全局键盘钩子）之前**。
@@ -286,8 +323,25 @@ pub fn run() {
             let state = bootstrap::bootstrap(app.handle());
             app.manage(Arc::clone(&state));
 
-            // 2) 托盘（常驻，FR-UI-06）
-            tray::build(app.handle())?;
+            // 2) 托盘（常驻，FR-UI-06）。
+            //    首启告知页期间（未同意）**不创建托盘**：此时关闭按钮应直接退出程序，
+            //    而非隐藏到托盘（§5.1 合规约定，FR-UI-08）。同意后才挂托盘。
+            let notice_agreed = dc_bridge::notice::agreed(&state.config);
+            if !notice_agreed {
+                tracing::info!("首次启动未确认告知页，跳过托盘创建（关闭=退出）");
+                // 监听同意落盘事件：用户点击「开始使用」后即时创建托盘。
+                let app_for_tray = app.handle().clone();
+                app.listen_any(dc_bridge::events::EVENT_NOTICE_AGREED, move |_| {
+                    tracing::info!("告知页同意落盘，创建托盘");
+                    if app_for_tray.tray_by_id("main").is_none() {
+                        if let Err(e) = tray::build(&app_for_tray) {
+                            tracing::error!(error = %e, "托盘创建失败");
+                        }
+                    }
+                });
+            } else {
+                tray::build(app.handle())?;
+            }
 
             // 3) 泵线程（AlertBus → 事件/弹窗）+ 窗口发现（spawn Guard）
             let handle = app.handle().clone();
@@ -343,7 +397,7 @@ pub fn run() {
             //    **未勾选同意前必须把窗口显示出来**，不得静默。此前只判断 silent_start，
             //    而 silent_start 默认 true → 首启表现为静默启动、告知页永不出现。
             //    已同意后才退回 silent_start 语义（默认静默到托盘）。
-            let notice_agreed = dc_bridge::notice::agreed(&state.config);
+            //    （notice_agreed 复用第 2 步已计算的结果）
             let silent = state
                 .config
                 .snapshot()

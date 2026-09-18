@@ -20,6 +20,9 @@ pub enum GuardSlot {
 }
 
 pub struct AppState {
+    /// Tauri AppHandle：供 dc-bridge commands 向前端/托盘发事件
+    /// （目前用于告知页同意后即时创建托盘，FR-UI-08）。
+    pub app_handle: tauri::AppHandle,
     pub sys: Arc<dyn SysApi>,
     /// 日志中心句柄（clear_logs 用；init 在 bootstrap，Drop 由全局 tracing 管）。
     #[allow(dead_code)]

@@ -6,7 +6,7 @@ import { AlertRoot } from './alert/AlertRoot';
 import { WindowControls } from './components/WindowControls';
 import { TooltipLayer } from './components/TooltipLayer';
 import { CursorFx } from './components/CursorFx';
-import { getNoticeAgreed, setTrayHue } from './lib/commands';
+import { getNoticeAgreed, setTrayHue, exitApp } from './lib/commands';
 import { getAccent, getTheme, applyAccent, applyTheme, onSystemChange } from './lib/theme';
 
 /** 窗口 label 分支：main = 设置主窗口（含告知页），alert = 拦截弹窗。 */
@@ -64,7 +64,16 @@ function MainWindow() {
         data-tauri-drag-region
       >
         <div className="flex-1" data-tauri-drag-region />
-        <WindowControls />
+        {/* 未同意（含状态未知加载中）：关闭=直接退出；同意后：关闭=隐藏到托盘。 */}
+        <WindowControls
+          onClose={() => {
+            if (agreed) {
+              void getCurrentWindow().hide();
+            } else {
+              void exitApp();
+            }
+          }}
+        />
       </header>
       <div className="min-h-0 flex-1">
         {/* agreed === null：状态未知，留白而非渲染设置页（合规门控不允许抢跑） */}

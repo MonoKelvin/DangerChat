@@ -147,6 +147,11 @@ export async function listModels(): Promise<import('./types').ModelDto[]> {
   return invoke('list_models');
 }
 
+/** 退出应用（FR-UI-08 首启页关闭）。 */
+export async function exitApp(): Promise<void> {
+  return invoke('exit_app');
+}
+
 /** datasets/ 下的训练数据 zip（训练对话框数据源） */
 export async function listDatasets(): Promise<import('./types').DatasetDto[]> {
   return invoke('list_datasets');
