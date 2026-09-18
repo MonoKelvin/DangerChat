@@ -30,6 +30,32 @@ use crate::contract::{
 /// ROI 高度低于此值时 2× 超分（PaddleOCR rec 输入高 48，小图直接识别质量差）。
 const UPSCALE_BELOW: u32 = 32;
 
+/// 默认噪声词表：整行 OCR 命中即过滤（§5.6）。
+///
+/// 覆盖发送按钮、语音输入占位，以及聊天 UI 边角切出的孤立碎片：
+/// - 符号/标点孤立行：`)` `(` `（` `%`
+/// - 孤立拉丁字母：`M` `Y` `R`
+/// - 孤立 CJK 及其带括号伪影：`白` `白(` `白（`
+/// - 孤立问号：`?`
+///
+/// 这些碎片由噪声词表负责，**而非长度阈值**——长度阈值会误删「sb」「傻逼」等
+/// 短敏感词（见 `assemble::filter_lines`）。本表可通过设置 `ocr.noise_words` 覆盖。
+const DEFAULT_NOISE_WORDS: &[&str] = &[
+    "发送",
+    "按住鼠标 语音输入文字",
+    ")",
+    "(",
+    "（",
+    "%",
+    "M",
+    "Y",
+    "R",
+    "?",
+    "白",
+    "白(",
+    "白（",
+];
+
 pub struct OcrStage {
     engine: Option<engine::OcrEngine>,
     noise_words: Vec<String>,
@@ -171,7 +197,9 @@ impl Module for OcrStage {
             ConfigField {
                 key: "ocr.noise_words".into(),
                 ty: ConfigType::StrList,
-                default: ConfigValue::StrList(vec!["发送".into(), "按住鼠标 语音输入文字".into()]),
+                default: ConfigValue::StrList(
+                    DEFAULT_NOISE_WORDS.iter().map(|s| s.to_string()).collect(),
+                ),
                 label: "噪声词表".into(),
                 help: "整行命中即过滤（发送按钮一类）".into(),
                 group: "模型与设备".into(),
@@ -195,7 +223,8 @@ impl Module for OcrStage {
         let intra = mctx.config.i64_or("device.intra_threads", 2).clamp(1, 4) as usize;
         let gpu = mctx.config.str_or("ocr.device", "direct-ml") == "direct-ml";
         let engine = engine::OcrEngine::new(&paths, intra, gpu).map_err(ModuleError::Fatal)?;
-        let default_noise: Vec<String> = vec!["发送".into(), "按住鼠标 语音输入文字".into()];
+        let default_noise: Vec<String> =
+            DEFAULT_NOISE_WORDS.iter().map(|s| s.to_string()).collect();
         self.noise_words = mctx.config.str_list_or("ocr.noise_words", &default_noise);
         self.min_conf = mctx.config.f64_or("ocr.min_conf", 0.5);
         self.upscale = mctx.config.bool_or("ocr.upscale", true);
