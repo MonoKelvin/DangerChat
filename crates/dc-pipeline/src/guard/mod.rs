@@ -59,6 +59,9 @@ impl Guard {
         // 目标是否前台（挂起态卸载判据，§2.4）。由调用方从 Arc<Intercept> 构造：
         // { let i = intercept.clone(); move || i.target_active() }
         target_active: Arc<dyn Fn() -> bool + Send + Sync>,
+        // 判定入槽回调（fail-closed 闭环，§2.2 修订）。由调用方从 Arc<Intercept> 构造：
+        // { let i = intercept.clone(); move |v| i.on_analysis_ready(v) }
+        on_verdict_stored: Arc<dyn Fn(&crate::verdict::Verdict) + Send + Sync>,
     ) -> Result<Self, String> {
         let capture = Arc::new(crate::capture::CaptureStage::new(sys));
         let mctx = mctx_factory();
@@ -137,6 +140,7 @@ impl Guard {
             ctx_factory,
             heartbeat_probe: Some(heartbeat_probe),
             last_phash: std::sync::Mutex::new(None),
+            on_verdict_stored,
         });
 
         let worker_cancel = crate::contract::CancellationToken::new();

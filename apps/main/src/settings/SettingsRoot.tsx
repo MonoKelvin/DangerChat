@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
-import { Shield, ShieldAlert, ShieldOff, Plus, Trash2, Pencil, FolderOpen, FolderCog, Loader2, Moon, Sun, Monitor, GraduationCap, SlidersHorizontal, MessageSquareWarning, Layers, Info, Palette, MonitorCog, ShieldCheck, ScanText, Users, BookText, Cpu, ScrollText, FileText, AlertTriangle, Code2, type LucideIcon } from 'lucide-react';
+import { Shield, ShieldAlert, ShieldOff, Plus, Trash2, Pencil, FolderOpen, FolderCog, Loader2, Moon, Sun, Monitor, GraduationCap, SlidersHorizontal, MessageSquareWarning, Layers, Info, Palette, MonitorCog, ShieldCheck, ScanText, Users, BookText, Cpu, ScrollText, FileText, AlertTriangle, Code2, Eye, type LucideIcon } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { ConfigFieldDto, ContactDto, ModelDto, RuleDto, ScenarioDto, StatusPayload } from '../lib/types';
 import * as api from '../lib/commands';
@@ -14,6 +14,7 @@ import { ExtLink } from '../components/ExtLink';
 import { SettingsGroup, SettingsRow, SettingsSection } from '../components/SettingsGroup';
 import { AboutHero } from './AboutHero';
 import { useTintedLogo } from '../lib/logoTint';
+import { AlertCard, AlertPreviewFrame, PREVIEW_ALERT } from '../alert/AlertCard';
 import { TrainingDialog } from './TrainingDialog';
 import { APP_NAME, APP_VERSION, AUTHOR, AUTHOR_URL, LICENSE, REPO_URL } from '../lib/meta';
 import {
@@ -323,6 +324,7 @@ export function SettingsRoot() {
                   {g.keys.map(renderField)}
                 </SettingsGroup>
               ))}
+              <AlertPreviewGroup />
             </SettingsSection>
           </div>
         )}
@@ -904,20 +906,19 @@ function SemModelRow({
 function ContactsGroup() {
   const [contacts, setContacts] = useState<ContactDto[]>([]);
   const [scenarios, setScenarios] = useState<ScenarioDto[]>([]);
-  const [name, setName] = useState('');
-  const [profile, setProfile] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<ContactDto | null>(null);
+  /** 新增草稿：仅存在于前端，name 非空提交后才落库（后端拒绝空名）。null=无草稿。 */
+  const [draft, setDraft] = useState<{ name: string; profile: string } | null>(null);
+  const draftRowRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     void api.listContacts().then(setContacts);
-    void api.listScenarios().then((s) => {
-      setScenarios(s);
-      // 默认画像取实际存在的场景，空值会被后端拒绝
-      setProfile((prev) => (s.some((x) => x.id === prev) ? prev : (s[0]?.id ?? '')));
-    });
+    void api.listScenarios().then(setScenarios);
   }, []);
+
+  const defaultProfile = () => scenarios[0]?.id ?? '';
 
   /** 统一写路径：失败落到 error 并回读真实状态（杜绝乐观残影）。 */
   const commit = (key: string, write: () => Promise<unknown>) => {
@@ -933,17 +934,30 @@ function ContactsGroup() {
       .finally(() => setBusy(null));
   };
 
-  const addContact = () => {
-    const n = name.trim();
-    if (!n || !profile) return;
-    void commit(n, () => api.setContactProfile(n, profile)).then(() => setName(''));
+  /** 点「添加对象」：插入一行空草稿（下方 autoFocus 到名称输入框）。 */
+  const startDraft = () => {
+    if (draft) return; // 已有未完成草稿，避免堆叠空行
+    setDraft({ name: '', profile: defaultProfile() });
+  };
+
+  /** 提交草稿：名称去空为空则丢弃，否则写库并清空草稿。 */
+  const commitDraft = () => {
+    if (!draft) return;
+    const n = draft.name.trim();
+    if (!n || !draft.profile) {
+      setDraft(null);
+      return;
+    }
+    const p = draft.profile;
+    setDraft(null);
+    void commit(n, () => api.setContactProfile(n, p));
   };
 
   const removeContact = (c: ContactDto) => {
     void commit(c.name, () => api.setContactProfile(c.name, 'none')).then(() => setConfirming(null));
   };
 
-  /** 改名 = 写入新名 + 删除旧名；名称未变时只更新画像。 */
+  /** 改名 = 写入新名 + 删除旧名；名称未变时只更新画像。空名视为无效，还原不删除（删除走垃圾桶+确认）。 */
   const renameContact = (from: string, to: string, p: string) => {
     if (!to || to === from) return;
     void commit(to, async () => {
@@ -952,15 +966,10 @@ function ContactsGroup() {
     });
   };
 
-  /** 画像下拉：只有各场景。删除是独立动作（右侧垃圾桶 → 确认框），不在这里表达——
-   *  `profile="none"` 在后端即「删除该条目」，把它做成一个选项等于给了「删除」第二条入口，
-   *  且条目一旦写入就不会以 `none` 形态存在，该选项永远选不中也永远显示不出来。 */
+  /** 画像下拉：只有各场景。删除是独立动作（右侧垃圾桶 → 确认框），不在这里表达。 */
   const profileOptions: ComboOption[] = scenarios.map((s) => ({ value: s.id, label: s.name }));
-  const scenarioOptions: ComboOption[] = scenarios.map((s) => ({ value: s.id, label: s.name }));
 
-  /** 引用已删除场景的残留画像：后端 `base_profile` 会回落 Formal（保守），
-   *  但 `Combobox` 找不到匹配项时会把**原始 id** 当标签显示（如 `custom-3`）。
-   *  这里补一个回落项，让界面显示可读文案而不是内部标识符。 */
+  /** 引用已删除场景的残留画像：补一个回落项，让界面显示可读文案而不是内部标识符。 */
   const missingProfiles: ComboOption[] = [
     ...new Set(contacts.map((c) => c.profile).filter((p) => !scenarios.some((s) => s.id === p))),
   ].map((p) => ({ value: p, label: `${p}（已删除，按正式处理）` }));
@@ -970,32 +979,23 @@ function ContactsGroup() {
 
   return (
     <section className="mb-8">
-      <div className="mb-3">
-        <h3 className="flex items-center gap-2 text-item font-semibold tracking-tight text-[var(--text-primary)]">
-          <Users className="size-4 shrink-0 text-[var(--brand)]" strokeWidth={2.2} />
-          聊天对象画像
-        </h3>
-        <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">
-          未标记的对象一律按「正式」保守处理；画像由 OCR 识别到的对象名匹配
-        </p>
-      </div>
-
-      <div className="mb-2 flex gap-2">
-        <input
-          className={cn(inputCls, 'flex-1 px-3.5')}
-          value={name}
-          placeholder="对象名（与聊天窗口显示名一致）"
-          maxLength={64}
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && addContact()}
-        />
-        <Combobox value={profile} options={scenarioOptions} onChange={setProfile} className="w-32" />
+      <div className="mb-3 flex items-center justify-between">
+        <div>
+          <h3 className="flex items-center gap-2 text-item font-semibold tracking-tight text-[var(--text-primary)]">
+            <Users className="size-4 shrink-0 text-[var(--brand)]" strokeWidth={2.2} />
+            聊天对象画像
+          </h3>
+          <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">
+            未标记的对象一律按「正式」保守处理；画像由 OCR 识别到的对象名匹配
+          </p>
+        </div>
         <button
-          className="shrink-0 rounded-lg bg-[var(--brand)] px-4 text-sm font-medium text-[var(--brand-text)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--brand-hover)] disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
-          disabled={!name.trim() || !profile || busy !== null}
-          onClick={addContact}
+          className="flex shrink-0 items-center gap-1.5 rounded-lg bg-[var(--brand)] px-3.5 py-2 text-sm font-medium text-[var(--brand-text)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--brand-hover)] disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+          disabled={scenarios.length === 0 || draft !== null}
+          onClick={startDraft}
         >
-          添加
+          <Plus className="size-4" />
+          添加对象
         </button>
       </div>
 
@@ -1023,7 +1023,15 @@ function ContactsGroup() {
                   (e.target as HTMLInputElement).blur();
                 }
               }}
-              onBlur={(e) => renameContact(c.name, e.target.value.trim(), c.profile)}
+              onBlur={(e) => {
+                const to = e.target.value.trim();
+                // 已有条目名不能清空（清空视为无效）→ 还原原名，不误删既有数据
+                if (!to) {
+                  e.target.value = c.name;
+                  return;
+                }
+                renameContact(c.name, to, c.profile);
+              }}
             />
             <Combobox
               value={c.profile}
@@ -1042,7 +1050,52 @@ function ContactsGroup() {
             </IconButton>
           </div>
         ))}
-        {contacts.length === 0 && (
+
+        {/* 新增草稿行：autoFocus 名称；名称空且焦点离开本行 → 自动删除（焦点在下拉框/删除内不删）。 */}
+        {draft && (
+          <div
+            ref={draftRowRef}
+            className="flex items-center gap-2 rounded-xl bg-[var(--group-bg)] px-3 py-2"
+          >
+            <input
+              autoFocus
+              className={cn(inputCls, 'flex-1')}
+              value={draft.name}
+              placeholder="对象名（与聊天窗口显示名一致）"
+              maxLength={64}
+              onChange={(e) => setDraft((d) => (d ? { ...d, name: e.target.value } : d))}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commitDraft();
+                if (e.key === 'Escape') setDraft(null);
+              }}
+              onBlur={(e) => {
+                // 焦点仍在本行内（移到下拉框/删除按钮）→ 不处理，等真正离开
+                if (draftRowRef.current?.contains(e.relatedTarget as Node | null)) return;
+                commitDraft(); // 空名在 commitDraft 内被丢弃，非空则落库
+              }}
+            />
+            <Combobox
+              value={draft.profile}
+              options={profileOptions}
+              onChange={(v) => {
+                const name = draft.name.trim();
+                // 名称已填 → 选完画像即落库；否则只更新草稿，等用户补名称
+                if (name) {
+                  setDraft(null);
+                  void commit(name, () => api.setContactProfile(name, v));
+                } else {
+                  setDraft((d) => (d ? { ...d, profile: v } : d));
+                }
+              }}
+              className="w-32"
+            />
+            <IconButton variant="ghost" data-tip="取消" onClick={() => setDraft(null)}>
+              <Trash2 className="size-4 text-[var(--danger)]" />
+            </IconButton>
+          </div>
+        )}
+
+        {contacts.length === 0 && !draft && (
           <p className="py-8 text-center text-sm text-[var(--text-tertiary)]">
             暂无对象，全部按「正式」基线处理
           </p>
@@ -1395,6 +1448,30 @@ function RulesEditor({ scenarios }: { scenarios: ScenarioDto[] }) {
         )}
       </div>
     </section>
+  );
+}
+
+/* ── 消息防护：拦截效果预览 ── */
+
+/** 拦截效果预览：用示例数据渲染一份真实弹窗（AlertCard 同源），纯展示不触发任何动作。
+ *  让用户在设置里就能看到「拦截时会弹出什么」。 */
+function AlertPreviewGroup() {
+  const [contextOpen, setContextOpen] = useState(false);
+  return (
+    <SettingsGroup label="拦截效果预览" icon={Eye}>
+      <div className="px-5 pb-4 pt-1">
+        <p className="mb-3 text-label text-[var(--text-tertiary)]">
+          下面是检测到危险内容时弹出的提示样式（示例，不影响实际设置）。
+        </p>
+        <AlertPreviewFrame>
+          <AlertCard
+            payload={PREVIEW_ALERT}
+            contextOpen={contextOpen}
+            onToggleContext={() => setContextOpen((v) => !v)}
+          />
+        </AlertPreviewFrame>
+      </div>
+    </SettingsGroup>
   );
 }
 

@@ -61,6 +61,11 @@ fn watch_loop(app: AppHandle) {
                 let target_active =
                     Arc::new(move || fg_intercept.target_active())
                         as Arc<dyn Fn() -> bool + Send + Sync>;
+                // fail-closed 闭环（§2.2 修订）：判定入槽后通知 intercept，快速发送吞键场景据此主动弹窗。
+                let vs_intercept = Arc::clone(&state.intercept);
+                let on_verdict_stored = Arc::new(move |v: &dc_pipeline::verdict::Verdict| {
+                    vs_intercept.on_analysis_ready(v)
+                }) as Arc<dyn Fn(&dc_pipeline::verdict::Verdict) + Send + Sync>;
                 match dc_pipeline::guard::Guard::spawn(
                     &state.intercept,
                     Arc::clone(&state.sys),
@@ -68,6 +73,7 @@ fn watch_loop(app: AppHandle) {
                     state.config.snapshot(),
                     hwnd,
                     target_active,
+                    on_verdict_stored,
                 ) {
                     Ok(guard) => {
                         misses = 0;

@@ -103,6 +103,9 @@ where
     /// 心跳 pHash（None = 心跳不做像素比较，直接升级 Slow——测试简化路径）。
     pub heartbeat_probe: Option<HeartbeatProbe>,
     pub last_phash: std::sync::Mutex<Option<u64>>,
+    /// 判定入槽后的回调（fail-closed 闭环）：worker 算完判定后通知 intercept，
+    /// 让「回车吞键后等待判定」的场景在危险时主动弹窗。默认 no-op（测试可注入）。
+    pub on_verdict_stored: Arc<dyn Fn(&Verdict) + Send + Sync>,
 }
 
 /// 一次触发处理的结局（供测试断言与 worker 日志）。
@@ -324,7 +327,10 @@ where
             draft = verdict.draft_text.as_deref().unwrap_or(""),
             "流水线判定已入槽"
         );
-        self.slot
-            .store(verdict.with_epoch(epoch), self.clock.now_ms());
+        let stamped = verdict.with_epoch(epoch);
+        // fail-closed 闭环：先通知 intercept（它据 pending_send_epoch 决定是否主动弹窗），
+        // 再入槽。回调只读原子量 + try_send，无阻塞。
+        (self.on_verdict_stored)(&stamped);
+        self.slot.store(stamped, self.clock.now_ms());
     }
 }

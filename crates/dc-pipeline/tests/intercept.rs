@@ -213,16 +213,21 @@ fn ut_int_03_block_swallows_and_enqueues_alert() {
     assert_eq!(h2.enter(), HookAction::Swallow);
 }
 
-/// UT-INT-04 纪元不等 / 过期 / 无缓存 / 挂起 / 暂停 → 全部 Pass（fail-open 五分支）
+/// UT-INT-04（§2.2 原则 2「宁漏勿阻」）：判定未就绪 / 纪元不等 / 过期 / 挂起 / 暂停 → 全部放行。
+///
+/// fail-open 是基本可用性的前提：打字远快于分析，回车时判定常没跟上；若吞键会把正常消息也堵死
+/// （实测几乎每条都发不出去）。故判定不就绪时放行，但**触发一次即时分析**让判定尽快追上。
 #[test]
 fn ut_int_04_fail_open_branches() {
-    // 1) 无缓存
+    // 1) 无缓存 → 放行 + 触发分析
     let h = Harness::new();
     h.target_foreground();
     let _ = h.press(VK_A);
-    assert_eq!(h.enter(), HookAction::Pass, "无判定 → 放行");
+    let before = h.intercept.triggers().offered();
+    assert_eq!(h.enter(), HookAction::Pass, "无判定 → 放行（宁漏勿阻）");
+    assert!(h.intercept.triggers().offered() > before, "放行同时触发即时分析");
 
-    // 2) 纪元不等：判定基于旧草稿
+    // 2) 纪元不等：判定基于旧草稿 → 放行
     let h = Harness::new();
     h.target_foreground();
     h.publish_with_epoch(Verdict::block("旧判定"), 0);
@@ -230,7 +235,7 @@ fn ut_int_04_fail_open_branches() {
     assert_eq!(h.enter(), HookAction::Pass, "纪元不等 → 放行");
     assert_eq!(h.intercept.state(), GuardState::Active);
 
-    // 3) 判定过期（TTL 默认 2s）
+    // 3) 判定过期（TTL 默认 2s）→ 放行
     let h = Harness::new();
     h.target_foreground();
     let _ = h.press(VK_A);
@@ -238,7 +243,7 @@ fn ut_int_04_fail_open_branches() {
     h.advance(2_001);
     assert_eq!(h.enter(), HookAction::Pass, "超过 TTL → 放行");
 
-    // 4) 挂起（目标切走并去抖确认）
+    // 4) 挂起（目标切走并去抖确认）→ 放行一切（等同未安装）
     let h = Harness::new();
     h.target_foreground();
     let _ = h.press(VK_A);
@@ -358,11 +363,11 @@ fn ut_int_07_ime_composing_passes_and_bumps() {
     assert_eq!(h.intercept.tracker().epoch(), epoch + 2);
     assert_eq!(h.intercept.alerts().shown(), 0, "组合中不得弹窗");
 
-    // 组合结束：判定纪元已落后 → 仍然 fail-open
+    // 组合结束：判定纪元已落后 → fail-open 放行（§2.2 宁漏勿阻）
     h.sys.set_ime_composing(false);
-    assert_eq!(h.enter(), HookAction::Pass);
+    assert_eq!(h.enter(), HookAction::Pass, "组合结束判定未就绪 → 放行");
     h.publish(Verdict::block("命中"));
-    assert_eq!(h.enter(), HookAction::Swallow, "组合结束后恢复守护");
+    assert_eq!(h.enter(), HookAction::Swallow, "组合结束后有新鲜判定 → 恢复拦截");
 }
 
 /// UT-INT-08 alert 入队失败 → 放行（fail-open，绝不静默吞键）
@@ -617,6 +622,65 @@ fn send_key_hot_switch() {
         HookAction::Swallow,
         "切到 Ctrl+Enter 后，Ctrl+Enter 才拦截"
     );
+}
+
+/// UT-INT-11（fail-open）：判定未就绪时回车放行（不吞键）并触发即时分析。
+/// 保证正常消息秒发不被堵（打字快于分析时也能发出去）。
+#[test]
+fn fail_open_pass_when_no_verdict() {
+    let h = Harness::new();
+    h.target_foreground();
+    let _ = h.press(VK_A); // 打字推进纪元、触发快环；不 publish → 槽位空
+
+    let before = h.intercept.triggers().offered();
+    assert_eq!(
+        h.enter(),
+        HookAction::Pass,
+        "判定未就绪时回车放行（fail-open），不能堵住正常消息"
+    );
+    assert!(
+        h.intercept.triggers().offered() > before,
+        "放行同时触发即时分析（让判定尽快追上）"
+    );
+}
+
+/// UT-INT-12：有新鲜安全判定时回车放行（正常发送不误拦）。
+#[test]
+fn safe_verdict_passes() {
+    let h = Harness::new();
+    h.target_foreground();
+    let _ = h.press(VK_A);
+    h.publish(Verdict::safe());
+    assert_eq!(h.enter(), HookAction::Pass, "安全判定 → 放行");
+    assert_eq!(h.intercept.alerts().shown(), 0, "安全不弹窗");
+}
+
+/// UT-INT-14：关闭弹窗后不改内容再发 → 仍拦截（复现「关闭后重发漏拦」）。
+#[test]
+fn close_alert_then_resend_still_blocks() {
+    let h = Harness::new();
+    h.target_foreground();
+    let _ = h.press(VK_A);
+    h.publish(Verdict::block("不合场景"));
+
+    // 第一次回车：拦截弹窗
+    assert_eq!(h.enter(), HookAction::Swallow);
+    assert_eq!(h.intercept.state(), GuardState::Cooldown);
+
+    // 点「关闭」（Cancel）→ 回 Active，判定新鲜度被刷新
+    h.intercept.apply_alert_action(AlertAction::Cancel);
+    assert_eq!(h.intercept.state(), GuardState::Active);
+
+    // 关闭耗时接近 TTL 也不怕：refresh 已重置计时。推进 1.5s（< 2s TTL 但接近）
+    h.advance(1_500);
+    // 不改内容（纪元没变）再按回车 → 仍命中同一危险判定 → 再次弹窗
+    assert_eq!(
+        h.enter(),
+        HookAction::Swallow,
+        "关闭后不改内容再发，必须再次拦截"
+    );
+    assert_eq!(h.intercept.state(), GuardState::Cooldown);
+    assert_eq!(h.intercept.alerts().shown(), 2, "两次拦截各弹一次");
 }
 
 /// 配置 schema 与快照解析一致（防止 schema 里的键名与读取代码漂移）

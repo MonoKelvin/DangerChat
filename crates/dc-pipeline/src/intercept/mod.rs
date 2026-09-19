@@ -195,6 +195,11 @@ pub struct Intercept {
     /// 判定有效期毫秒（热更新；回车裁决读）。
     verdict_ttl_ms: AtomicU64,
     state: AtomicU8,
+    /// 待发纪元（fail-closed，§2.2 修订）：回车时若无新鲜/纪元匹配的判定，
+    /// 吞键并记下这次「等待判定」的草稿纪元；`u64::MAX` = 无待发。
+    /// worker 分析完成后经 `on_analysis_ready` 检查此值：匹配且危险→自动弹窗，
+    /// 匹配且安全→清零（用户再按回车放行）。避免快速发送时判定没跟上导致漏拦。
+    pending_send_epoch: AtomicU64,
     foreground: ForegroundTracker,
     tracker: Arc<DraftTracker>,
     slot: Arc<VerdictSlot>,
@@ -232,6 +237,7 @@ impl Intercept {
             enabled,
             verdict_ttl_ms,
             state: AtomicU8::new(GuardState::Suspended.to_u8()),
+            pending_send_epoch: AtomicU64::new(u64::MAX),
             foreground,
             tracker: Arc::new(tracker),
             slot: Arc::new(VerdictSlot::new()),
@@ -420,20 +426,27 @@ impl Intercept {
             if self.tracker.is_snoozed() {
                 return HookAction::Pass;
             }
-            let Some(verdict) = self.slot.load_fresh(
+            // fail-open（§2.2 原则 2「宁漏勿阻」）：判定没跟上（无新鲜判定 / 纪元落后）时**放行**。
+            // 吞键会把正常消息也堵死（打字远快于分析），破坏基本可用性——实测几乎每条都发不出去。
+            // 仍**触发一次即时分析**：让判定尽快追上，配合「边打字边预分析」缩小漏拦窗口；
+            // 若这条本就危险且用户又发了同样内容，下一次发送/on_analysis_ready 会拦到。
+            let epoch_now = self.tracker.epoch();
+            let fresh = self.slot.load_fresh(
                 Duration::from_millis(self.verdict_ttl_ms.load(Ordering::SeqCst)),
                 now,
-            ) else {
-                // debug 而非 info：这条在每次「打完就回车」的正常场景都会触发，
-                // 而日志写入在钩子线程内是同步 Mutex+文件 IO，info 级会拖慢每次回车（§2.2）。
-                tracing::debug!("fail-open：无新鲜判定");
-                return HookAction::Pass;
+            );
+            let verdict = match fresh {
+                Some(v) if v.draft_epoch == epoch_now => v,
+                _ => {
+                    // 记下待发纪元 + 触发分析：worker 算完若危险，on_analysis_ready 主动弹窗兜底。
+                    self.pending_send_epoch.store(epoch_now, Ordering::SeqCst);
+                    let _ = self.triggers.offer_fast();
+                    tracing::debug!(epoch = epoch_now, "fail-open：判定未就绪，放行并触发分析");
+                    return HookAction::Pass;
+                }
             };
-            if verdict.draft_epoch != self.tracker.epoch() {
-                // 判定对应的草稿已被改动 → 结果失效（§2.2 性质论证）。同上降为 debug。
-                tracing::debug!("fail-open：判定纪元落后于草稿");
-                return HookAction::Pass;
-            }
+            // 本次发送已有就绪判定，裁决它——清掉可能残留的待发标志。
+            self.pending_send_epoch.store(u64::MAX, Ordering::SeqCst);
             match verdict.level {
                 crate::verdict::VerdictLevel::Safe => HookAction::Pass,
                 _ => {
@@ -465,17 +478,19 @@ impl Intercept {
     pub fn on_foreground(&self, info: ForegroundInfo) {
         let now = self.clock.now_ms();
         let is_target = self.matches_target(&info);
+        // 只记录**与守护目标相关**的切换：切入目标 / 从目标切出。
+        // 非目标程序间切换（切浏览器→切编辑器、鼠标聚焦等）不入日志，避免刷屏。
+        let was_target = self.foreground.is_target_foreground();
         self.foreground.note(is_target, now);
         if is_target {
             // 唤醒即时生效：用户切回目标程序后不该还要等去抖窗口
             self.transition(GuardEvent::ForegroundActive, now);
         }
-        tracing::info!(
-            process = %info.process_name,
-            is_target,
-            state = self.state().as_str(),
-            "前台切换"
-        );
+        if is_target && !was_target {
+            tracing::info!(process = %info.process_name, state = self.state().as_str(), "切入守护目标");
+        } else if !is_target && was_target {
+            tracing::info!(process = %info.process_name, state = self.state().as_str(), "切出守护目标");
+        }
     }
 
     /// 前台进程是否为目标程序（仅比较进程名，不做任何进程内部探测，C-05/C-06）。
@@ -488,12 +503,27 @@ impl Intercept {
         !target.is_empty() && info.process_name.eq_ignore_ascii_case(&target)
     }
 
+    /// worker 分析完成回调（在 pipeline-worker 线程调用）。
+    ///
+    /// fail-open 语义下（§2.2 原则 2）：回车判定没跟上时已放行，消息已发出——
+    /// 事后再弹窗会误导（消息其实已发送）。因此本回调**不主动弹窗**，只清理待发标志。
+    /// 保留 hook 是为将来可能的「发送后温和提醒」预留位；当前仅做状态清理，行为纯 fail-open。
+    pub fn on_analysis_ready(&self, verdict: &Verdict) {
+        let pending = self.pending_send_epoch.load(Ordering::SeqCst);
+        if pending != u64::MAX && verdict.draft_epoch == pending {
+            self.pending_send_epoch.store(u64::MAX, Ordering::SeqCst);
+        }
+    }
+
     /// 应用弹窗动作（dc-alert → dc-bridge → 这里）。
     pub fn apply_alert_action(&self, action: AlertAction) {
         let now = self.clock.now_ms();
         match action {
             AlertAction::Cancel => {
                 self.transition(GuardEvent::AlertResolved, now);
+                // 关闭≠改稿：内容没变（纪元没变），刷新判定新鲜度让 TTL 重新计时，
+                // 下次回车仍命中同一危险判定→再次弹窗（符合「关闭=下次还拦」）。
+                self.slot.refresh(now);
             }
             AlertAction::Snooze => {
                 self.tracker.snooze_current();

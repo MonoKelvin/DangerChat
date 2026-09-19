@@ -80,6 +80,12 @@ impl ForegroundTracker {
         self.debounce_ms.load(Ordering::Relaxed)
     }
 
+    /// 上一次前台事件是否为目标程序（`note` 记录的原始标志）。
+    /// 用于「仅在目标切入/切出时记日志」——避免非目标程序间切换刷屏。
+    pub fn is_target_foreground(&self) -> bool {
+        self.is_target.load(Ordering::SeqCst)
+    }
+
     /// 热更新去抖窗口（`set_config` → 即时生效）。
     ///
     /// 只影响**后续**的挂起计划：已排定的 `suspend_at_ms` 不重算——它记录的是

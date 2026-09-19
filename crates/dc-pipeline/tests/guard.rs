@@ -114,6 +114,7 @@ fn fixture() -> Fixture {
         ctx_factory,
         heartbeat_probe: None,
         last_phash: std::sync::Mutex::new(None),
+        on_verdict_stored: std::sync::Arc::new(|_| {}),
     };
     Fixture {
         capture,
@@ -289,6 +290,7 @@ fn ut_grd_06_heartbeat_phash() {
         ctx_factory: f.core.ctx_factory.clone(),
         heartbeat_probe: Some(Arc::new(move |_snap, _layout| *cell.lock().unwrap())),
         last_phash: std::sync::Mutex::new(None),
+        on_verdict_stored: std::sync::Arc::new(|_| {}),
     };
 
     // 预热：Slow 一轮填 layout_cache
