@@ -9,6 +9,8 @@
     "url": "git+https://github.com/MonoKelvin/DangerChat.git"
   },
   "scripts": {
+    "postinstall": "node tools/fetch_models.mjs",
+    "fetch-models": "node tools/fetch_models.mjs",
     "tauri": "tauri",
     "dev": "tauri dev",
     "dev:uitag": "pnpm -F uitag exec tauri dev",

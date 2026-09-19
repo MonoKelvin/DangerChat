@@ -28,8 +28,6 @@ Thumbs.db
 .claude/
 .workbuddy/
 
-# Spike 用的测试模型（按 README 里的命令抓取，不入库二进制）
-spikes/**/models/
 
 # Projcet files
 resources/training_set/wechat_snapcaptures/

@@ -11,7 +11,7 @@
   · 用同一套带标注样本，分别给 fp32 / int8 求最优阈值与准确率；再看「沿用 fp32 阈值」时 int8 的表现
 
 用法：
-    python tools/training/calibrate_sem.py spikes/m3-inference/models/bge
+    python tools/training/calibrate_sem.py resources/models/bge-large
 """
 
 from __future__ import annotations
@@ -146,7 +146,7 @@ def loo_probe(x: np.ndarray, y: np.ndarray, l2: float = 0.5, epochs: int = 800, 
 
 
 def main() -> int:
-    model_dir = Path(sys.argv[1] if len(sys.argv) > 1 else "spikes/m3-inference/models/bge")
+    model_dir = Path(sys.argv[1] if len(sys.argv) > 1 else "resources/models/bge-large")
     tok = Tokenizer.from_file(str(model_dir / "tokenizer.json"))
     drafts = [s[0] for s in SAMPLES]
     labels = np.array([s[1] for s in SAMPLES])

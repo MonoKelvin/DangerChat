@@ -51,7 +51,7 @@ src-tauri (dangerchat 主程序壳：bootstrap 装配 / 托盘 / 窗口状态 / 
 
 - `apps/main`：主界面（React 19 + zustand + Tailwind 4，设置/弹窗/通知）。
 - `apps/uitag`：打标记工具（独立 Tauri app，产出 tags.json）。
-- `spikes/m3-inference`、`tools/redline_scan`、`tools/training`：实验/离线工具，不进发布物。
+- `tools/redline_scan`（合规红线静态扫描，AC-04 门禁）、`tools/training`（离线训练脚本）：不进发布物。
 
 ### 关键技术约束（写代码前必知）
 

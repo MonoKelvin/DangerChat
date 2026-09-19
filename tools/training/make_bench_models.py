@@ -3,7 +3,8 @@
 为什么要代理模型：M3 需要「双端耗时」数据来决定设备策略（CPU / DirectML），但真实权重
 要到 M4（YOLO 需 dc_uitag 标注后训练、OCR 取官方预训练、语义模型取 HF int8）才到位。
 先用**同算量同算子类别**的代理模型把设备交叉点测出来，M4 再用真实模型复测。
-代理模型只进 spikes/，不属于发布物。
+代理模型是 M3 期的一次性基准物，不属于发布物（spikes 目录已随 M3 结束移除，
+默认输出目录改为 target/bench-models，不再入库）。
 
 用法：
     python tools/training/make_bench_models.py <out_dir>
@@ -163,7 +164,7 @@ def yolo_test_stub(path: Path, mode: str, side: int = 320, classes: int = 4) -> 
 
 
 def main() -> int:
-    out = Path(sys.argv[1] if len(sys.argv) > 1 else "spikes/m3-inference/models")
+    out = Path(sys.argv[1] if len(sys.argv) > 1 else "target/bench-models")
     out.mkdir(parents=True, exist_ok=True)
 
     # YOLOv8n@640 约 8.7 GFLOPs：下面这条链约 10.6 GFLOPs，量级一致
