@@ -910,6 +910,7 @@ pub struct MigrateReport {
 fn is_builtin_model_dir(name: &std::ffi::OsStr) -> bool {
     let n = name.to_string_lossy();
     n == "bge"
+        || n == "bge-large"
         || n.starts_with("ocr-")
         || (n.starts_with("dc-layout-") && !n.starts_with("dc-layout-user"))
 }

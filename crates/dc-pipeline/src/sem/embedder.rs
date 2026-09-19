@@ -12,8 +12,9 @@ use tokenizers::Tokenizer;
 
 use crate::contract::StageError;
 
-/// 嵌入维度（bge-small-zh）。
-pub const EMBED_DIM: usize = 512;
+/// 嵌入维度（bge-large-zh：1024）。编码器换档后由此常量统一传播到
+/// head 权重维度校验与双塔特征装配（sem/head.rs、sem/mod.rs 均引用本常量）。
+pub const EMBED_DIM: usize = 1024;
 /// token 上限（草稿文本按 128 截断，M3 实测该长度 CPU 9.1ms）。
 const MAX_SEQ: usize = 128;
 
@@ -44,6 +45,15 @@ impl Embedder {
         let builder = builder
             .with_execution_providers([ort::ep::CPU::default().build()])
             .map_err(|e| format!("EP 配置失败：{e}"))?;
+        // 低内存配置（bge-large int8 权重 311MB，目标：运行时不常驻大块 RSS）：
+        // 1) device_allocated_initializers：初始化权重不被 arena 额外复制一份，单副本驻留；
+        // 2) 关闭 mem_pattern：动态序列长度下预规划分配无收益，反而预留冗余内存；
+        // 3) 关闭 intra_op 线程 busy-spin：空闲不空转，贴合「无感知」CPU 目标。
+        let builder = builder
+            .with_device_allocated_initializers()
+            .and_then(|b| b.with_memory_pattern(false))
+            .and_then(|b| b.with_intra_op_spinning(false))
+            .map_err(|e| format!("内存配置失败：{e}"))?;
         let session = builder
             .with_intra_threads(2)
             .map_err(|e| format!("设置 intra 线程失败：{e}"))?

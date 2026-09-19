@@ -41,6 +41,10 @@ resources/training_set/*.zip
 crates/dc-pipeline/tests/fixtures/golden/*.png
 crates/dc-pipeline/tests/fixtures/golden/*.json
 
-# 训练用的原始权重与数据集（成品 ONNX 已随 models/ 入库，各目录附 LICENSE）
+# 训练用的原始权重与数据集（各目录附 LICENSE）
 models/dc-layout-wechat/best.pt
 weights/
+
+# bge-large 语义模型权重 311MB，超 GitHub 100MB 单文件限制，不入库。
+# 克隆后按 resources/models/README.md 手动下载到 resources/models/bge-large/。
+resources/models/bge-large/model_quantized.onnx

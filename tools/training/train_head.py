@@ -45,7 +45,7 @@ from tokenizers import Tokenizer
 THRESHOLD_FORMAL = 0.55
 THRESHOLD_CASUAL = 0.45
 BLOCK_MARGIN = 0.25   # 仅用于打印 Block 线；实际扣分在 verdict.rs::from_score
-EMBED_DIM = 512          # 单塔维度（= embedder.rs::EMBED_DIM）
+EMBED_DIM = 1024         # 单塔维度（= embedder.rs::EMBED_DIM，bge-large-zh）
 FEATURE_DIM = 4 * EMBED_DIM   # 草稿塔 ⊕ 对象塔 ⊕ 逐元素积 ⊕ 差（含交互项）
 
 # 语料允许的判定基线（= 训练出的两个头）
@@ -133,10 +133,16 @@ def load_corpus(corpus_dir: Path) -> dict[str, tuple[list[str], list[str], np.nd
 
 def fit_logreg(x: np.ndarray, y: np.ndarray, l2: float = 0.5,
                epochs: int = 2000, lr: float = 0.5) -> tuple[np.ndarray, float]:
-    """纯 numpy 逻辑回归（与 calibrate_sem.loo_probe 同内核）。返回 (w, b)。"""
+    """纯 numpy 逻辑回归（与 calibrate_sem.loo_probe 同内核）。返回 (w, b)。
+
+    全程 float32：4096 维特征 × 近千样本，float64 会让每轮 `x @ w` 把整个矩阵
+    上采样为 float64（翻倍内存 + 碎片），在 311MB ONNX arena 之上易触发 OOM。
+    """
     n, dim = x.shape
-    w = np.zeros(dim)
-    b = 0.0
+    x = np.ascontiguousarray(x, dtype=np.float32)
+    y = y.astype(np.float32)
+    w = np.zeros(dim, dtype=np.float32)
+    b = np.float32(0.0)
     for _ in range(epochs):
         z = x @ w + b
         pr = 1.0 / (1.0 + np.exp(-z))
@@ -205,7 +211,7 @@ def suggest_threshold(scores: np.ndarray, y: np.ndarray) -> tuple[float, float]:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model-dir", default=str(REPO_ROOT / "resources/models/bge"))
+    ap.add_argument("--model-dir", default=str(REPO_ROOT / "resources/models/bge-large"))
     ap.add_argument("--corpus", default=str(REPO_ROOT / "resources/training_set/conversation"))
     ap.add_argument("--dry-run", action="store_true", help="只训练打印，不写 head 文件")
     ap.add_argument("--no-loo", action="store_true", help="跳过 LOO 交叉验证（语料增大后耗时线性上升）")
@@ -260,12 +266,15 @@ def main() -> int:
 
         if not args.dry_run:
             head_path = model_dir / head_file
-            existing = json.loads(head_path.read_text(encoding="utf-8"))
-            # dim=2048（4×512）→ 运行时启用 草稿⊕对象⊕积⊕差（sem/head.rs 接受 512/1024/2048）
+            # 已有 head 文件则保留其 templates（兜底相似度锚点）；首次训练无文件则新建。
+            if head_path.exists():
+                existing = json.loads(head_path.read_text(encoding="utf-8"))
+            else:
+                existing = {"templates": []}
+            # dim=4096（4×1024）→ 运行时启用 草稿⊕对象⊕积⊕差（sem/head.rs 接受 1×/2×/4×）
             existing["dim"] = FEATURE_DIM
             existing["weights"] = [float(v) for v in w]
             existing["bias"] = float(b)
-            # 保留 templates（兜底仍可用）
             head_path.write_text(
                 json.dumps(existing, ensure_ascii=False, indent=2),
                 encoding="utf-8",

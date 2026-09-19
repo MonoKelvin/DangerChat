@@ -211,7 +211,7 @@ fn ut_sem_08_missing_head_degrades_not_errors() {
 fn real_bge_embedding() {
     let dir = std::path::Path::new(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../resources/models/bge"
+        "/../../resources/models/bge-large"
     ));
     let emb = dc_pipeline::sem::embedder::Embedder::load(dir).expect("BGE 加载失败");
 
@@ -245,7 +245,7 @@ fn real_heads_two_tower_scoring() {
 
     let dir = std::path::Path::new(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../resources/models/bge"
+        "/../../resources/models/bge-large"
     ));
     let emb = dc_pipeline::sem::embedder::Embedder::load(dir).expect("BGE 加载失败");
     let heads = Heads::load(dir);

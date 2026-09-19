@@ -1,4 +1,0 @@
-kind = "sem"
-file = "model_quantized.onnx"
-version = "bge-small-zh-v1.5-int8"
-note = "BGE 中文语义向量模型，int8 量化（Xenova 转换版）；tokenizer.json 同目录"

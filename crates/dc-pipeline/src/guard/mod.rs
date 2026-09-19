@@ -55,6 +55,9 @@ impl Guard {
         mctx_factory: impl Fn() -> dc_core::ModuleContext + Send + Sync + 'static,
         config: Arc<dc_core::ConfigSnapshot>,
         target_hwnd: Hwnd,
+        // 目标是否前台（挂起态卸载判据，§2.4）。由调用方从 Arc<Intercept> 构造：
+        // { let i = intercept.clone(); move || i.target_active() }
+        target_active: Arc<dyn Fn() -> bool + Send + Sync>,
     ) -> Result<Self, String> {
         let capture = Arc::new(crate::capture::CaptureStage::new(sys));
         let mctx = mctx_factory();
@@ -119,6 +122,7 @@ impl Guard {
             worker_cancel.clone(),
             HEARTBEAT,
             target_hwnd,
+            target_active,
         )?;
 
         Ok(Self {
@@ -193,12 +197,15 @@ fn spawn_worker(
     cancel: crate::contract::CancellationToken,
     heartbeat: Duration,
     target_hwnd: Hwnd,
+    target_active: Arc<dyn Fn() -> bool + Send + Sync>,
 ) -> Result<std::thread::JoinHandle<()>, String> {
     std::thread::Builder::new()
         .name("pipeline-worker".into())
         .spawn(move || {
             let mut pending = Pending::default();
             let mut next_heartbeat = std::time::Instant::now() + heartbeat;
+            // 挂起态卸载（§2.4）：记录上一轮前台态，仅在跳变时装/卸模型（避免每轮 IO）。
+            let mut was_active = true;
             loop {
                 if cancel.is_cancelled() {
                     break;
@@ -217,6 +224,17 @@ fn spawn_worker(
                     }
                     if t == Trigger::Heartbeat {
                         next_heartbeat = std::time::Instant::now() + heartbeat;
+                        // 心跳兼作前台态巡检：离开前台 → 卸载大模型释放内存；
+                        // 回到前台 → 重载（~600ms，重载完成前该轮 fail-open）。
+                        let active = target_active();
+                        if active != was_active {
+                            if active {
+                                core.sem.ensure_loaded();
+                            } else {
+                                core.sem.unload_model();
+                            }
+                            was_active = active;
+                        }
                     }
                     let request = crate::capture::CaptureRequest { hwnd: target_hwnd };
                     let outcome = core.run_trigger(t, request);

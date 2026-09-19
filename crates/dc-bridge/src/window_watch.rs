@@ -56,12 +56,18 @@ fn watch_loop(app: AppHandle) {
             (false, Some(hwnd)) if notice_agreed => {
                 // 发现 → spawn Guard（此线程唯一写者）
                 let ctx_state = Arc::clone(&state);
+                // 挂起态卸载判据（§2.4）：worker 巡检目标是否前台。
+                let fg_intercept = Arc::clone(&state.intercept);
+                let target_active =
+                    Arc::new(move || fg_intercept.target_active())
+                        as Arc<dyn Fn() -> bool + Send + Sync>;
                 match dc_pipeline::guard::Guard::spawn(
                     &state.intercept,
                     Arc::clone(&state.sys),
                     move || module_ctx(&ctx_state),
                     state.config.snapshot(),
                     hwnd,
+                    target_active,
                 ) {
                     Ok(guard) => {
                         misses = 0;

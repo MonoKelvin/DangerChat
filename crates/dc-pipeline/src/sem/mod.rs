@@ -129,8 +129,14 @@ pub struct SemStage {
     contacts: RwLock<ContactBook>,
     /// 场景表（id/名称/基线；L1 过滤键与 L2 基线折算的唯一来源）
     scenarios: RwLock<ScenarioManager>,
-    /// L2 三件：None = 未加载（fail-open 仅 L1）。
-    embedder: Option<embedder::Embedder>,
+    /// L2 编码器：None = 未加载（fail-open 仅 L1）。
+    /// 用 RwLock 而非裸 Option：挂起态（目标非前台）由 worker 线程 `unload_model`
+    /// 释放 bge-large 的 ~350MB 会话内存，回到前台再 `ensure_loaded` 重载
+    /// （§2.4 挂起卸载；bge-large 常驻内存与「内存极低」目标冲突，靠按需装卸解决）。
+    embedder: RwLock<Option<embedder::Embedder>>,
+    /// 已解析的模型目录（init 时确定；卸载后重载的依据）。
+    model_dir: RwLock<Option<std::path::PathBuf>>,
+    /// 头权重：小（每头几十 KB），常驻，不随挂起卸载。
     heads: head::Heads,
     l2_enabled: bool,
     threshold_formal: f32,
@@ -153,7 +159,8 @@ impl SemStage {
             })),
             contacts: RwLock::new(ContactBook::default()),
             scenarios: RwLock::new(ScenarioManager::builtin_only()),
-            embedder: None,
+            embedder: RwLock::new(None),
+            model_dir: RwLock::new(None),
             heads: head::Heads::fallback_only(),
             l2_enabled: false,
             threshold_formal: THRESHOLD_FORMAL,
@@ -168,7 +175,8 @@ impl SemStage {
             rules: RwLock::new(rules),
             contacts: RwLock::new(contacts),
             scenarios: RwLock::new(ScenarioManager::builtin_only()),
-            embedder: None,
+            embedder: RwLock::new(None),
+            model_dir: RwLock::new(None),
             heads: head::Heads::fallback_only(),
             l2_enabled: false,
             threshold_formal: THRESHOLD_FORMAL,
@@ -254,8 +262,13 @@ impl SemStage {
             return Verdict::safe();
         }
 
-        // L2（可开关；Embedder 缺失 = fail-open 仅 L1）
-        if self.l2_enabled && self.embedder.is_some() {
+        // L2（可开关；Embedder 缺失/已卸载 = fail-open 仅 L1）
+        let embedder_loaded = self
+            .embedder
+            .read()
+            .map(|e| e.is_some())
+            .unwrap_or(false);
+        if self.l2_enabled && embedder_loaded {
             // 上下文与对象各成一个特征塔（对象塔仅在 1024 维头下参与拼接，
             // 详见 draft_embed_text / object_embed_text 的文档注释与实测对比）。
             let draft_text = draft_embed_text(input.chat_context.as_deref(), draft);
@@ -292,7 +305,8 @@ impl SemStage {
     /// 特征按 head 维度装配（见 [`assemble_features`]）；维度不符由 head 侧守卫拒绝。
     /// 旧 head 文件（512/1024）无需重训即可继续工作，重训产出 2048 维头才启用交互项。
     fn l2_score(&self, draft_text: &str, object_text: &str, base: Profile) -> Option<f32> {
-        let embedder = self.embedder.as_ref()?;
+        let guard = self.embedder.read().ok()?;
+        let embedder = guard.as_ref()?;
         let draft = embedder.embed(draft_text).ok()?;
         let dim = self.heads.feature_dim(base);
         if dim == embedder::EMBED_DIM {
@@ -301,6 +315,41 @@ impl SemStage {
         let object = embedder.embed(object_text).ok()?;
         self.heads
             .score(&assemble_features(&draft, &object, dim), base)
+    }
+
+    /// 挂起态卸载（§2.4）：目标程序离开前台时释放 bge-large 会话内存（~350MB）。
+    /// heads（小）与配置保留，回到前台经 [`ensure_loaded`] 重载（~600ms）。
+    /// 幂等：已卸载再调无副作用。仅在 l2_enabled 且已加载过时打印日志。
+    pub fn unload_model(&self) {
+        if let Ok(mut w) = self.embedder.write() {
+            if w.take().is_some() {
+                tracing::info!("sem 挂起：已卸载语义模型，释放会话内存");
+            }
+        }
+    }
+
+    /// 回前台重载（§2.4）：挂起卸载后目标重新前台时调用。
+    /// 幂等：已加载直接返回。重载失败 → 保持 None（fail-open 仅 L1）。
+    pub fn ensure_loaded(&self) {
+        if !self.l2_enabled {
+            return;
+        }
+        if self.embedder.read().map(|e| e.is_some()).unwrap_or(true) {
+            return; // 已加载，或锁中毒（不冒进重载）
+        }
+        let dir = match self.model_dir.read().ok().and_then(|d| d.clone()) {
+            Some(d) => d,
+            None => return,
+        };
+        match embedder::Embedder::load(&dir) {
+            Ok(emb) => {
+                if let Ok(mut w) = self.embedder.write() {
+                    *w = Some(emb);
+                    tracing::info!("sem 唤醒：语义模型已重载");
+                }
+            }
+            Err(e) => tracing::warn!(error = %e, "sem 唤醒重载失败，本轮仅 L1（fail-open）"),
+        }
     }
 
     fn run(&self, input: OcrResult, ctx: &PipelineContext) -> Result<Verdict, StageError> {
@@ -428,17 +477,22 @@ impl Module for SemStage {
                 .f64_or("sem.threshold.casual", THRESHOLD_CASUAL as f64) as f32;
 
         if self.l2_enabled {
-            // bge 是内置模型（随安装包 resources/models/）：按名解析，
+            // bge-large 是内置模型（随安装包 resources/models/）：按名解析，
             // 用户层存在优先（允许用户覆盖），否则用内置层。
             let result = mctx
                 .models
-                .resolve_dir("bge")
-                .ok_or_else(|| "bge 模型目录不存在（内置层与用户层均未找到）".to_string())
+                .resolve_dir("bge-large")
+                .ok_or_else(|| "bge-large 模型目录不存在（内置层与用户层均未找到）".to_string())
                 .and_then(|dir| embedder::Embedder::load(&dir).map(|emb| (dir, emb)));
             match result {
                 Ok((dir, emb)) => {
                     self.heads = head::Heads::load(&dir);
-                    self.embedder = Some(emb);
+                    if let Ok(mut w) = self.model_dir.write() {
+                        *w = Some(dir); // 记录目录：挂起卸载后 ensure_loaded 据此重载
+                    }
+                    if let Ok(mut w) = self.embedder.write() {
+                        *w = Some(emb);
+                    }
                     tracing::info!(
                         heads = self.heads.describe(),
                         "sem L2 已加载（ADR-14 嵌入+线性头）"
@@ -455,7 +509,9 @@ impl Module for SemStage {
     }
 
     fn shutdown(&mut self) -> Result<(), ModuleError> {
-        self.embedder = None;
+        if let Ok(mut w) = self.embedder.write() {
+            *w = None;
+        }
         Ok(())
     }
 
