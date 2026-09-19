@@ -1,5 +1,5 @@
 import { type ReactNode } from 'react';
-import { RotateCcw } from 'lucide-react';
+import { RotateCcw, type LucideIcon } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 /**
@@ -12,11 +12,21 @@ export function SettingsSection({ children }: { children: ReactNode }) {
   return <div className="space-y-4">{children}</div>;
 }
 
-export function SettingsGroup({ label, children }: { label?: string; children: ReactNode }) {
+export function SettingsGroup({
+  label,
+  icon: Icon,
+  children,
+}: {
+  label?: string;
+  /** 分组标题图标（lucide 组件）：与标题同行显示，主色描边。 */
+  icon?: LucideIcon;
+  children: ReactNode;
+}) {
   return (
     <section className="overflow-hidden rounded-2xl bg-[var(--group-bg)]">
       {label && (
-        <h3 className="px-5 pt-4 pb-1 text-label font-semibold text-[var(--text-secondary)]">
+        <h3 className="flex items-center gap-2 px-5 pt-4 pb-1.5 text-item font-semibold text-[var(--text-primary)]">
+          {Icon && <Icon className="size-4 shrink-0 text-[var(--brand)]" strokeWidth={2.2} />}
           {label}
         </h3>
       )}

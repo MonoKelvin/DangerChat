@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
-import { Shield, ShieldAlert, ShieldOff, Plus, Trash2, Pencil, FolderOpen, FolderCog, Loader2, Moon, Sun, Monitor, GraduationCap } from 'lucide-react';
+import { Shield, ShieldAlert, ShieldOff, Plus, Trash2, Pencil, FolderOpen, FolderCog, Loader2, Moon, Sun, Monitor, GraduationCap, SlidersHorizontal, MessageSquareWarning, Layers, Info, Palette, MonitorCog, ShieldCheck, ScanText, Users, BookText, Cpu, ScrollText, FileText, AlertTriangle, Code2, type LucideIcon } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { ConfigFieldDto, ContactDto, ModelDto, RuleDto, ScenarioDto, StatusPayload } from '../lib/types';
 import * as api from '../lib/commands';
@@ -34,6 +34,58 @@ import {
 const CATEGORY_ORDER = ['通用', '消息防护', '场景管理', '高级设置', '关于'] as const;
 type Category = (typeof CATEGORY_ORDER)[number];
 
+/** 分类导航图标（左侧列表每项前置）。 */
+const CATEGORY_ICON: Record<Category, LucideIcon> = {
+  通用: SlidersHorizontal,
+  消息防护: MessageSquareWarning,
+  场景管理: Layers,
+  高级设置: Cpu,
+  关于: Info,
+};
+
+/** 分组标题图标（右侧各分组卡片标题前置；键为分组 label）。 */
+const GROUP_ICON: Record<string, LucideIcon> = {
+  外观: Palette,
+  系统: MonitorCog,
+  目标程序: Shield,
+  拦截行为: ShieldCheck,
+  语义判定: MessageSquareWarning,
+  聊天对象画像: Users,
+  拦截引擎: Cpu,
+  区域识别: ScanText,
+  文字识别: ScanText,
+  诊断: ScrollText,
+  日志: ScrollText,
+  场景: Layers,
+  词库: BookText,
+  简介: FileText,
+  风险提示: AlertTriangle,
+  开源信息: Code2,
+};
+
+/** 页面大标题（图标 + 文字）：右侧各分类顶部标题统一样式。 */
+function PageTitle({
+  icon: Icon,
+  className,
+  children,
+}: {
+  icon: LucideIcon;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <h2
+      className={cn(
+        'flex items-center gap-2.5 text-xl font-semibold tracking-tight text-[var(--text-primary)]',
+        className,
+      )}
+    >
+      <Icon className="size-5 shrink-0 text-[var(--brand)]" strokeWidth={2.2} />
+      {children}
+    </h2>
+  );
+}
+
 /** 技术参数键（判定有效期/防抖等一般人无需关心的）→ 高级设置 */
 const ADVANCED_KEYS = new Set([
   'guard.verdict_ttl_ms',
@@ -58,12 +110,15 @@ const WECHAT_GROUPS: { title: string; keys: string[] }[] = [
     title: '拦截行为',
     keys: ['guard.enabled', 'guard.send_key', 'alert.timeout_secs', 'alert.shake'],
   },
-  { title: '语义判定', keys: ['sem.l2_enabled', 'sem.threshold.formal', 'sem.threshold.casual'] },
 ];
 
 /** 高级设置的分组顺序与标题 */
 const ADVANCED_GROUPS: { title: string; keys: string[] }[] = [
   { title: '拦截引擎', keys: [...ADVANCED_KEYS] },
+  {
+    title: '语义判定',
+    keys: ['sem.model', 'sem.l2_enabled', 'sem.threshold.formal', 'sem.threshold.casual'],
+  },
   { title: '区域识别', keys: ['layout.model', 'layout.conf_threshold', 'layout.nms_iou'] },
   { title: '文字识别', keys: ['ocr.upscale', 'ocr.min_conf', 'ocr.noise_words'] },
   { title: '诊断', keys: ['debug.save_images', 'debug.image_dirs_limit'] },
@@ -129,27 +184,31 @@ export function SettingsRoot() {
             ? '挂起'
             : '冷却';
 
-  /** logo 动态变色：主题色态用真 HSL 着色（logoSrc，保饱和度），灰阶态叠 CSS 滤镜。
-   *  守护中 = 主题色；挂起 = 浅灰；暂停(禁用) = 深灰；未发现目标 = 去饱和。 */
+  /** logo 动态变色：logoSrc 已是主题色着色图；状态只叠**明暗**滤镜（不降饱和）。
+   *  守护中 = 主题色本色；等待目标 = 略暗；挂起/冷却 = 压暗；暂停(禁用) = 最暗。
+   *  为何压暗而非降饱和：去饱和后接近白/灰，与浅色背景难以区分（用户反馈）。 */
   const [accentHue, setAccentHue] = useState(() => getAccent().hue);
+  const [accentSat, setAccentSat] = useState(() => getAccent().sat);
   useEffect(() => {
-    const on = (e: Event) => setAccentHue((e as CustomEvent<{ hue: number }>).detail.hue);
+    const on = (e: Event) => {
+      const a = (e as CustomEvent<{ hue: number; sat: number }>).detail;
+      setAccentHue(a.hue);
+      setAccentSat(a.sat);
+    };
     window.addEventListener('main:accent', on);
     return () => window.removeEventListener('main:accent', on);
   }, []);
-  const logoSrc = useTintedLogo(accentHue);
+  const logoSrc = useTintedLogo(accentHue, accentSat);
   const logoFilter =
     status == null
-      ? 'saturate(0.12)'
+      ? 'brightness(0.6)'
       : status.state === 'active'
         ? status.target_found
           ? undefined
-          : 'saturate(0.12)'
+          : 'brightness(0.8)'
         : status.state === 'paused'
-          ? 'saturate(0.06) brightness(0.65)'
-          : status.state === 'suspended'
-            ? 'saturate(0.1) brightness(1.45)'
-            : 'saturate(0.1) brightness(1.45)';
+          ? 'brightness(0.45)'
+          : 'brightness(0.6)';
 
   /** 渲染一组 schema 字段（目标程序/区域模型特殊渲染为自定义行） */
   const renderField = (key: string) => {
@@ -168,6 +227,17 @@ export function SettingsRoot() {
       const def = String(byKey.get(key)?.default ?? 'dc-layout-wechat');
       return (
         <LayoutModelRow
+          key={key}
+          value={String(values[key] ?? def)}
+          defaultValue={def}
+          onChange={(v) => change(key, v)}
+        />
+      );
+    }
+    if (key === 'sem.model') {
+      const def = String(byKey.get(key)?.default ?? 'bge-large');
+      return (
+        <SemModelRow
           key={key}
           value={String(values[key] ?? def)}
           defaultValue={def}
@@ -208,30 +278,34 @@ export function SettingsRoot() {
         </div>
 
         <div className="space-y-1.5">
-          {CATEGORY_ORDER.map((c) => (
-            <button
-              key={c}
-              onClick={() => setActive(c)}
-              className={cn(
-                'w-full rounded-lg px-3 py-2.5 text-left text-sm font-medium transition-all duration-150',
-                active === c
-                  ? 'bg-[var(--brand)] text-[var(--brand-text)] shadow-[var(--shadow-sm)]'
-                  : 'text-[var(--text-secondary)] hover:bg-[var(--hover-overlay)] hover:text-[var(--text-primary)]',
-              )}
-            >
-              {c}
-            </button>
-          ))}
+          {CATEGORY_ORDER.map((c) => {
+            const Icon = CATEGORY_ICON[c];
+            return (
+              <button
+                key={c}
+                onClick={() => setActive(c)}
+                className={cn(
+                  'flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm font-semibold transition-all duration-150',
+                  active === c
+                    ? 'bg-[var(--brand)] text-[var(--brand-text)] shadow-[var(--shadow-sm)]'
+                    : 'text-[var(--text-secondary)] hover:bg-[var(--hover-overlay)] hover:text-[var(--text-primary)]',
+                )}
+              >
+                <Icon className="size-4 shrink-0" strokeWidth={2.2} />
+                {c}
+              </button>
+            );
+          })}
         </div>
 
         {stats && (
-          <div className="mt-auto rounded-xl bg-[var(--group-bg)] px-4 py-3">
-            <div className="flex items-baseline gap-1.5">
-              <span className="text-xs text-[var(--text-tertiary)]">今日拦截</span>
-              <strong className="text-lg font-semibold tabular-nums tracking-tight text-[var(--brand)]">
+          <div className="mt-auto mb-2 mx-1 rounded-xl bg-[var(--group-bg)] px-5 py-4">
+            <div className="flex items-baseline justify-center gap-1.5 text-sm">
+              <span className="text-[var(--text-tertiary)]">今日拦截</span>
+              <strong className="font-semibold tabular-nums tracking-tight text-[var(--brand)]">
                 {stats.today_blocked}
               </strong>
-              <span className="text-xs text-[var(--text-tertiary)]">次</span>
+              <span className="text-[var(--text-tertiary)]">次</span>
             </div>
           </div>
         )}
@@ -242,16 +316,10 @@ export function SettingsRoot() {
         {active === '通用' && <GeneralPage />}
         {active === '消息防护' && (
           <div className="mx-auto max-w-2xl">
-            <h2 className="mb-5 text-xl font-semibold tracking-tight text-[var(--text-primary)]">消息防护</h2>
+            <PageTitle icon={CATEGORY_ICON['消息防护']} className="mb-5">消息防护</PageTitle>
             <SettingsSection>
-              {WECHAT_GROUPS.slice(0, 2).map((g) => (
-                <SettingsGroup key={g.title} label={g.title}>
-                  {g.keys.map(renderField)}
-                </SettingsGroup>
-              ))}
-              <ContactsGroup />
-              {WECHAT_GROUPS.slice(2).map((g) => (
-                <SettingsGroup key={g.title} label={g.title}>
+              {WECHAT_GROUPS.map((g) => (
+                <SettingsGroup key={g.title} label={g.title} icon={GROUP_ICON[g.title]}>
                   {g.keys.map(renderField)}
                 </SettingsGroup>
               ))}
@@ -261,17 +329,16 @@ export function SettingsRoot() {
         {active === '场景管理' && <ScenariosPage />}
         {active === '高级设置' && (
           <div className="mx-auto max-w-2xl">
-            <h2 className="mb-1 text-xl font-semibold tracking-tight text-[var(--text-primary)]">高级设置</h2>
+            <PageTitle icon={CATEGORY_ICON['高级设置']} className="mb-1">高级设置</PageTitle>
             <p className="mb-5 text-label text-[var(--text-tertiary)]">
               面向开发与调试的技术参数，日常使用无需调整。
             </p>
             <SettingsSection>
               {ADVANCED_GROUPS.map((g) => (
-                <SettingsGroup key={g.title} label={g.title}>
+                <SettingsGroup key={g.title} label={g.title} icon={GROUP_ICON[g.title]}>
                   {g.keys.map(renderField)}
                 </SettingsGroup>
               ))}
-              <LogsGroup />
             </SettingsSection>
           </div>
         )}
@@ -286,13 +353,14 @@ export function SettingsRoot() {
 function GeneralPage() {
   return (
     <div className="mx-auto max-w-2xl">
-      <h2 className="mb-5 text-xl font-semibold tracking-tight text-[var(--text-primary)]">通用</h2>
+      <PageTitle icon={CATEGORY_ICON['通用']} className="mb-5">通用</PageTitle>
       <SettingsSection>
         <AppearanceGroup />
-        <SettingsGroup label="系统">
+        <SettingsGroup label="系统" icon={GROUP_ICON['系统']}>
           <AutostartRow />
           <DataDirRow />
         </SettingsGroup>
+        <LogsGroup />
       </SettingsSection>
     </div>
   );
@@ -326,12 +394,12 @@ function AppearanceGroup() {
   const applyAccentChoice = (a: (typeof ACCENTS)[number]) => {
     setAccent(a);
     setAccentId(a.id);
-    // 托盘图标同步色相（浏览器 dev 环境无 Tauri，静默失败）
-    void api.setTrayHue(a.hue).catch(() => {});
+    // 托盘图标同步主题色（色相 + 饱和度；浏览器 dev 环境无 Tauri，静默失败）
+    void api.setTrayAccent(a.hue, a.sat).catch(() => {});
   };
 
   return (
-    <SettingsGroup label="外观">
+    <SettingsGroup label="外观" icon={GROUP_ICON['外观']}>
       <SettingsRow
         label="主题"
         subtitle="界面配色，跟随系统时随系统设置自动切换"
@@ -786,6 +854,47 @@ function LayoutModelRow({
   );
 }
 
+/** 语义模型行：下拉列出 models/ 有效 sem 模型（内置 bge-large + 用户放入的替换模型）。
+ *  切换后下次启动生效（模型在 init 读取，与区域模型一致）。 */
+function SemModelRow({
+  value,
+  defaultValue,
+  onChange,
+}: {
+  value: string;
+  defaultValue?: string;
+  onChange: (v: string) => void;
+}) {
+  const [models, setModels] = useState<ModelDto[]>([]);
+
+  useEffect(() => {
+    void api.listModels().then(setModels);
+    const un = onModels(setModels);
+    return () => void un.then((f) => f());
+  }, []);
+
+  const options: ComboOption[] = models
+    .filter((m) => m.kind === 'sem')
+    .map((m) => ({
+      value: m.name,
+      label: m.name,
+      hint: m.source === 'builtin' ? '内置' : '用户',
+    }));
+
+  const dirty = defaultValue != null && value !== defaultValue;
+
+  return (
+    <SettingsRow
+      label="语义模型"
+      subtitle="models/ 下 kind=sem 的模型；默认内置 bge-large，放入自训练/替换模型后可切换（重启生效）"
+      dirty={dirty}
+      onReset={() => defaultValue != null && onChange(defaultValue)}
+    >
+      <Combobox value={value} options={options} onChange={onChange} className="w-40" />
+    </SettingsRow>
+  );
+}
+
 /** 聊天对象画像：内联可编辑行（名称输入框 + 画像下拉 + 删除），与词库条目同构。
  *
  *  后端只有 `set_contact_profile(name, profile)` 一个写入口（profile="none" 即删除），
@@ -860,42 +969,43 @@ function ContactsGroup() {
     'h-9 min-w-0 rounded-lg bg-[var(--input-bg)] px-3 text-sm text-[var(--text-primary)] outline-none transition-all duration-150 hover:bg-[var(--active-overlay)] focus:bg-[var(--panel-bg)] focus:shadow-[inset_0_0_0_1.5px_var(--brand)]';
 
   return (
-    <SettingsGroup label="聊天对象画像">
-      <SettingsRow
-        label="新增对象"
-        subtitle="未标记的对象一律按「正式」保守处理；画像由 OCR 识别到的对象名匹配"
-        stacked
-      >
-        <div className="flex gap-2">
-          <input
-            className={cn(inputCls, 'flex-1 px-3.5')}
-            value={name}
-            placeholder="对象名（与聊天窗口显示名一致）"
-            maxLength={64}
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && addContact()}
-          />
-          <Combobox value={profile} options={scenarioOptions} onChange={setProfile} className="w-32" />
-          <button
-            className="shrink-0 rounded-lg bg-[var(--brand)] px-4 text-sm font-medium text-[var(--brand-text)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--brand-hover)] disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
-            disabled={!name.trim() || !profile || busy !== null}
-            onClick={addContact}
-          >
-            添加
-          </button>
-        </div>
-      </SettingsRow>
+    <section className="mb-8">
+      <div className="mb-3">
+        <h3 className="flex items-center gap-2 text-item font-semibold tracking-tight text-[var(--text-primary)]">
+          <Users className="size-4 shrink-0 text-[var(--brand)]" strokeWidth={2.2} />
+          聊天对象画像
+        </h3>
+        <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">
+          未标记的对象一律按「正式」保守处理；画像由 OCR 识别到的对象名匹配
+        </p>
+      </div>
+
+      <div className="mb-2 flex gap-2">
+        <input
+          className={cn(inputCls, 'flex-1 px-3.5')}
+          value={name}
+          placeholder="对象名（与聊天窗口显示名一致）"
+          maxLength={64}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && addContact()}
+        />
+        <Combobox value={profile} options={scenarioOptions} onChange={setProfile} className="w-32" />
+        <button
+          className="shrink-0 rounded-lg bg-[var(--brand)] px-4 text-sm font-medium text-[var(--brand-text)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--brand-hover)] disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+          disabled={!name.trim() || !profile || busy !== null}
+          onClick={addContact}
+        >
+          添加
+        </button>
+      </div>
 
       {error && (
-        <div className="mx-5 mb-3 rounded-lg bg-[var(--danger-soft)] px-4 py-2 text-sm text-[var(--danger)]">
+        <div className="mb-3 rounded-lg bg-[var(--danger-soft)] px-4 py-2 text-sm text-[var(--danger)]">
           {error}
         </div>
       )}
 
-      {/* 左右与 SettingsRow 的 px-5 对齐：条目卡片外缘应落在 20px（= SettingsRow 的 px-5），
-          而行自身还有 px-3 内边距，故外层取 20 - 12 = 8px（px-2）。
-          这样条目里第一个控件距卡片边缘 = 8 + 12 = 20px，与上方「新增对象」齐平。 */}
-      <div className="space-y-2 px-2 pt-3 pb-4">
+      <div className="space-y-2">
         {contacts.map((c) => (
           <div
             key={c.name}
@@ -959,7 +1069,7 @@ function ContactsGroup() {
           <p>删除「{confirming.name}」后，该对象不再有专属画像，一律按「正式」基线处理。</p>
         </Modal>
       )}
-    </SettingsGroup>
+    </section>
   );
 }
 
@@ -981,11 +1091,12 @@ function ScenariosPage() {
   }, []);
   return (
     <div className="mx-auto max-w-3xl">
-      <h2 className="mb-1 text-xl font-semibold tracking-tight text-[var(--text-primary)]">场景管理</h2>
+      <PageTitle icon={CATEGORY_ICON['场景管理']} className="mb-1">场景管理</PageTitle>
       <p className="mb-5 text-label text-[var(--text-tertiary)]">
         场景决定对聊天对象的判定尺度；词库规则与对象画像均按场景生效。「正式」「个人」为内置场景。
       </p>
       <ScenarioList scenarios={scenarios} onChange={setScenarios} />
+      <ContactsGroup />
       <RulesEditor scenarios={scenarios} />
     </div>
   );
@@ -1019,11 +1130,12 @@ function ScenarioList({
   return (
     <section className="mb-8">
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-item font-semibold tracking-tight text-[var(--text-primary)]">场景</h3>
-        <span className="text-xs text-[var(--text-tertiary)]">{scenarios.length}/10</span>
+        <h3 className="flex items-center gap-2 text-item font-semibold tracking-tight text-[var(--text-primary)]">
+          <Layers className="size-4 shrink-0 text-[var(--brand)]" strokeWidth={2.2} />
+          场景
+        </h3>
         <button
-          className="flex items-center gap-1.5 rounded-lg bg-[var(--brand)] px-3.5 py-2 text-sm font-medium text-[var(--brand-text)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--brand-hover)] disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
-          disabled={scenarios.length >= 10}
+          className="flex items-center gap-1.5 rounded-lg bg-[var(--brand)] px-3.5 py-2 text-sm font-medium text-[var(--brand-text)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--brand-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
           onClick={() => setDialog({ mode: 'add' })}
         >
           <Plus className="size-4" />
@@ -1227,7 +1339,10 @@ function RulesEditor({ scenarios }: { scenarios: ScenarioDto[] }) {
     <section>
       <div className="mb-3 flex items-center justify-between">
         <div>
-          <h3 className="text-item font-semibold tracking-tight text-[var(--text-primary)]">词库</h3>
+          <h3 className="flex items-center gap-2 text-item font-semibold tracking-tight text-[var(--text-primary)]">
+            <BookText className="size-4 shrink-0 text-[var(--brand)]" strokeWidth={2.2} />
+            词库
+          </h3>
           <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">
             修改后自动保存 {saving && <span className="text-[var(--brand)]">· 保存中...</span>}
           </p>
@@ -1301,7 +1416,7 @@ function LogsGroup() {
   };
 
   return (
-    <SettingsGroup label="日志">
+    <SettingsGroup label="日志" icon={GROUP_ICON['日志']}>
       <SettingsRow label="清空全部日志" subtitle="删除日志目录全部内容（不可恢复）">
         {confirming ? (
           <div className="flex gap-2">
@@ -1346,16 +1461,16 @@ function AboutPage() {
     <div className="mx-auto max-w-2xl">
       <AboutHero name={APP_NAME} version={APP_VERSION} />
       <SettingsSection>
-        <SettingsGroup label="简介">
+        <SettingsGroup label="简介" icon={GROUP_ICON['简介']}>
           <SettingsRow stacked>
             <p className="text-sm leading-relaxed text-[var(--text-secondary)]">
-                {APP_NAME}是一款危险言语提前拦截工具：在消息发出前截取屏幕画面、在本机识别文字，
-              发现可能引发风险的措辞时弹窗提醒，尽可能帮你避免误发、错发。
+                {APP_NAME}是一款危险言语提前拦截工具：在消息发出前智能分析聊天内容，
+              识别是否误发、错发并弹窗提醒，尽可能帮你避免严重问题。
             </p>
           </SettingsRow>
         </SettingsGroup>
 
-        <SettingsGroup label="风险提示">
+        <SettingsGroup label="风险提示" icon={GROUP_ICON['风险提示']}>
           {/* 重点条款：主题色强调，阅读时不可错过 */}
           <SettingsRow stacked>
             <div className="rounded-xl bg-[var(--brand-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--text-secondary)]">
@@ -1378,12 +1493,11 @@ function AboutPage() {
               <li>· 不替你发送任何消息</li>
               <li>· 不把聊天内容上传到任何服务器（纯本地方案）</li>
               <li>· 绝不触碰法律法规底线：不开发、不内置任何绕过监管或对抗审查的功能</li>
-              <li>· 绝不采集与拦截无关的数据：识别仅在内存中进行，落盘内容不包含消息原文</li>
             </ul>
           </SettingsRow>
         </SettingsGroup>
 
-        <SettingsGroup label="开源信息">
+        <SettingsGroup label="开源信息" icon={GROUP_ICON['开源信息']}>
           <SettingsRow label="源码地址">
             <ExtLink url={REPO_URL}>{REPO_URL.replace('https://', '')}</ExtLink>
           </SettingsRow>

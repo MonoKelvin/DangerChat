@@ -239,8 +239,9 @@ pub fn bootstrap(app: &tauri::AppHandle) -> Arc<AppState> {
         training: std::sync::Mutex::new(Default::default()),
         // 退出信号：托盘「退出」置位，后台线程据此收敛（否则进程不终止）
         shutdown: std::sync::atomic::AtomicBool::new(false),
-        // logo 基础色相（暖红）：前端主题色切换时经 set_tray_hue 覆盖
-        tray_hue_deg: std::sync::atomic::AtomicU32::new(11),
+        // logo 基础主题色（默认朱砂 H9 S80）：前端主题色切换时经 set_tray_accent 覆盖
+        tray_hue_deg: std::sync::atomic::AtomicU32::new(9),
+        tray_sat_pct: std::sync::atomic::AtomicU32::new(80),
     });
 
     tracing::info!(target = %target, "装配完成（等待目标窗口发现）");

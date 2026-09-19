@@ -34,6 +34,23 @@ shutil.copy(p,'resources/models/bge-large/model_quantized.onnx')"
 - **BGE**：[BAAI/bge-large-zh-v1.5](https://huggingface.co/BAAI/bge-large-zh-v1.5)（MIT）的 [Xenova ONNX int8 量化版](https://huggingface.co/Xenova/bge-large-zh-v1.5)（`model_int8.onnx`，1024 维）。语义判定天花板受编码器可分性限制，large 较 small 明显提升；int8 与 fp32 实测准确率无差异，故取 int8。会话常驻约 350MB，靠挂起态装卸（目标离开前台即卸载）压低运行时内存。
 - **dc-layout-wechat**：`tools/training/train_layout.py` 产出（YOLO11n 微调），重训新版本用 `--ver v2` 递增。
 
+## 替换语义模型（可选）
+
+语义判定模型（`kind=sem`）可切换：默认内置 `bge-large`，用户可放入自己的模型后在
+**设置 → 高级 → 语义判定 → 语义模型**下拉里选择（重启生效）。放置方式与内置一致：
+
+```
+<数据目录>/models/<你的模型名>/
+  model.toml          # kind = "sem"，file = 权重文件名
+  <权重>.onnx         # 句向量编码器（三输入 i64：input_ids/attention_mask/token_type_ids）
+  tokenizer.json      # 分词器
+  head-formal.json    # 线性头（dim/weights/bias，见 tools/training/train_head.py）
+  head-casual.json
+```
+
+维度需与 `crates/dc-pipeline/src/sem/embedder.rs::EMBED_DIM` 一致（当前 1024）。用户层同名目录
+覆盖内置层。头文件缺 `weights` → 退化为模板兜底（只提示不拦截）。
+
 ## 注意
 
 - 各模型目录内的 `LICENSE` 为上游许可证原文，改动权重时保留。

@@ -373,6 +373,15 @@ impl Module for SemStage {
     fn config_schema(&self) -> Vec<ConfigField> {
         vec![
             ConfigField {
+                key: "sem.model".into(),
+                ty: ConfigType::Text { max_len: 64 },
+                default: ConfigValue::Str("bge-large".into()),
+                label: "语义模型".into(),
+                help: "models/ 下 kind=sem 的模型目录名；内置 bge-large，用户可放入自训练/替换模型后在此切换".into(),
+                group: "模型与设备".into(),
+                owner: "sem".into(),
+            },
+            ConfigField {
                 key: "sem.l2_enabled".into(),
                 ty: ConfigType::Bool,
                 default: ConfigValue::Bool(true),
@@ -478,29 +487,40 @@ impl Module for SemStage {
                 .f64_or("sem.threshold.casual", THRESHOLD_CASUAL as f64) as f32;
 
         if self.l2_enabled {
-            // bge-large 是内置模型（随安装包 resources/models/）：按名解析，
-            // 用户层存在优先（允许用户覆盖），否则用内置层。
+            // 语义模型可切换（sem.model 配置项，默认内置 bge-large）：
+            // 用户把自训练/替换模型（kind=sem）放进数据目录 models/ 下即可在设置里选。
+            // 用户层同名覆盖内置层（resolve_dir 语义）。
             //
             // **惰性加载（内存优化）**：init 只解析目录与头权重（几十 KB），
-            // **不加载 350MB 的 Embedder 会话**——真正的加载延后到 `ensure_loaded`，
+            // **不加载 ~350MB 的 Embedder 会话**——真正的加载延后到 `ensure_loaded`，
             // 由 worker 在「目标程序前台」时触发。这样目标不在前台/用户不打字时，
             // 常驻内存只有头权重，实测空闲 RSS 从 ~360MB 降到 ~30-40MB。
-            match mctx.models.resolve_dir("bge-large") {
-                Some(dir) => {
-                    // heads::load 惰性创建 embedder：本项目双头均为线性头，
-                    // 不落模板兜底分支 → 此处不加载任何会话，仅读头权重。
+            let model_name = mctx.config.str_or("sem.model", "bge-large");
+            // kind 校验：非 sem 模型直接拒绝（避免选错把 layout/ocr 模型当语义模型加载）。
+            let kind_ok = mctx
+                .models
+                .get(model_name)
+                .map(|info| info.kind() == Some(dc_core::ModelKind::Sem))
+                .unwrap_or(false);
+            match (kind_ok, mctx.models.resolve_dir(model_name)) {
+                (true, Some(dir)) => {
+                    // heads::load 惰性创建 embedder：线性头不落模板兜底分支 → 不加载会话，仅读头权重。
                     self.heads = head::Heads::load(&dir);
                     if let Ok(mut w) = self.model_dir.write() {
                         *w = Some(dir); // 记录目录：ensure_loaded 据此按需加载
                     }
                     tracing::info!(
+                        model = %model_name,
                         heads = self.heads.describe(),
                         "sem L2 头已就绪（Embedder 惰性加载，前台时才装入）"
                     );
                 }
-                None => {
-                    // fail-open（NFR-07）：模型目录缺失 → 仅 L1
-                    tracing::warn!("bge-large 模型目录不存在（内置层与用户层均未找到），仅启用 L1 规则判定");
+                _ => {
+                    // fail-open（NFR-07）：模型缺失或 kind 不符 → 仅 L1
+                    tracing::warn!(
+                        model = %model_name,
+                        "语义模型不存在或 kind 非 sem，仅启用 L1 规则判定（可在设置中放入模型并切换）"
+                    );
                     self.l2_enabled = false;
                 }
             }

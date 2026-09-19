@@ -24,9 +24,6 @@ static LOGO: &[u8] = include_bytes!("../icons/logo-32.png");
 /// 「暂停/开启守护」菜单项句柄（由 build 存入 state，refresh 时按守护态更新文案）。
 struct PauseMenuItem(MenuItem<tauri::Wry>);
 
-/// logo 基础色相（暖红 ≈11°）；主题色切换时由前端经 set_tray_hue 覆盖
-const LOGO_HUE: f32 = 11.0;
-
 /// ── 色相调整算法（RGB ↔ HSL，保留 alpha）──
 fn rgb_to_hsl(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     let (max, min) = (r.max(g).max(b), r.min(g).min(b));
@@ -88,8 +85,11 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (f32, f32, f32) {
     )
 }
 
-/// 就地色相旋转 + 饱和度/亮度调整（灰色像素不动，alpha 保留）。
-fn tint(rgba: &mut [u8], hue_shift: f32, sat_scale: f32, l_add: f32) {
+/// 就地着色（灰色像素不动，alpha 保留）：彩色像素 H/S **直接设成主题色**，
+/// 只保留自身亮度 L 维持明暗层次；`l_mul` 整体压暗（<1 变暗，=1 本色）。
+///
+/// 为何压暗而非降饱和：旧做法挂起态降饱和 → 图标接近白/灰，与浅色托盘背景难分辨（用户反馈）。
+fn tint(rgba: &mut [u8], accent_hue: f32, accent_sat: f32, l_mul: f32) {
     // as_chunks_mut 比 chunks_exact_mut 少一次边界检查，且尾部残块语义明确（此处丢弃）
     for px in rgba.as_chunks_mut::<4>().0 {
         let (r, g, b) = (
@@ -97,49 +97,49 @@ fn tint(rgba: &mut [u8], hue_shift: f32, sat_scale: f32, l_add: f32) {
             px[1] as f32 / 255.0,
             px[2] as f32 / 255.0,
         );
-        let (h, s, l) = rgb_to_hsl(r, g, b);
+        let (_, s, l) = rgb_to_hsl(r, g, b);
         if s < 1e-4 {
-            // 无彩色：亮度调整仍生效（浅灰/深灰态）
-            let g2 = (l + l_add).clamp(0.0, 1.0);
+            // 无彩色（黑白灰描边）：保持中性，只随 l_mul 压暗
+            let g2 = (l * l_mul).clamp(0.0, 1.0);
             px[0] = (g2 * 255.0).round() as u8;
             px[1] = (g2 * 255.0).round() as u8;
             px[2] = (g2 * 255.0).round() as u8;
             continue;
         }
-        let (r, g, b) = hsl_to_rgb(
-            (h + hue_shift).rem_euclid(360.0),
-            (s * sat_scale).min(1.0),
-            (l + l_add).clamp(0.0, 1.0),
-        );
+        let (r, g, b) = hsl_to_rgb(accent_hue, accent_sat, (l * l_mul).clamp(0.0, 1.0));
         px[0] = (r * 255.0).round() as u8;
         px[1] = (g * 255.0).round() as u8;
         px[2] = (b * 255.0).round() as u8;
     }
 }
 
-/// 状态 → (饱和度, 亮度)：守护中 = 主题色；挂起/冷却 = 浅灰；暂停(禁用) = 深灰；
-/// 未发现目标 = 去饱和。色相偏移由调用方按主题色相换算。
-fn tint_for(state: GuardState, found: bool) -> (f32, f32) {
+/// 状态 → 亮度系数 `l_mul`：守护中 = 本色(1.0)；等待目标 = 略暗；
+/// 挂起/冷却 = 压暗；暂停(禁用) = 最暗。彩色像素的 H/S 恒为主题色，仅明暗区分状态。
+fn tint_for(state: GuardState, found: bool) -> f32 {
     match (state, found) {
-        (GuardState::Active, true) => (1.0, 0.0),
-        (GuardState::Paused, _) => (0.06, -0.18),
-        (GuardState::Suspended, _) | (GuardState::Cooldown, _) => (0.1, 0.22),
-        (_, false) => (0.12, 0.0),
+        (GuardState::Active, true) => 1.0,
+        (GuardState::Active, false) => 0.8,
+        (GuardState::Paused, _) => 0.45,
+        (GuardState::Suspended, _) | (GuardState::Cooldown, _) => 0.6,
     }
 }
 
-/// 按状态 + 主题色相变色的托盘图标（同一张 logo，内存中调整）
+/// 按状态 + 主题色着色的托盘图标（同一张 logo，内存中调整）
 fn logo_image(state: &AppState) -> Image<'static> {
-    let base_hue = state
+    let accent_hue = state
         .tray_hue_deg
         .load(std::sync::atomic::Ordering::Relaxed) as f32;
+    let accent_sat = state
+        .tray_sat_pct
+        .load(std::sync::atomic::Ordering::Relaxed) as f32
+        / 100.0;
     let img = image::load_from_memory(LOGO)
         .expect("内嵌 logo 解码失败")
         .to_rgba8();
     let (w, h) = (img.width(), img.height());
     let mut rgba = img.into_raw();
-    let (sat, l) = tint_for(state.intercept.state(), state.guard_running());
-    tint(&mut rgba, base_hue - LOGO_HUE, sat, l);
+    let l_mul = tint_for(state.intercept.state(), state.guard_running());
+    tint(&mut rgba, accent_hue, accent_sat, l_mul);
     Image::new_owned(rgba, w, h)
 }
 
@@ -266,46 +266,46 @@ pub fn refresh(app: &AppHandle) {
 mod tests {
     use super::*;
 
-    /// 色相旋转：暖红 → 蓝，红色分量显著下降、蓝色上升
+    /// 彩色像素直接采用主题色相：暖红原图 → 蓝色主题（H≈220），蓝分量应主导
     #[test]
-    fn hue_shift_changes_dominant_channel() {
+    fn colored_pixel_takes_accent_hue() {
         let mut rgba = [191u8, 64, 42, 255];
-        tint(&mut rgba, 215.0 - LOGO_HUE, 1.0, 0.0);
-        assert!(rgba[0] < rgba[2], "红({}) 应低于 蓝({})", rgba[0], rgba[2]);
+        tint(&mut rgba, 220.0, 0.8, 1.0);
+        assert!(rgba[2] > rgba[0], "蓝({}) 应高于 红({})", rgba[2], rgba[0]);
         assert_eq!(rgba[3], 255, "alpha 保留");
     }
 
-    /// 饱和度缩放 + 亮度提升 → 浅灰（挂起态）
+    /// 彩色像素采用主题色饱和度：低饱和主题（S=0.2）→ 结果饱和度低（RGB 三通道差小）
     #[test]
-    fn tint_light_gray() {
-        let mut rgba = [191u8, 64, 42, 255];
-        tint(&mut rgba, 0.0, 0.1, 0.22);
-        let (r, g, b) = (rgba[0] as u32, rgba[1] as u32, rgba[2] as u32);
-        assert!(
-            r.abs_diff(g) < 24 && g.abs_diff(b) < 24,
-            "应接近灰色：{rgba:?}"
-        );
-        assert!(rgba[0] > 150, "亮度应明显提升：{rgba:?}");
+    fn colored_pixel_takes_accent_sat() {
+        // 高饱和红原图，着色成低饱和主题色（H=200 S=0.2 L 保留）
+        let mut high = [220u8, 30, 30, 255];
+        tint(&mut high, 200.0, 0.2, 1.0);
+        let spread = |px: [u8; 4]| {
+            let (r, g, b) = (px[0] as i32, px[1] as i32, px[2] as i32);
+            (r.max(g).max(b) - r.min(g).min(b)) as u32
+        };
+        assert!(spread(high) < 90, "低饱和主题着色后三通道应接近：{high:?}");
     }
 
-    /// 饱和度压低 + 亮度下降 → 深灰（禁用态）
+    /// 压暗（l_mul<1）：同一主题色，挂起态应比守护态更暗
     #[test]
-    fn tint_dark_gray() {
-        let mut rgba = [191u8, 64, 42, 255];
-        tint(&mut rgba, 0.0, 0.06, -0.18);
-        let (r, g, b) = (rgba[0] as u32, rgba[1] as u32, rgba[2] as u32);
-        assert!(
-            r.abs_diff(g) < 24 && g.abs_diff(b) < 24,
-            "应接近灰色：{rgba:?}"
-        );
-        assert!(rgba[0] < 130, "亮度应明显下降：{rgba:?}");
+    fn darken_lowers_lightness() {
+        let mut active = [191u8, 64, 42, 255];
+        let mut suspended = [191u8, 64, 42, 255];
+        tint(&mut active, 9.0, 0.8, 1.0);
+        tint(&mut suspended, 9.0, 0.8, 0.6);
+        let lum = |px: [u8; 4]| px[0] as u32 + px[1] as u32 + px[2] as u32;
+        assert!(lum(suspended) < lum(active), "挂起({suspended:?}) 应暗于 守护({active:?})");
     }
 
-    /// 无彩色像素：只受亮度影响，不产生色相
+    /// 无彩色像素（黑白灰描边）：保持中性，只随 l_mul 压暗，不染色
     #[test]
-    fn achromatic_only_lightness() {
+    fn achromatic_stays_neutral() {
         let mut rgba = [128u8, 128, 128, 255];
-        tint(&mut rgba, 180.0, 1.0, 0.2);
-        assert_eq!(rgba, [179, 179, 179, 255]);
+        tint(&mut rgba, 200.0, 0.8, 0.6);
+        assert_eq!(rgba[0], rgba[1], "仍为灰");
+        assert_eq!(rgba[1], rgba[2], "仍为灰");
+        assert!(rgba[0] < 128, "应压暗：{rgba:?}");
     }
 }

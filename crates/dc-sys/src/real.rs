@@ -83,6 +83,10 @@ thread_local! {
 static IME_LAST_PROCESSKEY_MS: AtomicU64 = AtomicU64::new(0);
 static KEY_PROC_INVOKED: AtomicU64 = AtomicU64::new(0);
 static FG_PROC_INVOKED: AtomicU64 = AtomicU64::new(0);
+/// IME 候选框可见性（EVENT_OBJECT_IME_SHOW/CHANGE 置位、HIDE 清位）。
+/// **不再参与组合态判定**（HIDE 事件在微信/部分输入法下会丢，导致 latch 永久卡 true，
+/// 曾使回车永不弹窗）；保留 hook 写入仅为诊断与将来可能的辅助信号。
+#[allow(dead_code)]
 static IME_SHOWN: AtomicBool = AtomicBool::new(false);
 
 /// 距离最近一次「被输入法消费的键」多久仍视为组合中。
@@ -94,9 +98,15 @@ fn mono_ms() -> u64 {
 }
 
 fn ime_composing_now() -> bool {
-    if IME_SHOWN.load(Ordering::SeqCst) {
-        return true;
-    }
+    // 组合态的**权威信号是最近一次 VK_PROCESSKEY**（自带 1s TTL，自然过期）。
+    //
+    // `IME_SHOWN`（EVENT_OBJECT_IME_SHOW/CHANGE 置位、HIDE 清位）只作**辅助**：
+    // 曾经它是无条件短路（`if IME_SHOWN { return true }`），但 HIDE 事件在
+    // 微信/部分输入法下经常不触发或丢失 → 该 latch 永久卡 true →
+    // `decide()` 每次都走 IME 分支放行 → 回车永不弹窗（verdict 已入槽却不拦）。
+    //
+    // 修复：只以「最近组合按键活动」为准（自带 TTL，自然过期）；
+    // IME_SHOWN latch 不再参与短路——它在微信/部分输入法下会因 HIDE 丢失永久卡 true。
     let last = IME_LAST_PROCESSKEY_MS.load(Ordering::SeqCst);
     last != 0 && mono_ms().saturating_sub(last) < IME_PROCESSKEY_TTL_MS
 }

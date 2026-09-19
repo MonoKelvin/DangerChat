@@ -6,7 +6,7 @@ import { AlertRoot } from './alert/AlertRoot';
 import { WindowControls } from './components/WindowControls';
 import { TooltipLayer } from './components/TooltipLayer';
 import { CursorFx } from './components/CursorFx';
-import { getNoticeAgreed, setTrayHue, exitApp } from './lib/commands';
+import { getNoticeAgreed, setTrayAccent, exitApp } from './lib/commands';
 import { getAccent, getTheme, applyAccent, applyTheme, onSystemChange } from './lib/theme';
 
 /** 窗口 label 分支：main = 设置主窗口（含告知页），alert = 拦截弹窗。 */
@@ -49,8 +49,8 @@ function MainWindow() {
     const accent = getAccent();
     applyTheme(theme);
     applyAccent(accent);
-    // 托盘图标色相同步（浏览器 dev 环境无 Tauri，静默失败）
-    void setTrayHue(accent.hue).catch(() => {});
+    // 托盘图标主题色同步（浏览器 dev 环境无 Tauri，静默失败）
+    void setTrayAccent(accent.hue, accent.sat).catch(() => {});
     return theme === 'system' ? onSystemChange(() => applyTheme(theme)) : undefined;
   }, []);
 

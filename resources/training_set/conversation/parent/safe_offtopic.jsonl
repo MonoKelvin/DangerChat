@@ -1,0 +1,10 @@
+{"text": "方案我下午发您过目", "danger": false, "with_context": false, "scene": "parent", "base": "casual", "context": "none", "truncated": false, "match": false, "severity": "none", "why": "工作消息误发父母，不匹配但无害", "object": "妈"}
+{"text": "会议改到下午三点了", "danger": false, "with_context": false, "scene": "parent", "base": "casual", "context": "none", "truncated": false, "match": false, "severity": "none", "why": "工作信息误发，无严重后果", "object": "爸"}
+{"text": "这个需求我评估一下明天答复", "danger": false, "with_context": false, "scene": "parent", "base": "casual", "context": "none", "truncated": false, "match": false, "severity": "none", "why": "工作内容误发父母，无害", "object": "妈"}
+{"text": "报表已经整理好发群里了", "danger": false, "with_context": false, "scene": "parent", "base": "casual", "context": "none", "truncated": false, "match": false, "severity": "none", "why": "工作误发，不匹配但无害", "object": "爸"}
+{"text": "客户那边我跟进一下", "danger": false, "with_context": false, "scene": "parent", "base": "casual", "context": "none", "truncated": false, "match": false, "severity": "none", "why": "工作误发", "object": "妈"}
+{"text": "收到明天准时参加", "danger": false, "with_context": false, "scene": "parent", "base": "casual", "context": "none", "truncated": false, "match": false, "severity": "none", "why": "工作回复误发，无害", "object": "爸"}
+{"text": "这个链接你点进去看下", "danger": false, "with_context": false, "scene": "parent", "base": "casual", "context": "none", "truncated": false, "match": true, "severity": "none", "why": "日常分享", "object": "妈"}
+{"text": "我到公司了路上有点堵", "danger": false, "with_context": false, "scene": "parent", "base": "casual", "context": "none", "truncated": false, "match": true, "severity": "none", "why": "报平安", "object": "妈"}
+{"text": "今天团建晚点回家", "danger": false, "with_context": false, "scene": "parent", "base": "casual", "context": "none", "truncated": false, "match": true, "severity": "none", "why": "日常告知", "object": "爸"}
+{"text": "帮我看看这个快递到了没", "danger": false, "with_context": false, "scene": "parent", "base": "casual", "context": "none", "truncated": false, "match": true, "severity": "none", "why": "日常请求", "object": "妈"}

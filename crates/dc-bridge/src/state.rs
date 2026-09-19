@@ -60,6 +60,8 @@ pub struct AppState {
     pub training: Mutex<crate::dto::TrainingStatusDto>,
     /// 托盘图标主题色相（度数）：前端主题色切换时同步，图标按此色相着色。
     pub tray_hue_deg: std::sync::atomic::AtomicU32,
+    /// 托盘图标主题色饱和度（百分比 0-100）：图标彩色像素直接采用主题色 H+S。
+    pub tray_sat_pct: std::sync::atomic::AtomicU32,
     /// 进程退出信号：置位后各后台线程（pump/window-watch）退出循环。
     ///
     /// 为何需要：这些线程是 `std::thread::spawn` 的**非分离线程**，

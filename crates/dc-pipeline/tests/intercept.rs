@@ -589,6 +589,36 @@ fn send_key_configuration() {
     assert_eq!(h2.enter(), HookAction::Swallow);
 }
 
+/// 运行时热切换发送键（set_config → set_send_key 路径）：切到 Ctrl+Enter 后立即生效。
+/// 复现「切换成 Ctrl+Enter 但仍拦 Enter」的报告——验证 set_send_key 是否真的改变裁决。
+#[test]
+fn send_key_hot_switch() {
+    let h = Harness::new(); // 默认 Enter
+    h.target_foreground();
+    let _ = h.press(VK_A);
+    h.publish(Verdict::block("命中"));
+    // 默认 Enter：回车拦截
+    assert_eq!(h.enter(), HookAction::Swallow, "默认 Enter 应拦截");
+
+    // 热切换到 Ctrl+Enter（模拟 set_config 的 set_send_key 调用）
+    h.intercept.set_send_key(SendKey::CtrlEnter);
+    // 重新回到 Active（上一步 enter 触发了 Cooldown），并重建新鲜判定
+    h.intercept.apply_alert_action(AlertAction::Cancel);
+    let _ = h.press(VK_A);
+    h.publish(Verdict::block("命中"));
+
+    assert_eq!(
+        h.enter(),
+        HookAction::Pass,
+        "切到 Ctrl+Enter 后，纯 Enter 必须放行（不再拦截）"
+    );
+    assert_eq!(
+        h.press_ctrl(VK_ENTER),
+        HookAction::Swallow,
+        "切到 Ctrl+Enter 后，Ctrl+Enter 才拦截"
+    );
+}
+
 /// 配置 schema 与快照解析一致（防止 schema 里的键名与读取代码漂移）
 #[test]
 fn config_schema_matches_snapshot_parsing() {

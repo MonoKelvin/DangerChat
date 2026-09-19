@@ -132,9 +132,9 @@ export async function ackNotice(): Promise<void> {
   return invoke('ack_notice');
 }
 
-/** 主题色切换 → 托盘图标同步按该色相着色（即时刷新） */
-export async function setTrayHue(hue: number): Promise<void> {
-  return invoke('set_tray_hue', { hue });
+/** 主题色切换 → 托盘图标同步按该主题色（色相 + 饱和度）着色（即时刷新） */
+export async function setTrayAccent(hue: number, sat: number): Promise<void> {
+  return invoke('set_tray_accent', { hue, sat });
 }
 
 /** 外部浏览器打开链接（后端仅放行 https） */

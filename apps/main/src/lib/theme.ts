@@ -19,18 +19,21 @@ export interface AccentDef {
   dark: string;
   /** 色相（度）：logo 变色与托盘同步用 */
   hue: number;
+  /** 饱和度（0-100）：logo/托盘直接采用主题色饱和度，不再沿用原图饱和度 */
+  sat: number;
 }
 
-/** 主题色板（参考 monokelvin.studio），默认朱砂 */
+/** 主题色板（参考 monokelvin.studio），默认朱砂。
+ *  hue/sat 取自 dark 品牌色的 HSL（logo/托盘着色直接采用，保证与色板一致）。 */
 export const ACCENTS: AccentDef[] = [
-  { id: 'vermillion', name: '朱砂', light: '#c64b36', dark: '#ef7965', hue: 11 },
-  { id: 'cobalt', name: '钴蓝', light: '#3559d8', dark: '#6f8cff', hue: 226 },
-  { id: 'azure', name: '湛蓝', light: '#1677b8', dark: '#68b5e6', hue: 202 },
-  { id: 'teal', name: '青碧', light: '#237b78', dark: '#6eb9b4', hue: 178 },
-  { id: 'moss', name: '苔绿', light: '#527a59', dark: '#83b78b', hue: 132 },
-  { id: 'amber', name: '琥珀', light: '#a86616', dark: '#d7a34e', hue: 34 },
-  { id: 'violet', name: '紫晶', light: '#7554b8', dark: '#aa8be6', hue: 268 },
-  { id: 'rose', name: '绯红', light: '#b74f73', dark: '#df84a4', hue: 339 },
+  { id: 'vermillion', name: '朱砂', light: '#c64b36', dark: '#ef7965', hue: 9, sat: 80 },
+  { id: 'cobalt', name: '钴蓝', light: '#3559d8', dark: '#6f8cff', hue: 226, sat: 100 },
+  { id: 'azure', name: '湛蓝', light: '#1677b8', dark: '#68b5e6', hue: 202, sat: 71 },
+  { id: 'teal', name: '青碧', light: '#237b78', dark: '#6eb9b4', hue: 176, sat: 37 },
+  { id: 'moss', name: '苔绿', light: '#527a59', dark: '#83b78b', hue: 129, sat: 27 },
+  { id: 'amber', name: '琥珀', light: '#a86616', dark: '#d7a34e', hue: 38, sat: 62 },
+  { id: 'violet', name: '紫晶', light: '#7554b8', dark: '#aa8be6', hue: 262, sat: 63 },
+  { id: 'rose', name: '绯红', light: '#b74f73', dark: '#df84a4', hue: 338, sat: 60 },
 ];
 
 export const THEME_LABEL: Record<Theme, string> = {

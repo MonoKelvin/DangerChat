@@ -5,17 +5,14 @@
 //! L2 的阈值与线性头按基线复用 —— 自定义场景不引入新的模型头，
 //! `head.rs` 的双头结构因此不受场景数量影响。
 //!
-//! 内置场景（`正式`/`个人`）不可修改、不可删除；自定义场景最多补到
-//! 总数 10（`MAX_SCENARIOS`）。id 稳定（`s1`…），改名不影响既有规则引用；
+//! 内置场景（`正式`/`个人`）不可修改、不可删除；自定义场景数量不限。
+//! id 稳定（`s1`…），改名不影响既有规则引用；
 //! 删除后残留的引用由 `base_profile` 兜底回落 Formal（保守）。
 
 use serde::{Deserialize, Serialize};
 
 use super::doc::SceneDoc;
 use super::rules::Profile;
-
-/// 场景总数上限（内置 2 + 自定义最多 8）。
-pub const MAX_SCENARIOS: usize = 10;
 
 /// 单个场景。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -154,9 +151,6 @@ impl ScenarioManager {
         }
         if self.all().iter().any(|s| s.name == name) {
             return Err(format!("场景名「{name}」已存在"));
-        }
-        if self.all().len() >= MAX_SCENARIOS {
-            return Err(format!("场景总数已达上限 {MAX_SCENARIOS}"));
         }
         let id = self.next_id();
         let s = Scenario {
@@ -314,16 +308,16 @@ mod tests {
     }
 
     #[test]
-    fn add_validates_name_and_limit() {
+    fn add_validates_name_and_id_reuse() {
         let path = tmp("limit");
         let mut m = ScenarioManager::load(&path);
         assert!(m.add("  ", Profile::Formal).is_err());
         assert!(m.add("正式", Profile::Formal).is_err(), "与内置重名拒绝");
-        // 补满到 10：内置 2 + 自定义 8
-        for i in 0..8 {
+        // 数量不限：连加多个都应成功
+        for i in 0..12 {
             m.add(&format!("场景{i}"), Profile::Casual).unwrap();
         }
-        assert!(m.add("第十一个", Profile::Formal).is_err(), "总数上限 10");
+        assert_eq!(m.custom.len(), 12, "自定义场景数量不设上限");
         // id 分配：删除中间项后空洞可复用
         m.remove("s3").unwrap();
         let s = m.add("补位", Profile::Formal).unwrap();

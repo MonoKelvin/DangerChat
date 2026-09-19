@@ -823,12 +823,15 @@ pub fn clear_logs(state: State<'_, Arc<AppState>>) -> CmdResult<()> {
 // 数据目录（FR：用户可将全部数据迁移到自选位置）
 // ---------------------------------------------------------------------------
 
-/// 前端主题色切换 → 托盘图标同步按该色相着色（不生成多张图）。
+/// 前端主题色切换 → 托盘图标同步按该主题色（色相 + 饱和度）着色（不生成多张图）。
 /// 主壳命令负责调用 + 刷新托盘（那边有 AppHandle）。
-pub fn set_tray_hue_inner(state: &Arc<AppState>, hue: u32) {
+pub fn set_tray_accent_inner(state: &Arc<AppState>, hue: u32, sat: u32) {
     state
         .tray_hue_deg
         .store(hue.min(359), std::sync::atomic::Ordering::Relaxed);
+    state
+        .tray_sat_pct
+        .store(sat.min(100), std::sync::atomic::Ordering::Relaxed);
 }
 
 #[derive(Debug, serde::Serialize)]

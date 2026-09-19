@@ -244,14 +244,19 @@ export function AboutHero({ name, version }: { name: string; version: string }) 
   const fxRef = useRef<HTMLDivElement>(null);
   const particles = useRef<FxParticle[]>(createParticles());
 
-  // logo 真 HSL 着色（保饱和度，与托盘/侧栏同源）；主题色切换即时刷新
+  // logo 直接采用主题色 H+S 着色（与托盘/侧栏同源）；主题色切换即时刷新
   const [accentHue, setAccentHue] = useState(() => getAccent().hue);
+  const [accentSat, setAccentSat] = useState(() => getAccent().sat);
   useEffect(() => {
-    const on = (e: Event) => setAccentHue((e as CustomEvent<{ hue: number }>).detail.hue);
+    const on = (e: Event) => {
+      const a = (e as CustomEvent<{ hue: number; sat: number }>).detail;
+      setAccentHue(a.hue);
+      setAccentSat(a.sat);
+    };
     window.addEventListener('main:accent', on);
     return () => window.removeEventListener('main:accent', on);
   }, []);
-  const logoSrc = useTintedLogo(accentHue);
+  const logoSrc = useTintedLogo(accentHue, accentSat);
 
   useEffect(() => {
     if (!hover) return;
@@ -352,7 +357,7 @@ export function AboutHero({ name, version }: { name: string; version: string }) 
         <div className="min-w-0 flex-1 transition-transform duration-200 group-hover:translate-x-0.5">
           <h2 className="text-xl font-semibold tracking-tight text-[var(--text-primary)]">{name}</h2>
           <p className="mt-1 text-label text-[var(--text-secondary)]">
-            © {new Date().getFullYear()} DangerChat · 纯本地运行 · 开源可审计
+            © {new Date().getFullYear()} Mono Studio
           </p>
         </div>
         <span className="shrink-0 text-lg font-semibold text-[var(--text-secondary)] transition-colors group-hover:text-[var(--text-primary)]">

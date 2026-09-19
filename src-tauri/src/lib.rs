@@ -130,14 +130,14 @@ impl NoWindow for std::process::Command {
     }
 }
 
-/// 前端主题色切换：存色相（dc-bridge）并即时刷新托盘图标。
+/// 前端主题色切换：存主题色（色相 + 饱和度，dc-bridge）并即时刷新托盘图标。
 #[tauri::command]
-fn set_tray_hue(app: AppHandle, hue: u32) -> Result<(), String> {
+fn set_tray_accent(app: AppHandle, hue: u32, sat: u32) -> Result<(), String> {
     let state = app
         .state::<Arc<dc_bridge::state::AppState>>()
         .inner()
         .clone();
-    dc_bridge::commands::set_tray_hue_inner(&state, hue);
+    dc_bridge::commands::set_tray_accent_inner(&state, hue, sat);
     tray::refresh(&app);
     Ok(())
 }
@@ -300,7 +300,7 @@ pub fn run() {
             dc_bridge::commands::training_status,
             dc_bridge::commands::launch_uitag,
             dc_bridge::commands::start_training,
-            set_tray_hue,
+            set_tray_accent,
             open_external,
             restart_app,
             exit_app,
