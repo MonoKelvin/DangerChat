@@ -325,8 +325,10 @@ fn ut_grd_06_heartbeat_phash() {
         .load_fresh(std::time::Duration::from_secs(10), 1_600)
         .is_some());
 
-    // 心跳 3：哈希变化（聊天对象切换）→ Slow
-    *hash_cell.lock().unwrap() = 42;
+    // 心跳 3：哈希实质变化（聊天对象切换）→ Slow。
+    // 用 0xFFFF_FFFF（32 位全 1，海明距 32 ≫ 4）代表真实场景切换——
+    // 心跳判定用海明距 ≤4 容差（抗渲染抖动），故变化量必须超过该阈值。
+    *hash_cell.lock().unwrap() = 0xFFFF_FFFF;
     let layout_before = f.layout.call_count();
     let out = core.run_trigger(Trigger::Heartbeat, request());
     assert_eq!(out, TickOutcome::Stored);

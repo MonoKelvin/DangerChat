@@ -13,7 +13,7 @@
 //! ## 与文档的一处配置扩充
 //!
 //! §5.3 内部结构说「3s 去抖」但配置项清单里没有对应键，这里补 `guard.foreground_debounce_ms`
-//! （默认 3000），使去抖窗口可测、可调。
+//! （默认 1000），使去抖窗口可测、可调。
 
 pub mod bus;
 pub mod keys;
@@ -60,7 +60,7 @@ impl Default for InterceptConfig {
             send_key: SendKey::Enter,
             target_process: "WeChat.exe".to_string(),
             verdict_ttl: Duration::from_millis(2_000),
-            foreground_debounce: Duration::from_millis(3000),
+            foreground_debounce: Duration::from_millis(1000),
         }
     }
 }
@@ -424,12 +424,14 @@ impl Intercept {
                 Duration::from_millis(self.verdict_ttl_ms.load(Ordering::SeqCst)),
                 now,
             ) else {
-                tracing::info!("fail-open：无新鲜判定");
+                // debug 而非 info：这条在每次「打完就回车」的正常场景都会触发，
+                // 而日志写入在钩子线程内是同步 Mutex+文件 IO，info 级会拖慢每次回车（§2.2）。
+                tracing::debug!("fail-open：无新鲜判定");
                 return HookAction::Pass;
             };
             if verdict.draft_epoch != self.tracker.epoch() {
-                // 判定对应的草稿已被改动 → 结果失效（§2.2 性质论证）
-                tracing::info!("fail-open：判定纪元落后于草稿");
+                // 判定对应的草稿已被改动 → 结果失效（§2.2 性质论证）。同上降为 debug。
+                tracing::debug!("fail-open：判定纪元落后于草稿");
                 return HookAction::Pass;
             }
             match verdict.level {

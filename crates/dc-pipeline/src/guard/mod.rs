@@ -15,7 +15,8 @@ use dc_core::ConfigField;
 use dc_sys::{Hwnd, SysApi};
 
 use crate::clock::MonoClock;
-use crate::contract::{LoopKind, Module, PipelineContext};
+use crate::contract::{LoopKind, Module, PipelineContext, RegionLayout, WindowSnapshot};
+use crate::guard::core::HeartbeatProbe;
 use crate::intercept::{Intercept, Trigger};
 use crate::layout::LayoutStage;
 use crate::ocr::OcrStage;
@@ -98,6 +99,29 @@ impl Guard {
             PipelineContext::new(run_id, kind, image_sink, Arc::clone(&cfg))
         });
 
+        // 心跳 pHash 探针（§2.3）：裁 chat_target ROI（拿不到则整窗）算感知哈希。
+        // **必须接线**——缺它心跳会退化成每 1.5s 一次全链路慢环，占满 worker，
+        // 快环判定被饿死，导致回车迟钝 + 同消息时而漏弹。
+        let heartbeat_probe: HeartbeatProbe = Arc::new(
+            |snap: &WindowSnapshot, layout: &RegionLayout| -> u64 {
+                let (iw, ih) = (snap.image.width(), snap.image.height());
+                // ROI：优先聊天对象区；缺失时退整窗（心跳只需回答「聊天对象是否变了」）
+                let (x, y, w, h) = match layout.rect_of(crate::contract::TAG_CHAT_TARGET) {
+                    Some(r) => {
+                        let x = r.x.max(0) as u32;
+                        let y = r.y.max(0) as u32;
+                        (x, y, r.w.min(iw.saturating_sub(x)), r.h.min(ih.saturating_sub(y)))
+                    }
+                    None => (0, 0, iw, ih),
+                };
+                if w == 0 || h == 0 {
+                    return phash::phash(&snap.image);
+                }
+                let roi = image::imageops::crop_imm(&snap.image, x, y, w, h).to_image();
+                phash::phash(&roi)
+            },
+        );
+
         let core = Arc::new(GuardCore {
             capture: Arc::clone(&capture),
             layout: Arc::clone(&layout),
@@ -111,7 +135,7 @@ impl Guard {
             context_cache: std::sync::Mutex::new(None),
             layout_cache: std::sync::Mutex::new(None),
             ctx_factory,
-            heartbeat_probe: None,
+            heartbeat_probe: Some(heartbeat_probe),
             last_phash: std::sync::Mutex::new(None),
         });
 
@@ -204,8 +228,9 @@ fn spawn_worker(
         .spawn(move || {
             let mut pending = Pending::default();
             let mut next_heartbeat = std::time::Instant::now() + heartbeat;
-            // 挂起态卸载（§2.4）：记录上一轮前台态，仅在跳变时装/卸模型（避免每轮 IO）。
-            let mut was_active = true;
+            // 惰性加载（§2.4）：sem 模型 init 时**未加载**（省常驻内存），故初始视为「未激活」，
+            // 首次进入前台由下面的巡检/触发路径按需装入。仅在前台态跳变时装/卸，避免每轮 IO。
+            let mut was_active = false;
             loop {
                 if cancel.is_cancelled() {
                     break;
@@ -222,19 +247,21 @@ fn spawn_worker(
                     if cancel.is_cancelled() {
                         return;
                     }
+                    // 前台态巡检（每个触发都查一次，O(1) 原子读）：离开前台 → 卸载释放内存；
+                    // 回到前台 → 装入（~600ms，装入完成前该轮 fail-open 放行）。
+                    // 放在触发处理**之前**，保证用户一打字（Fast 触发）即触发按需装入，
+                    // 不必等下一次 1.5s 心跳。
+                    let active = target_active();
+                    if active != was_active {
+                        if active {
+                            core.sem.ensure_loaded();
+                        } else {
+                            core.sem.unload_model();
+                        }
+                        was_active = active;
+                    }
                     if t == Trigger::Heartbeat {
                         next_heartbeat = std::time::Instant::now() + heartbeat;
-                        // 心跳兼作前台态巡检：离开前台 → 卸载大模型释放内存；
-                        // 回到前台 → 重载（~600ms，重载完成前该轮 fail-open）。
-                        let active = target_active();
-                        if active != was_active {
-                            if active {
-                                core.sem.ensure_loaded();
-                            } else {
-                                core.sem.unload_model();
-                            }
-                            was_active = active;
-                        }
                     }
                     let request = crate::capture::CaptureRequest { hwnd: target_hwnd };
                     let outcome = core.run_trigger(t, request);

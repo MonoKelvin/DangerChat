@@ -9,6 +9,7 @@ import { cn } from '../lib/utils';
  *   data-tip-hint="副行文本"    —— 可选，第二行弱化说明
  *   data-tip-side="top|bottom|left|right" —— 可选，默认 bottom
  *   data-tip-class="附加类"     —— 可选
+ *   data-tip-delay="毫秒"       —— 可选，覆盖默认 400ms 悬停延迟（如弹窗按钮设 50）
  *
  * 长文本自动换行：先按 nowrap 测自然宽度，超出可用宽度时切换 wrap 并重定位。
  */
@@ -44,6 +45,8 @@ export function TooltipLayer() {
       const text = el?.getAttribute('data-tip');
       if (el && text) {
         window.clearTimeout(timer.current);
+        const delayAttr = el.getAttribute('data-tip-delay');
+        const delay = delayAttr != null ? Math.max(0, Number(delayAttr)) : SHOW_DELAY_MS;
         timer.current = window.setTimeout(() => {
           setWrap(false);
           setTip({
@@ -53,7 +56,7 @@ export function TooltipLayer() {
             side: (el.getAttribute('data-tip-side') as Side) || 'bottom',
             rect: el.getBoundingClientRect(),
           });
-        }, SHOW_DELAY_MS);
+        }, delay);
       } else {
         hide();
       }
@@ -135,7 +138,7 @@ export function TooltipLayer() {
       style={{ left: pos?.left ?? -9999, top: pos?.top ?? -9999 }}
     >
       {tip.text}
-      {tip.hint && <p className="mt-1 text-[11px] opacity-60">{tip.hint}</p>}
+      {tip.hint && <p className="mt-1 text-caption opacity-60">{tip.hint}</p>}
     </div>,
     document.body,
   );

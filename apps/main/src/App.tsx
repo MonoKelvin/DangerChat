@@ -13,7 +13,13 @@ import { getAccent, getTheme, applyAccent, applyTheme, onSystemChange } from './
 export default function App() {
   const label = getCurrentWindow().label;
   if (label === 'alert') {
-    return <AlertRoot />;
+    // 弹窗也需 TooltipLayer：按钮上的 data-tip 由它渲染（否则悬停无提示）。
+    return (
+      <>
+        <AlertRoot />
+        <TooltipLayer />
+      </>
+    );
   }
   return <MainWindow />;
 }

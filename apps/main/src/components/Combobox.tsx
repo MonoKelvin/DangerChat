@@ -158,7 +158,7 @@ export function Combobox({
           triggerW ? 'shrink-0' : (className ?? 'w-40'),
         )}
       >
-        <span className={cn(!triggerW && 'truncate')}>{selected?.label ?? value}</span>
+        <span className="min-w-0 flex-1 truncate text-left">{selected?.label ?? value}</span>
         <ChevronDown
           className={cn('size-4 shrink-0 text-[var(--text-tertiary)] transition-transform duration-200', open && 'rotate-180')}
           strokeWidth={2}

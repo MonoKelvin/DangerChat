@@ -451,7 +451,7 @@ fn ut_int_10_cooldown_routes_alert_shortcuts() {
 // 补充用例（不属于矩阵编号，但覆盖规格里的关键行为）
 // ---------------------------------------------------------------------------
 
-/// 前台去抖：切走后 3s 内仍算前台；3s 后挂起；切回即时唤醒
+/// 前台去抖：切走后默认窗口（1s）内仍算前台；超时后挂起；切回即时唤醒
 #[test]
 fn foreground_debounce_and_instant_wake() {
     let h = Harness::new();
@@ -460,10 +460,10 @@ fn foreground_debounce_and_instant_wake() {
 
     h.other_foreground("explorer.exe");
     assert_eq!(h.intercept.state(), GuardState::Active, "去抖窗口内不挂起");
-    h.advance(2_999);
+    h.advance(999);
     assert_eq!(h.intercept.state(), GuardState::Active);
     h.advance(1);
-    assert_eq!(h.intercept.state(), GuardState::Suspended, "超过 3s 才挂起");
+    assert_eq!(h.intercept.state(), GuardState::Suspended, "超过 1s 才挂起");
 
     h.target_foreground();
     assert_eq!(

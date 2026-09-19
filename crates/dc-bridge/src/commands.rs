@@ -67,10 +67,14 @@ fn ty_str(t: &ConfigType) -> &'static str {
 }
 
 /// 数值范围三件套 (min, max, step)：float 步长 0.05 给出两位小数，
-/// int 步长 1 表示整数。控件的钳制与显示精度都从这里取，避免前端硬编码。
-fn range_of(t: &ConfigType) -> (Option<f64>, Option<f64>, Option<f64>) {
+/// int 步长默认 1；毫秒类 int（键以 `_ms` 结尾）步长 500（每次增减半秒，
+/// 免得用户从 1000 敲到 3000 要点一千下）。控件的钳制与显示精度都从这里取，避免前端硬编码。
+fn range_of(key: &str, t: &ConfigType) -> (Option<f64>, Option<f64>, Option<f64>) {
     match t {
-        ConfigType::Int { min, max } => (Some(*min as f64), Some(*max as f64), Some(1.0)),
+        ConfigType::Int { min, max } => {
+            let step = if key.ends_with("_ms") { 500.0 } else { 1.0 };
+            (Some(*min as f64), Some(*max as f64), Some(step))
+        }
         ConfigType::Float { min, max } => (Some(*min), Some(*max), Some(0.05)),
         _ => (None, None, None),
     }
@@ -124,7 +128,7 @@ pub fn get_config_schema(state: State<'_, Arc<AppState>>) -> CmdResult<Vec<Confi
         .schema()
         .into_iter()
         .map(|f| {
-            let (min, max, step) = range_of(&f.ty);
+            let (min, max, step) = range_of(&f.key, &f.ty);
             ConfigFieldDto {
                 key: f.key,
                 ty: ty_str(&f.ty).to_string(),
@@ -190,6 +194,14 @@ pub fn set_config(
         "guard.foreground_debounce_ms" => {
             if let ConfigValue::Int(ms) = &applied {
                 state.intercept.set_foreground_debounce_ms(*ms as u64);
+            }
+        }
+        "alert.timeout_secs" => {
+            // 弹窗倒计时热更新：0 = 不自动关闭。下次弹窗生效（当前若已弹出不改）。
+            if let ConfigValue::Int(secs) = &applied {
+                if let Ok(mut c) = state.countdown_secs.lock() {
+                    *c = (*secs).max(0) as u64;
+                }
             }
         }
         "debug.image_dirs_limit" => {

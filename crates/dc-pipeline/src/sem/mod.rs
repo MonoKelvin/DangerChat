@@ -410,6 +410,7 @@ impl Module for SemStage {
             .parent()
             .map(|d| d.join(dc_core::paths::RULES_JSON))
             .unwrap_or_else(|| std::path::PathBuf::from(dc_core::paths::RULES_JSON));
+        // 文件缺失/非法时回落**内置基线词库**（而非空集）——保证明显脏话开箱即拦。
         match std::fs::read_to_string(&rules_path) {
             Ok(text) => match RuleSet::from_json(&text) {
                 Ok(rs) => {
@@ -418,16 +419,16 @@ impl Module for SemStage {
                     }
                 }
                 Err(e) => {
-                    tracing::warn!(error = %e, "规则库非法，按空规则集继续");
+                    tracing::warn!(error = %e, "规则库非法，回落内置基线词库");
                     if let Ok(mut w) = self.rules.write() {
-                        *w = RuleSet::from_defs(Vec::new()).map_err(ModuleError::Fatal)?;
+                        *w = RuleSet::from_defs(rules::baseline_defs()).map_err(ModuleError::Fatal)?;
                     }
                 }
             },
             Err(e) => {
-                tracing::warn!(path = %rules_path.display(), error = %e, "规则库不存在，按空规则集继续");
+                tracing::warn!(path = %rules_path.display(), error = %e, "规则库不存在，回落内置基线词库");
                 if let Ok(mut w) = self.rules.write() {
-                    *w = RuleSet::from_defs(Vec::new()).map_err(ModuleError::Fatal)?;
+                    *w = RuleSet::from_defs(rules::baseline_defs()).map_err(ModuleError::Fatal)?;
                 }
             }
         }
@@ -479,28 +480,27 @@ impl Module for SemStage {
         if self.l2_enabled {
             // bge-large 是内置模型（随安装包 resources/models/）：按名解析，
             // 用户层存在优先（允许用户覆盖），否则用内置层。
-            let result = mctx
-                .models
-                .resolve_dir("bge-large")
-                .ok_or_else(|| "bge-large 模型目录不存在（内置层与用户层均未找到）".to_string())
-                .and_then(|dir| embedder::Embedder::load(&dir).map(|emb| (dir, emb)));
-            match result {
-                Ok((dir, emb)) => {
+            //
+            // **惰性加载（内存优化）**：init 只解析目录与头权重（几十 KB），
+            // **不加载 350MB 的 Embedder 会话**——真正的加载延后到 `ensure_loaded`，
+            // 由 worker 在「目标程序前台」时触发。这样目标不在前台/用户不打字时，
+            // 常驻内存只有头权重，实测空闲 RSS 从 ~360MB 降到 ~30-40MB。
+            match mctx.models.resolve_dir("bge-large") {
+                Some(dir) => {
+                    // heads::load 惰性创建 embedder：本项目双头均为线性头，
+                    // 不落模板兜底分支 → 此处不加载任何会话，仅读头权重。
                     self.heads = head::Heads::load(&dir);
                     if let Ok(mut w) = self.model_dir.write() {
-                        *w = Some(dir); // 记录目录：挂起卸载后 ensure_loaded 据此重载
-                    }
-                    if let Ok(mut w) = self.embedder.write() {
-                        *w = Some(emb);
+                        *w = Some(dir); // 记录目录：ensure_loaded 据此按需加载
                     }
                     tracing::info!(
                         heads = self.heads.describe(),
-                        "sem L2 已加载（ADR-14 嵌入+线性头）"
+                        "sem L2 头已就绪（Embedder 惰性加载，前台时才装入）"
                     );
                 }
-                Err(e) => {
-                    // fail-open（NFR-07）：仅 L1
-                    tracing::warn!(error = %e, "语义模型加载失败，仅启用 L1 规则判定");
+                None => {
+                    // fail-open（NFR-07）：模型目录缺失 → 仅 L1
+                    tracing::warn!("bge-large 模型目录不存在（内置层与用户层均未找到），仅启用 L1 规则判定");
                     self.l2_enabled = false;
                 }
             }

@@ -3,6 +3,7 @@ import { Switch } from '../components/Switch';
 import { Combobox } from '../components/Combobox';
 import { NumberInput } from '../components/NumberInput';
 import { SettingsRow } from '../components/SettingsGroup';
+import { settingsValueEqual } from '../lib/utils';
 
 /** SchemaField：ConfigType → 控件（schema 驱动渲染，新增配置项零前端改动，FR-UI-05）。 */
 
@@ -84,8 +85,17 @@ export function SchemaField({ field, value, onChange }: FieldProps) {
     }
   })();
 
+  // 已修改判定 + 还原：值偏离 schema 默认值时显示 * 与还原图标，
+  // 点击还原走与普通修改同一条写入路径（onChange(field.default)）。
+  const dirty = !settingsValueEqual(value, field.default);
+
   return (
-    <SettingsRow label={field.label} subtitle={field.help}>
+    <SettingsRow
+      label={field.label}
+      subtitle={field.help}
+      dirty={dirty}
+      onReset={() => onChange(field.default)}
+    >
       {control}
     </SettingsRow>
   );

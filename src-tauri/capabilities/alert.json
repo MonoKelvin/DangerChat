@@ -3,5 +3,12 @@
   "identifier": "alert",
   "description": "dc-alert 弹窗（拦截提示 + 动作回执；按钮/超时后自行隐藏窗口）",
   "windows": ["alert"],
-  "permissions": ["core:default", "core:window:allow-hide"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-hide",
+    "core:window:allow-set-size",
+    "core:window:allow-set-position",
+    "core:window:allow-inner-size",
+    "core:window:allow-scale-factor"
+  ]
 }

@@ -67,7 +67,7 @@ export function TrainingDialog({ open, onClose }: { open: boolean; onClose: () =
       }
     >
       <div className="space-y-4">
-        <p className="text-[13px] leading-relaxed">
+        <p className="text-label leading-relaxed">
           用 uitag 标注 10~20 张微信截图并导出训练数据，即可训练适配你界面版本的区域模型。
           训练在本机进行，需已安装 Python 与 ultralytics。
         </p>
@@ -92,7 +92,7 @@ export function TrainingDialog({ open, onClose }: { open: boolean; onClose: () =
           {datasets.length === 0 ? (
             <p className="mt-2 text-xs leading-relaxed text-[var(--text-tertiary)]">
               暂无训练数据：在 uitag 中标注图片后，导出 zip 到
-              <span className="mx-1 rounded bg-[var(--input-bg)] px-1 py-0.5 font-mono text-[11px]">{dataDir}/datasets</span>
+              <span className="mx-1 rounded bg-[var(--input-bg)] px-1 py-0.5 font-mono text-caption">{dataDir}/datasets</span>
               即会自动出现在列表中
             </p>
           ) : (
@@ -103,18 +103,18 @@ export function TrainingDialog({ open, onClose }: { open: boolean; onClose: () =
         {launchError && <p className="text-xs text-[var(--danger)]">{launchError}</p>}
 
         {running && (
-          <p className="flex items-center gap-2 text-[13px] text-[var(--text-secondary)]">
+          <p className="flex items-center gap-2 text-label text-[var(--text-secondary)]">
             <Loader2 className="size-4 animate-spin" />
             训练中（{status.dataset}），通常需要几分钟，可关闭对话框等待…
           </p>
         )}
         {status.state === 'success' && (
-          <p className="text-[13px] text-[var(--success)]">
+          <p className="text-label text-[var(--success)]">
             训练完成：模型「{status.model}」已就绪，可在「区域模型」下拉框中选择启用。
           </p>
         )}
         {status.state === 'error' && (
-          <p className="text-[13px] leading-relaxed text-[var(--danger)]">{status.message}</p>
+          <p className="text-label leading-relaxed text-[var(--danger)]">{status.message}</p>
         )}
       </div>
     </Modal>

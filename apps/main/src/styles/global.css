@@ -140,6 +140,18 @@
   --font-sans: var(--font-ui);
   --font-mono: var(--font-mono);
 
+  /* ── 字号标准 ──
+     填补 Tailwind 默认档之间缺的三档（11/13/15px），与默认 xs(12)/sm(14)/
+     base(16)/lg(18)/xl(20) 合成完整刻度。刻意只设 font-size、不带 line-height，
+     行为与被替换的 text-[Npx] 一致（行高继承，由 leading-* 或 body 的 1.5 决定）。
+     改字号只动这里，不再散落写死像素。用法：text-caption / text-label / text-item。
+     - text-caption 11px：角标 / 提示 / 次要计数
+     - text-label   13px：副标题 / 次级正文 / 小按钮
+     - text-item    15px：列表项主标题（侧栏应用名、场景/词库小标题） */
+  --text-caption: 0.6875rem;
+  --text-label: 0.8125rem;
+  --text-item: 0.9375rem;
+
   --color-background: var(--window-bg);
   --color-foreground: var(--text-primary);
   --color-card: var(--card-bg);

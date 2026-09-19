@@ -1,4 +1,5 @@
 import { type ReactNode } from 'react';
+import { RotateCcw } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 /**
@@ -15,7 +16,7 @@ export function SettingsGroup({ label, children }: { label?: string; children: R
   return (
     <section className="overflow-hidden rounded-2xl bg-[var(--group-bg)]">
       {label && (
-        <h3 className="px-5 pt-4 pb-1 text-[13px] font-semibold text-[var(--text-secondary)]">
+        <h3 className="px-5 pt-4 pb-1 text-label font-semibold text-[var(--text-secondary)]">
           {label}
         </h3>
       )}
@@ -28,6 +29,8 @@ export function SettingsRow({
   label,
   subtitle,
   stacked,
+  dirty,
+  onReset,
   children,
 }: {
   /** 省略时为纯内容行（长段落一类） */
@@ -35,6 +38,11 @@ export function SettingsRow({
   subtitle?: string;
   /** 长内容时上下布局，默认左右 */
   stacked?: boolean;
+  /** 值偏离默认时为 true：标题右上角显示 * 标记、标题后显示「还原为默认值」图标。
+   *  仅对可还原的单值设置项传入；新增对象/场景/词库等集合型不传。 */
+  dirty?: boolean;
+  /** 点击还原图标 → 走该项正常的写入流程回到默认值。dirty 为 true 时才显示图标。 */
+  onReset?: () => void;
   children: ReactNode;
 }) {
   return (
@@ -46,11 +54,33 @@ export function SettingsRow({
     >
       {label !== undefined && (
         <div className="min-w-0">
-          <p className={cn('text-sm font-medium text-[var(--text-primary)]', !subtitle && 'leading-6')}>
-            {label}
-          </p>
+          <div className="flex items-center gap-1.5">
+            <p className={cn('text-sm font-medium text-[var(--text-primary)]', !subtitle && 'leading-6')}>
+              {label}
+              {dirty && (
+                <span
+                  className="ml-0.5 align-top text-[var(--brand)]"
+                  title="已修改（偏离默认值）"
+                  aria-label="已修改"
+                >
+                  *
+                </span>
+              )}
+            </p>
+            {dirty && onReset && (
+              <button
+                type="button"
+                onClick={onReset}
+                data-tip="还原为默认值"
+                aria-label="还原为默认值"
+                className="inline-flex size-5 items-center justify-center rounded-md text-[var(--text-tertiary)] transition-colors hover:bg-[var(--hover-overlay)] hover:text-[var(--text-primary)]"
+              >
+                <RotateCcw className="size-3.5" strokeWidth={2} />
+              </button>
+            )}
+          </div>
           {subtitle && (
-            <p className="mt-0.5 text-[13px] leading-relaxed text-[var(--text-tertiary)]">{subtitle}</p>
+            <p className="mt-0.5 text-label leading-relaxed text-[var(--text-tertiary)]">{subtitle}</p>
           )}
         </div>
       )}

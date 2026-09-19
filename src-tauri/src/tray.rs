@@ -5,12 +5,24 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{TrayIcon, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Listener, Manager};
 
+/// 暂停/开启守护菜单项按状态切换的文案（点了「暂停守护」后应显示「开启守护」，反之亦然）。
+fn pause_label(paused: bool) -> &'static str {
+    if paused {
+        "开启守护"
+    } else {
+        "暂停守护"
+    }
+}
+
 use dc_bridge::events;
 use dc_bridge::state::AppState;
 use dc_pipeline::intercept::GuardState;
 
 /// 全幅拉伸后的品牌 logo（32px，托盘基础图；状态变色在内存中完成）
 static LOGO: &[u8] = include_bytes!("../icons/logo-32.png");
+
+/// 「暂停/开启守护」菜单项句柄（由 build 存入 state，refresh 时按守护态更新文案）。
+struct PauseMenuItem(MenuItem<tauri::Wry>);
 
 /// logo 基础色相（暖红 ≈11°）；主题色切换时由前端经 set_tray_hue 覆盖
 const LOGO_HUE: f32 = 11.0;
@@ -135,12 +147,16 @@ pub fn build(app: &AppHandle) -> tauri::Result<TrayIcon> {
     let state = app.state::<std::sync::Arc<AppState>>();
     let initial = logo_image(&state);
 
+    let paused = state.intercept.state() == GuardState::Paused;
+    let pause_item = MenuItem::with_id(app, "pause", pause_label(paused), true, None::<&str>)?;
+    // 存一份句柄，供 refresh 按守护状态切换文案（「暂停守护」↔「开启守护」）
+    app.manage(PauseMenuItem(pause_item.clone()));
     let menu = Menu::with_items(
         app,
         &[
             &MenuItem::with_id(app, "open", "打开设置", true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
-            &MenuItem::with_id(app, "pause", "暂停守护", true, None::<&str>)?,
+            &pause_item,
             &MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?,
         ],
     )?;
@@ -238,6 +254,11 @@ pub fn refresh(app: &AppHandle) {
     let icon = logo_image(&state);
     if let Some(tray) = app.tray_by_id("main") {
         let _ = tray.set_icon(Some(icon));
+    }
+    // 菜单文案随守护态切换：暂停后显示「开启守护」，恢复后显示「暂停守护」
+    let paused = state.intercept.state() == GuardState::Paused;
+    if let Some(item) = app.try_state::<PauseMenuItem>() {
+        let _ = item.0.set_text(pause_label(paused));
     }
 }
 

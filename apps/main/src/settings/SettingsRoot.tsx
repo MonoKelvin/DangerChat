@@ -13,6 +13,7 @@ import { Combobox, type ComboOption } from '../components/Combobox';
 import { ExtLink } from '../components/ExtLink';
 import { SettingsGroup, SettingsRow, SettingsSection } from '../components/SettingsGroup';
 import { AboutHero } from './AboutHero';
+import { useTintedLogo } from '../lib/logoTint';
 import { TrainingDialog } from './TrainingDialog';
 import { APP_NAME, APP_VERSION, AUTHOR, AUTHOR_URL, LICENSE, REPO_URL } from '../lib/meta';
 import {
@@ -23,6 +24,8 @@ import {
   setTheme,
   onSystemChange,
   applyTheme,
+  DEFAULT_THEME,
+  DEFAULT_ACCENT_ID,
   type Theme,
 } from '../lib/theme';
 
@@ -126,16 +129,21 @@ export function SettingsRoot() {
             ? '挂起'
             : '冷却';
 
-  /** logo 动态变色：同一张图 CSS 色相旋转/去饱和（与托盘 Rust 端 tint_for 同一映射）。
+  /** logo 动态变色：主题色态用真 HSL 着色（logoSrc，保饱和度），灰阶态叠 CSS 滤镜。
    *  守护中 = 主题色；挂起 = 浅灰；暂停(禁用) = 深灰；未发现目标 = 去饱和。 */
-  const accent = getAccent();
-  const hueShift = `hue-rotate(${Math.round(accent.hue - 11)}deg)`;
+  const [accentHue, setAccentHue] = useState(() => getAccent().hue);
+  useEffect(() => {
+    const on = (e: Event) => setAccentHue((e as CustomEvent<{ hue: number }>).detail.hue);
+    window.addEventListener('main:accent', on);
+    return () => window.removeEventListener('main:accent', on);
+  }, []);
+  const logoSrc = useTintedLogo(accentHue);
   const logoFilter =
     status == null
       ? 'saturate(0.12)'
       : status.state === 'active'
         ? status.target_found
-          ? hueShift
+          ? undefined
           : 'saturate(0.12)'
         : status.state === 'paused'
           ? 'saturate(0.06) brightness(0.65)'
@@ -146,19 +154,23 @@ export function SettingsRoot() {
   /** 渲染一组 schema 字段（目标程序/区域模型特殊渲染为自定义行） */
   const renderField = (key: string) => {
     if (key === 'target.process_name') {
+      const def = byKey.get(key)?.default;
       return (
         <TargetAppRow
           key={key}
-          value={values[key] ?? byKey.get(key)?.default}
+          value={values[key] ?? def}
+          defaultValue={def}
           onChange={(v) => change(key, v)}
         />
       );
     }
     if (key === 'layout.model') {
+      const def = String(byKey.get(key)?.default ?? 'dc-layout-wechat');
       return (
         <LayoutModelRow
           key={key}
-          value={String(values[key] ?? byKey.get(key)?.default ?? 'dc-layout-wechat')}
+          value={String(values[key] ?? def)}
+          defaultValue={def}
           onChange={(v) => change(key, v)}
         />
       );
@@ -181,13 +193,13 @@ export function SettingsRoot() {
       <nav className="flex w-56 shrink-0 flex-col bg-[var(--sidebar-bg)] px-3 pb-4">
         <div className="mb-5 flex items-center gap-3 px-2 pt-1">
           <img
-            src="app-icon.png"
+            src={logoSrc}
             alt={APP_NAME}
             className="size-9 rounded-xl object-cover shadow-[var(--shadow-sm)] transition-[filter] duration-300"
             style={{ filter: logoFilter }}
           />
           <div className="flex flex-1 flex-col leading-tight">
-            <span className="text-[15px] font-semibold tracking-tight text-[var(--text-primary)]">{APP_NAME}</span>
+            <span className="text-item font-semibold tracking-tight text-[var(--text-primary)]">{APP_NAME}</span>
             <div className="mt-0.5 flex items-center gap-1.5 text-xs">
               <StateIcon className={cn('size-3.5', stateColor)} strokeWidth={2} />
               <span className="text-[var(--text-tertiary)]">{stateText}</span>
@@ -250,7 +262,7 @@ export function SettingsRoot() {
         {active === '高级设置' && (
           <div className="mx-auto max-w-2xl">
             <h2 className="mb-1 text-xl font-semibold tracking-tight text-[var(--text-primary)]">高级设置</h2>
-            <p className="mb-5 text-[13px] text-[var(--text-tertiary)]">
+            <p className="mb-5 text-label text-[var(--text-tertiary)]">
               面向开发与调试的技术参数，日常使用无需调整。
             </p>
             <SettingsSection>
@@ -308,12 +320,27 @@ function AppearanceGroup() {
   const themeOptions: { value: Theme; label: string; icon: typeof Sun }[] = [
     { value: 'dark', label: '深色', icon: Moon },
     { value: 'light', label: '浅色', icon: Sun },
-    { value: 'system', label: '跟随系统', icon: Monitor },
+    { value: 'system', label: '系统', icon: Monitor },
   ];
+
+  const applyAccentChoice = (a: (typeof ACCENTS)[number]) => {
+    setAccent(a);
+    setAccentId(a.id);
+    // 托盘图标同步色相（浏览器 dev 环境无 Tauri，静默失败）
+    void api.setTrayHue(a.hue).catch(() => {});
+  };
 
   return (
     <SettingsGroup label="外观">
-      <SettingsRow label="主题" subtitle="界面配色，跟随系统时随系统设置自动切换">
+      <SettingsRow
+        label="主题"
+        subtitle="界面配色，跟随系统时随系统设置自动切换"
+        dirty={theme !== DEFAULT_THEME}
+        onReset={() => {
+          setTheme(DEFAULT_THEME);
+          setThemeState(DEFAULT_THEME);
+        }}
+      >
         <div className="flex gap-1 rounded-lg bg-[var(--input-bg)] p-1">
           {themeOptions.map(({ value, label, icon: Icon }) => (
             <button
@@ -323,7 +350,7 @@ function AppearanceGroup() {
                 setThemeState(value);
               }}
               className={cn(
-                'flex h-7 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium transition-all',
+                'flex h-7 items-center gap-1.5 rounded-md px-3 text-label font-medium transition-all',
                 theme === value
                   ? 'bg-[var(--brand)] text-[var(--brand-text)] shadow-[var(--shadow-sm)]'
                   : 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]',
@@ -335,17 +362,20 @@ function AppearanceGroup() {
           ))}
         </div>
       </SettingsRow>
-      <SettingsRow label="主题色" subtitle="强调色；托盘与界面图标同步变色">
+      <SettingsRow
+        label="主题色"
+        subtitle="强调色；托盘与界面图标同步变色"
+        dirty={accentId !== DEFAULT_ACCENT_ID}
+        onReset={() => {
+          const def = ACCENTS.find((a) => a.id === DEFAULT_ACCENT_ID) ?? ACCENTS[0];
+          applyAccentChoice(def);
+        }}
+      >
         <div className="flex items-center gap-2">
           {ACCENTS.map((a) => (
             <button
               key={a.id}
-              onClick={() => {
-                setAccent(a);
-                setAccentId(a.id);
-                // 托盘图标同步色相（浏览器 dev 环境无 Tauri，静默失败）
-                void api.setTrayHue(a.hue).catch(() => {});
-              }}
+              onClick={() => applyAccentChoice(a)}
               data-tip={a.name}
               className={cn(
                 'size-5 rounded-full transition-all duration-150',
@@ -358,7 +388,12 @@ function AppearanceGroup() {
           ))}
         </div>
       </SettingsRow>
-      <SettingsRow label="自定义鼠标指针" subtitle="品牌色箭头/圆环光标，关闭后使用系统指针">
+      <SettingsRow
+        label="自定义鼠标指针"
+        subtitle="品牌色箭头/圆环光标，关闭后使用系统指针"
+        dirty={!cursorFx}
+        onReset={() => toggleCursorFx(true)}
+      >
         <Switch checked={cursorFx} onChange={toggleCursorFx} label="自定义鼠标指针" />
       </SettingsRow>
     </SettingsGroup>
@@ -373,17 +408,23 @@ function AutostartRow() {
     });
   }, []);
 
-  const toggle = () => {
+  const setEnabled = (next: boolean) => {
     void import('@tauri-apps/plugin-autostart').then(async (m) => {
-      if (on) await m.disable();
-      else await m.enable();
-      setOn(!on);
+      if (next) await m.enable();
+      else await m.disable();
+      setOn(next);
     });
   };
 
+  // 默认关闭：开启后显示 * 与还原图标
   return (
-    <SettingsRow label="开机启动" subtitle="系统登录时自动运行">
-      <Switch checked={on} onChange={toggle} label="开机启动" />
+    <SettingsRow
+      label="开机启动"
+      subtitle="系统登录时自动运行"
+      dirty={on}
+      onReset={() => setEnabled(false)}
+    >
+      <Switch checked={on} onChange={setEnabled} label="开机启动" />
     </SettingsRow>
   );
 }
@@ -409,6 +450,9 @@ function DataDirRow() {
   const [busy, setBusy] = useState(false);
   /** 迁移成功回执；非 null 即弹窗打开 */
   const [report, setReport] = useState<import('../lib/commands').MigrateReport | null>(null);
+  /** 还原为默认目录确认框 */
+  const [resetConfirm, setResetConfirm] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   const load = () =>
     void api
@@ -436,10 +480,26 @@ function DataDirRow() {
     }
   };
 
+  /** 还原为默认目录：走与「设为默认」一致的流程（set_data_dir("") → 写指针 → 重启生效）。 */
+  const resetToDefault = async () => {
+    setResetting(true);
+    setError(null);
+    try {
+      await api.setDataDir('');
+      await api.restartApp();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '还原失败');
+      setResetting(false);
+      setResetConfirm(false);
+    }
+  };
+
   return (
     <SettingsRow
       label="数据目录"
       subtitle={info ? (info.custom ? `${info.current}（自定义）` : info.current) : '读取中…'}
+      dirty={info?.custom ?? false}
+      onReset={() => setResetConfirm(true)}
     >
       <div className="flex gap-1.5">
         <IconButton
@@ -462,6 +522,28 @@ function DataDirRow() {
       </div>
       {error && <p className="text-xs text-[var(--warning)]">{error}</p>}
       {report && <MigrateResultDialog report={report} onClose={() => setReport(null)} />}
+      {resetConfirm && (
+        <Modal
+          open
+          title="还原为默认数据目录"
+          onClose={() => !resetting && setResetConfirm(false)}
+          footer={
+            <>
+              <ModalButton variant="primary" disabled={resetting} onClick={() => void resetToDefault()}>
+                {resetting ? '还原中…' : '还原并重启'}
+              </ModalButton>
+              <ModalButton disabled={resetting} onClick={() => setResetConfirm(false)}>
+                取消
+              </ModalButton>
+            </>
+          }
+        >
+          <p>
+            将数据目录指针改回系统默认位置，重启后生效。当前自定义目录下的数据不会被移动或删除，
+            如需保留请自行迁移。
+          </p>
+        </Modal>
+      )}
     </SettingsRow>
   );
 }
@@ -583,9 +665,11 @@ function MigrateResultDialog({
  */
 function TargetAppRow({
   value,
+  defaultValue,
   onChange,
 }: {
   value: unknown;
+  defaultValue?: unknown;
   onChange: (v: unknown) => void;
 }) {
   const current = String(value ?? '');
@@ -605,8 +689,16 @@ function TargetAppRow({
     if (v && v !== current) onChange(v);
   };
 
+  const def = String(defaultValue ?? '');
+  const dirty = def !== '' && current.toLowerCase() !== def.toLowerCase();
+
   return (
-    <SettingsRow label="防护应用" subtitle="仅拦截该窗口的发送按键">
+    <SettingsRow
+      label="防护应用"
+      subtitle="仅拦截该窗口的发送按键"
+      dirty={dirty}
+      onReset={() => onChange(def)}
+    >
       <div className="flex flex-col items-end gap-2">
         <Combobox
           value={customMode ? CUSTOM_APP_VALUE : current}
@@ -643,7 +735,15 @@ function TargetAppRow({
 }
 
 /** 区域模型行：下拉列出 models/ 有效 layout 模型（目录监听自动刷新）+ 自助训练入口 */
-function LayoutModelRow({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function LayoutModelRow({
+  value,
+  defaultValue,
+  onChange,
+}: {
+  value: string;
+  defaultValue?: string;
+  onChange: (v: string) => void;
+}) {
   const [models, setModels] = useState<ModelDto[]>([]);
   const [trainingOpen, setTrainingOpen] = useState(false);
 
@@ -661,8 +761,15 @@ function LayoutModelRow({ value, onChange }: { value: string; onChange: (v: stri
       hint: m.source === 'builtin' ? '内置' : '用户',
     }));
 
+  const dirty = defaultValue != null && value !== defaultValue;
+
   return (
-    <SettingsRow label="区域模型" subtitle="models/ 下的模型目录名；界面识别不准时可训练自定义模型">
+    <SettingsRow
+      label="区域模型"
+      subtitle="models/ 下的模型目录名；界面识别不准时可训练自定义模型"
+      dirty={dirty}
+      onReset={() => defaultValue != null && onChange(defaultValue)}
+    >
       <div className="flex gap-1.5">
         <Combobox value={value} options={options} onChange={onChange} className="w-40" />
         <IconButton
@@ -875,7 +982,7 @@ function ScenariosPage() {
   return (
     <div className="mx-auto max-w-3xl">
       <h2 className="mb-1 text-xl font-semibold tracking-tight text-[var(--text-primary)]">场景管理</h2>
-      <p className="mb-5 text-[13px] text-[var(--text-tertiary)]">
+      <p className="mb-5 text-label text-[var(--text-tertiary)]">
         场景决定对聊天对象的判定尺度；词库规则与对象画像均按场景生效。「正式」「个人」为内置场景。
       </p>
       <ScenarioList scenarios={scenarios} onChange={setScenarios} />
@@ -912,7 +1019,7 @@ function ScenarioList({
   return (
     <section className="mb-8">
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-[15px] font-semibold tracking-tight text-[var(--text-primary)]">场景</h3>
+        <h3 className="text-item font-semibold tracking-tight text-[var(--text-primary)]">场景</h3>
         <span className="text-xs text-[var(--text-tertiary)]">{scenarios.length}/10</span>
         <button
           className="flex items-center gap-1.5 rounded-lg bg-[var(--brand)] px-3.5 py-2 text-sm font-medium text-[var(--brand-text)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--brand-hover)] disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
@@ -1033,7 +1140,7 @@ function ScenarioDialog({
         </>
       }
     >
-      <label className="mb-1.5 block text-[13px] font-medium text-[var(--text-secondary)]">场景名</label>
+      <label className="mb-1.5 block text-label font-medium text-[var(--text-secondary)]">场景名</label>
       <input
         autoFocus
         className="h-9 w-full rounded-lg bg-[var(--input-bg)] px-3.5 text-sm text-[var(--text-primary)] outline-none transition-all duration-150 hover:bg-[var(--active-overlay)] focus:bg-[var(--panel-bg)] focus:shadow-[inset_0_0_0_1.5px_var(--brand)]"
@@ -1044,7 +1151,7 @@ function ScenarioDialog({
         onKeyDown={(e) => e.key === 'Enter' && name.trim() && save()}
       />
       <div className="mt-4 flex items-center gap-3">
-        <label className="shrink-0 text-[13px] font-medium text-[var(--text-secondary)]">判定基线</label>
+        <label className="shrink-0 text-label font-medium text-[var(--text-secondary)]">判定基线</label>
         <Combobox value={base} options={BASE_OPTIONS} onChange={(v) => setBase(v as 'formal' | 'casual')} className="w-40" />
       </div>
       <p className="mt-3 text-xs leading-relaxed text-[var(--text-tertiary)]">
@@ -1120,7 +1227,7 @@ function RulesEditor({ scenarios }: { scenarios: ScenarioDto[] }) {
     <section>
       <div className="mb-3 flex items-center justify-between">
         <div>
-          <h3 className="text-[15px] font-semibold tracking-tight text-[var(--text-primary)]">词库</h3>
+          <h3 className="text-item font-semibold tracking-tight text-[var(--text-primary)]">词库</h3>
           <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">
             修改后自动保存 {saving && <span className="text-[var(--brand)]">· 保存中...</span>}
           </p>
@@ -1199,25 +1306,27 @@ function LogsGroup() {
         {confirming ? (
           <div className="flex gap-2">
             <button
-              className="rounded-lg bg-[var(--danger)] px-3.5 py-1.5 text-[13px] font-medium text-white shadow-[var(--shadow-sm)] transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-40"
+              className="inline-flex h-9 items-center justify-center rounded-lg bg-[var(--danger)] px-3.5 text-label font-medium leading-none text-white shadow-[var(--shadow-sm)] transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-40"
               disabled={clearing}
               onClick={clearLogs}
             >
-              {clearing ? '清空中...' : '确认清空'}
+              {/* YaHei 字形在行盒内偏低（内部 ascent/descent 不对称），flex 居中后仍偏下，
+                  上移 1px 抵消，视觉才真正居中 */}
+              <span className="-translate-y-px">{clearing ? '清空中...' : '确认清空'}</span>
             </button>
             <button
-              className="rounded-lg bg-[var(--input-bg)] px-3.5 py-1.5 text-[13px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--active-overlay)] hover:text-[var(--text-primary)]"
+              className="inline-flex h-9 items-center justify-center rounded-lg bg-[var(--input-bg)] px-3.5 text-label leading-none text-[var(--text-secondary)] transition-colors hover:bg-[var(--active-overlay)] hover:text-[var(--text-primary)]"
               onClick={() => setConfirming(false)}
             >
-              取消
+              <span className="-translate-y-px">取消</span>
             </button>
           </div>
         ) : (
           <button
-            className="rounded-lg bg-[var(--input-bg)] px-3.5 py-1.5 text-[13px] font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"
+            className="inline-flex h-9 items-center justify-center rounded-lg bg-[var(--input-bg)] px-3.5 text-label font-medium leading-none text-[var(--text-primary)] transition-colors hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"
             onClick={() => setConfirming(true)}
           >
-            清空全部日志
+            <span className="-translate-y-px">清空全部日志</span>
           </button>
         )}
       </SettingsRow>
@@ -1247,9 +1356,9 @@ function AboutPage() {
         </SettingsGroup>
 
         <SettingsGroup label="风险提示">
-          {/* 重点条款：主题色左边线 + 主题色强调，阅读时不可错过 */}
+          {/* 重点条款：主题色强调，阅读时不可错过 */}
           <SettingsRow stacked>
-            <div className="rounded-xl border-l-[3px] border-[var(--brand)] bg-[var(--brand-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--text-secondary)]">
+            <div className="rounded-xl bg-[var(--brand-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--text-secondary)]">
               <p>
                 本软件通过
                 <span className="font-semibold text-[var(--brand)]">截取屏幕画面并识别文字</span>

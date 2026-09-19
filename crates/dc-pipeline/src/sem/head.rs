@@ -41,6 +41,14 @@ enum Head {
     None,
 }
 
+/// 头文件解析中间态（未预计算锚点；embedder 惰性加载的分界）。
+enum ParsedHead {
+    Linear { weights: Vec<f32>, bias: f32 },
+    /// 需模板兜底（load 时才加载 embedder 预计算锚点）。
+    Templates(Vec<String>),
+    None,
+}
+
 /// formal/casual 双头集合（锚点在 load 时预计算，运行期零推理）。
 pub struct Heads {
     formal: Head,
@@ -56,33 +64,53 @@ impl Heads {
         }
     }
 
-    /// 从 models/bge/ 加载两个头 + 模板锚点（锚点预计算，运行期零推理）。
+    /// 从 models/bge/ 加载两个头。**embedder 惰性创建**（内存优化）：
+    /// 只有当某个头需要模板兜底（缺 weights 或维度不符）时才加载 Embedder 预计算锚点；
+    /// 若两个头都是训练好的线性头（本项目的默认情形），根本不加载 embedder——
+    /// 避免曾经的「Heads::load 白白多加载一次 350MB 会话」的浪费。
     pub fn load(model_dir: &std::path::Path) -> Self {
-        let embedder = std::sync::Arc::new(match super::embedder::Embedder::load(model_dir) {
-            Ok(e) => e,
-            Err(e) => {
-                tracing::warn!(error = %e, "头锚点预计算失败，模板兜底不可用");
-                return Self::fallback_only();
-            }
-        });
+        // 先只读文件、解析权重，不碰 embedder。
+        let formal_parsed = Self::parse_head(&model_dir.join("head-formal.json"));
+        let casual_parsed = Self::parse_head(&model_dir.join("head-casual.json"));
 
-        let formal = Self::load_head(&model_dir.join("head-formal.json"), &embedder);
-        let casual = Self::load_head(&model_dir.join("head-casual.json"), &embedder);
+        // 惰性 embedder：仅当有头落入模板兜底分支时才创建（Arc 便于两头共享）。
+        let mut embedder: Option<std::sync::Arc<super::embedder::Embedder>> = None;
+        let mut make = |parsed: ParsedHead| -> Head {
+            match parsed {
+                ParsedHead::Linear { weights, bias } => Head::Linear { weights, bias },
+                ParsedHead::None => Head::None,
+                ParsedHead::Templates(templates) => {
+                    if embedder.is_none() {
+                        embedder = match super::embedder::Embedder::load(model_dir) {
+                            Ok(e) => Some(std::sync::Arc::new(e)),
+                            Err(e) => {
+                                tracing::warn!(error = %e, "头锚点预计算失败，模板兜底不可用");
+                                None
+                            }
+                        };
+                    }
+                    match &embedder {
+                        Some(emb) => Self::anchors_from(templates, emb),
+                        None => Head::None,
+                    }
+                }
+            }
+        };
+        let formal = make(formal_parsed);
+        let casual = make(casual_parsed);
         Self { formal, casual }
     }
 
-    fn load_head(
-        path: &std::path::Path,
-        embedder: &std::sync::Arc<super::embedder::Embedder>,
-    ) -> Head {
+    /// 读文件 + 解析权重维度，**不加载 embedder**（判定是否需要模板兜底延后到 load）。
+    fn parse_head(path: &std::path::Path) -> ParsedHead {
         let Ok(text) = std::fs::read_to_string(path) else {
-            return Head::None;
+            return ParsedHead::None;
         };
         let parsed: HeadFile = match serde_json::from_str(&text) {
             Ok(h) => h,
             Err(e) => {
                 tracing::warn!(path = %path.display(), error = %e, "头文件非法，按无头处理");
-                return Head::None;
+                return ParsedHead::None;
             }
         };
         // 允许三种特征维度：
@@ -93,7 +121,7 @@ impl Heads {
         // 其他维度一律降级模板兜底（只提示不拦截），绝不按错误维度打分。
         let dim_ok = [EMBED_DIM, 2 * EMBED_DIM, 4 * EMBED_DIM].contains(&parsed.dim);
         match parsed.weights {
-            Some(w) if w.len() == parsed.dim && dim_ok => Head::Linear {
+            Some(w) if w.len() == parsed.dim && dim_ok => ParsedHead::Linear {
                 weights: w,
                 bias: parsed.bias,
             },
@@ -106,9 +134,9 @@ impl Heads {
                     2 * EMBED_DIM,
                     4 * EMBED_DIM
                 );
-                Self::anchors_from(parsed.templates, embedder)
+                ParsedHead::Templates(parsed.templates)
             }
-            None => Self::anchors_from(parsed.templates, embedder),
+            None => ParsedHead::Templates(parsed.templates),
         }
     }
 

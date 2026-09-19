@@ -6,6 +6,10 @@ const THEME_KEY = 'main-ui:theme';
 const ACCENT_KEY = 'main-ui:accent';
 const ORDER: Theme[] = ['dark', 'light', 'system'];
 
+/** 默认外观（还原为默认值用；与 getTheme/getAccent 的 fallback 保持一致）。 */
+export const DEFAULT_THEME: Theme = 'system';
+export const DEFAULT_ACCENT_ID = 'vermillion';
+
 export interface AccentDef {
   id: string;
   name: string;
@@ -32,12 +36,12 @@ export const ACCENTS: AccentDef[] = [
 export const THEME_LABEL: Record<Theme, string> = {
   dark: '深色',
   light: '浅色',
-  system: '跟随系统',
+  system: '系统',
 };
 
 export function getTheme(): Theme {
   const v = localStorage.getItem(THEME_KEY);
-  return ORDER.includes(v as Theme) ? (v as Theme) : 'dark';
+  return ORDER.includes(v as Theme) ? (v as Theme) : DEFAULT_THEME;
 }
 
 export function getAccent(): AccentDef {
@@ -68,6 +72,8 @@ export function setTheme(t: Theme): void {
 export function setAccent(a: AccentDef): void {
   localStorage.setItem(ACCENT_KEY, a.id);
   applyAccent(a);
+  // 通知 logo 着色（侧栏/关于页）即时刷新，与托盘同步
+  window.dispatchEvent(new CustomEvent('main:accent', { detail: a }));
 }
 
 /** 点击循环：深色 → 浅色 → 系统 → 深色 */

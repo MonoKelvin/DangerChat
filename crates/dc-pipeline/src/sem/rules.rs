@@ -53,6 +53,42 @@ fn default_applies() -> Vec<String> {
     vec!["all".into()]
 }
 
+/// 内置基线违禁词库（`from_json` 恒加载在用户规则之前）。
+///
+/// 目标：明显脏话/攻击性称谓「开箱即拦」，不依赖用户手动配置。范围克制——
+/// 只收无场景争议的辱骂类，情绪化吐槽/隐私误发交给 L2 语义判定，避免误伤日常沟通。
+/// 用户可在 rules.json 追加规则叠加其上；如需覆盖基线行为，后续可加「禁用基线」开关。
+///
+/// `word` 用于拉丁缩写（sb/nmsl 需词边界，不误伤 absb）；`regex` 覆盖脏话的常见变体。
+pub fn baseline_defs() -> Vec<RuleDef> {
+    let word = |p: &str, scenes: &[&str]| RuleDef {
+        pattern: p.into(),
+        r#match: MatchKind::Word,
+        applies_to: scenes.iter().map(|s| s.to_string()).collect(),
+    };
+    let re = |p: &str, scenes: &[&str]| RuleDef {
+        pattern: p.into(),
+        r#match: MatchKind::Regex,
+        applies_to: scenes.iter().map(|s| s.to_string()).collect(),
+    };
+    vec![
+        // 拉丁缩写脏话（词边界；formal 场景恒拦，casual 熟人间不拦以免误伤玩笑）
+        word("sb", &["formal"]),
+        word("nmsl", &["all"]),
+        word("cnm", &["all"]),
+        word("mmp", &["formal"]),
+        word("wcnm", &["all"]),
+        // 中文辱骂常见变体（正则容错错别字/谐音；formal 恒拦）
+        re("(傻|沙|煞)(比|逼|叉|缺)", &["formal"]),
+        re("(草|操|艹|cao)你?(妈|马|吗)", &["all"]),
+        re("(滚|滚蛋|滚开)", &["formal"]),
+        re("(废|费)物", &["formal"]),
+        re("(去死|找死|该死)", &["formal"]),
+        re("(神经病|有病|贱人|贱货)", &["formal"]),
+        re("(nc|脑残|智障|弱智)", &["formal"]),
+    ]
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MatchKind {
@@ -112,10 +148,14 @@ impl RuleSet {
         Self::from_defs(parsed.rule)
     }
 
+    /// 生产加载路径：用户 rules.json + **内置基线词库**（baseline 在前，命中优先）。
+    /// 基线保证「sb / 傻逼」这类明显脏话开箱即拦，不依赖用户手动配置；用户规则叠加其上。
     pub fn from_json(text: &str) -> Result<Self, String> {
         let parsed: super::doc::RuleDoc =
             serde_json::from_str(text).map_err(|e| format!("rules.json 解析失败：{e}"))?;
-        Self::from_defs(parsed.rule)
+        let mut defs = baseline_defs();
+        defs.extend(parsed.rule);
+        Self::from_defs(defs)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -268,5 +308,35 @@ match = "regex"
     fn empty_text_no_hit() {
         let rs = rules();
         assert!(rs.first_hit("", "formal").is_none());
+    }
+
+    /// 内置基线词库：明显脏话开箱即拦（不依赖用户 rules.json）。
+    #[test]
+    fn baseline_blocks_common_slurs() {
+        // 空 rules.json 也带基线（from_json 恒叠加）
+        let rs = RuleSet::from_json(r#"{"rule":[]}"#).unwrap();
+        // formal 场景：sb / 傻逼 / 变体 命中
+        assert!(rs.first_hit("你是 sb", "formal").is_some(), "sb 应被基线拦");
+        assert!(rs.first_hit("傻逼玩意", "formal").is_some());
+        assert!(rs.first_hit("沙比", "formal").is_some(), "谐音变体");
+        assert!(rs.first_hit("草你妈", "formal").is_some());
+        // word 边界：不误伤嵌入词
+        assert!(rs.first_hit("absb 内嵌", "formal").is_none());
+        // casual 场景：sb 熟人间不拦（applies formal-only），但通用脏话仍拦
+        assert!(rs.first_hit("你是 sb", "casual").is_none(), "sb 仅 formal");
+        assert!(rs.first_hit("nmsl", "casual").is_some(), "nmsl applies all");
+    }
+
+    /// 用户规则叠加在基线之上（两者并存，不互相覆盖）。
+    #[test]
+    fn user_rules_stack_on_baseline() {
+        let rs = RuleSet::from_json(
+            r#"{"rule":[{"pattern":"内部代号X","match":"substring","applies_to":["all"]}]}"#,
+        )
+        .unwrap();
+        // 用户自定义词命中
+        assert!(rs.first_hit("提到内部代号X了", "formal").is_some());
+        // 基线仍然生效
+        assert!(rs.first_hit("你是 sb", "formal").is_some());
     }
 }

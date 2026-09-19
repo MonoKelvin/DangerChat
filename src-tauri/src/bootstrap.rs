@@ -121,10 +121,10 @@ pub fn bootstrap(app: &tauri::AppHandle) -> Arc<AppState> {
                 vec![
                     dc_core::ConfigField {
                         key: "alert.timeout_secs".into(),
-                        ty: dc_core::ConfigType::Int { min: 3, max: 60 },
-                        default: dc_core::ConfigValue::Int(10),
+                        ty: dc_core::ConfigType::Int { min: 0, max: 60 },
+                        default: dc_core::ConfigValue::Int(0),
                         label: "弹窗倒计时".into(),
-                        help: "超时后弹窗自动关闭（等同「关闭」）".into(),
+                        help: "超时后弹窗自动关闭（等同「关闭」）；设为 0 表示不自动关闭".into(),
                         group: "拦截与提示".into(),
                         owner: "alert".into(),
                     },
@@ -227,8 +227,9 @@ pub fn bootstrap(app: &tauri::AppHandle) -> Arc<AppState> {
             &scenes_path,
         )),
         stats: DailyStats::load(stats_path),
+        // 0 = 不自动关闭（前端据此不启动倒计时）；非 0 为超时秒数。
         countdown_secs: std::sync::Mutex::new(
-            config.snapshot().i64_or("alert.timeout_secs", 10).max(1) as u64,
+            config.snapshot().i64_or("alert.timeout_secs", 0).max(0) as u64,
         ),
         data_dir: data_dir.clone(),
         default_data_dir: default_dir,

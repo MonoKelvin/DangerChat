@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '../lib/utils';
+import { getAccent } from '../lib/theme';
+import { useTintedLogo } from '../lib/logoTint';
 
 /* ── 版本号数字滚动：每个数字是竖排 0-9×2 胶片列，hover 滚入（级联延迟 + 回弹）── */
 
@@ -242,6 +244,15 @@ export function AboutHero({ name, version }: { name: string; version: string }) 
   const fxRef = useRef<HTMLDivElement>(null);
   const particles = useRef<FxParticle[]>(createParticles());
 
+  // logo 真 HSL 着色（保饱和度，与托盘/侧栏同源）；主题色切换即时刷新
+  const [accentHue, setAccentHue] = useState(() => getAccent().hue);
+  useEffect(() => {
+    const on = (e: Event) => setAccentHue((e as CustomEvent<{ hue: number }>).detail.hue);
+    window.addEventListener('main:accent', on);
+    return () => window.removeEventListener('main:accent', on);
+  }, []);
+  const logoSrc = useTintedLogo(accentHue);
+
   useEffect(() => {
     if (!hover) return;
     const spans = Array.from(fxRef.current?.querySelectorAll<HTMLElement>('[data-particle]') ?? []);
@@ -334,13 +345,13 @@ export function AboutHero({ name, version }: { name: string; version: string }) 
       {/* 内容层 */}
       <div className="relative z-[2] flex items-center gap-4 px-6 py-5">
         <img
-          src="app-icon.png"
+          src={logoSrc}
           alt={name}
           className="size-14 shrink-0 rounded-[0.875rem] object-cover transition-transform duration-300 group-hover:scale-105 group-hover:-rotate-2"
         />
         <div className="min-w-0 flex-1 transition-transform duration-200 group-hover:translate-x-0.5">
           <h2 className="text-xl font-semibold tracking-tight text-[var(--text-primary)]">{name}</h2>
-          <p className="mt-1 text-[13px] text-[var(--text-secondary)]">
+          <p className="mt-1 text-label text-[var(--text-secondary)]">
             © {new Date().getFullYear()} DangerChat · 纯本地运行 · 开源可审计
           </p>
         </div>

@@ -46,14 +46,14 @@ export function NoticePage({ onAgree }: { onAgree: () => void }) {
         {/* 协议风险（原文照贴） */}
         <section className="rounded-lg border border-amber-500/40 bg-amber-500/5 px-5 py-4">
           <h2 className="mb-2 text-base font-semibold">协议风险</h2>
-          <p className="text-[14px] leading-relaxed text-foreground/90">
+          <p className="text-sm leading-relaxed text-foreground/90">
             微信《软件许可及服务协议》8.2.1.6 与《微信个人账号使用规范》1.2.6 规定，禁止
             “通过非腾讯开发、授权的第三方软件……对微信软件及其组件、模块、界面、数据等进行访问、读取或控制”。
           </p>
-          <p className="mt-2 text-[14px] font-medium text-amber-600 dark:text-amber-400">
+          <p className="mt-2 text-sm font-medium text-amber-600 dark:text-amber-400">
             使用本类工具可能违反微信条款，存在账号被限制或封禁的风险，责任由使用者自行承担。
           </p>
-          <p className="mt-2 text-[14px] leading-relaxed text-muted-foreground">
+          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
             本软件仅在本地屏幕画面与按键层作判断，从不接触微信进程、从不读取微信文件、从不发送任何消息。
             但我们无法保证腾讯不会做出不同认定。使用前请阅读
             <ExtLink url={WECHAT_AGREEMENT}>《微信软件许可及服务协议》</ExtLink>
@@ -66,7 +66,7 @@ export function NoticePage({ onAgree }: { onAgree: () => void }) {
         {/* 原则和底线 */}
         <section className="rounded-lg border border-border/50 bg-card/60 px-5 py-4">
           <h2 className="mb-2 text-base font-semibold">原则和底线</h2>
-          <ul className="space-y-1.5 text-[14px] leading-relaxed text-foreground/90">
+          <ul className="space-y-1.5 text-sm leading-relaxed text-foreground/90">
             <li>· 不注入或修改微信程序</li>
             <li>· 不读取或解密微信聊天记录文件</li>
             <li>· 不替你发送任何消息</li>

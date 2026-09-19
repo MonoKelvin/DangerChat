@@ -247,9 +247,12 @@ where
             return self.run_slow(request);
         };
         let hash = probe(&snap, &layout);
+        // 海明距 ≤4 视为未变（抗渲染抖动/抗锯齿；见 phash::unchanged）。
+        // 曾用精确 `==`：任何一像素抖动都判「变了」→ 每次心跳都跑全量慢环，
+        // 占满 worker 饿死快环，正是回车迟钝的元凶之一。
         let unchanged = match self.last_phash.lock() {
             Ok(mut last) => {
-                let same = *last == Some(hash);
+                let same = last.map(|h| crate::guard::phash::unchanged(h, hash)).unwrap_or(false);
                 *last = Some(hash);
                 same
             }
