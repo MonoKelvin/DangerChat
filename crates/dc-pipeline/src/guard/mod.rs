@@ -14,7 +14,6 @@ use std::time::Duration;
 use dc_core::ConfigField;
 use dc_sys::{Hwnd, SysApi};
 
-use crate::clock::MonoClock;
 use crate::contract::{LoopKind, Module, PipelineContext, RegionLayout, WindowSnapshot};
 use crate::guard::core::HeartbeatProbe;
 use crate::intercept::{Intercept, Trigger};
@@ -59,7 +58,7 @@ impl Guard {
         // 目标是否前台（挂起态卸载判据，§2.4）。由调用方从 Arc<Intercept> 构造：
         // { let i = intercept.clone(); move || i.target_active() }
         target_active: Arc<dyn Fn() -> bool + Send + Sync>,
-        // 判定入槽回调（fail-closed 闭环，§2.2 修订）。由调用方从 Arc<Intercept> 构造：
+        // 判定入槽回调（fail-closed 补判闭环，§2.2 修订）。由调用方从 Arc<Intercept> 构造：
         // { let i = intercept.clone(); move |v| i.on_analysis_ready(v) }
         on_verdict_stored: Arc<dyn Fn(&crate::verdict::Verdict) + Send + Sync>,
     ) -> Result<Self, String> {
@@ -84,7 +83,7 @@ impl Guard {
             (Arc::new(layout), Arc::new(ocr), Arc::new(sem))
         };
 
-        let clock: Arc<dyn crate::clock::Clock> = Arc::new(MonoClock::new());
+        let clock = intercept.clock_arc(); // 复用 Intercept 的时钟：保证 TTL stamp 与检查使用同一基线
         let draft_epoch = {
             let tracker = intercept.tracker_arc();
             Arc::new(move || tracker.epoch()) as Arc<dyn Fn() -> u64 + Send + Sync>
@@ -267,7 +266,7 @@ fn spawn_worker(
                     if t == Trigger::Heartbeat {
                         next_heartbeat = std::time::Instant::now() + heartbeat;
                     }
-                    let request = crate::capture::CaptureRequest { hwnd: target_hwnd };
+                    let request = crate::capture::CaptureRequest { hwnd: target_hwnd, roi: None };
                     let outcome = core.run_trigger(t, request);
                     if let TickOutcome::Fatal(msg) = &outcome {
                         tracing::error!(error = %msg, stage = "guard", "Fatal → 停用（后续触发跳过）");

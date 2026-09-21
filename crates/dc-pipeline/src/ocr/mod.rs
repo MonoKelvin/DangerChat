@@ -78,15 +78,23 @@ impl OcrStage {
         }
     }
 
-    /// ROI 裁剪（窗口图坐标系 → ROI 局部）+ 可选 2× 超分，转 RGB。
+    /// ROI 裁剪（layout 窗口相对坐标 → 图象局部像素）+ 可选 2× 超分，转 RGB。
+    ///
+    /// `rect` 来自 layout，为窗口相对坐标（距 window_rect 左上）。
+    /// `snapshot.origin` 告诉图象在屏幕上的起点：
+    /// - 全窗截图：origin == window_rect，offset = (0, 0)
+    /// - ROI 裁剪：origin 为 ROI 屏幕矩形，offset = -(ROI.left - window.left, ROI.top - window.top)
     fn crop_roi(
         snapshot: &WindowSnapshot,
         rect: &dc_sys::Rect,
         upscale: bool,
     ) -> Option<image::RgbImage> {
         let (w, h) = (snapshot.image.width(), snapshot.image.height());
-        let x = rect.x.clamp(0, w as i32).max(0) as u32;
-        let y = rect.y.clamp(0, h as i32).max(0) as u32;
+        // 窗口相对 → 图象局部：减去 origin 与 window_rect 的差值
+        let ox = snapshot.origin.x - snapshot.window_rect.x;
+        let oy = snapshot.origin.y - snapshot.window_rect.y;
+        let x = (rect.x - ox).clamp(0, w as i32).max(0) as u32;
+        let y = (rect.y - oy).clamp(0, h as i32).max(0) as u32;
         let rw = rect.w.min(w.saturating_sub(x));
         let rh = rect.h.min(h.saturating_sub(y));
         if rw < 4 || rh < 4 {

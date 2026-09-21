@@ -22,6 +22,7 @@ fn snapshot(w: u32, h: u32) -> WindowSnapshot {
     WindowSnapshot {
         image: RgbaImage::from_pixel(w, h, image::Rgba([90, 90, 90, 255])),
         window_rect: Rect::new(0, 0, w, h),
+        origin: Rect::new(0, 0, w, h),
         dpi_scale: 1.0,
         captured_at: Instant::now(),
     }
@@ -128,7 +129,7 @@ fn fixture() -> Fixture {
 }
 
 fn request() -> dc_pipeline::capture::CaptureRequest {
-    dc_pipeline::capture::CaptureRequest { hwnd: HWND }
+    dc_pipeline::capture::CaptureRequest { hwnd: HWND, roi: None }
 }
 
 /// UT-GRD-01：全 mock Stage 的 Fast/Slow 端到端——槽位内容与纪元正确。
@@ -221,7 +222,7 @@ fn ut_grd_04_layout_cache_invalidation() {
     f.core.run_trigger(Trigger::Slow, request()); // 填缓存（hwnd=HWND）
 
     // 1) hwnd 变化
-    let other = dc_pipeline::capture::CaptureRequest { hwnd: Hwnd(0x9999) };
+    let other = dc_pipeline::capture::CaptureRequest { hwnd: Hwnd(0x9999), roi: None };
     let before = f.layout.call_count();
     f.core.run_trigger(Trigger::Fast, other);
     assert_eq!(f.layout.call_count(), before + 1, "hwnd 变 → 升级 Slow");

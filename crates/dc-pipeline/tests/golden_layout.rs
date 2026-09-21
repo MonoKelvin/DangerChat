@@ -81,6 +81,12 @@ fn ut_lay_01_golden_regions_iou() {
                 exp["size"][0].as_u64().unwrap() as u32,
                 exp["size"][1].as_u64().unwrap() as u32,
             ),
+            origin: Rect::new(
+                0,
+                0,
+                exp["size"][0].as_u64().unwrap() as u32,
+                exp["size"][1].as_u64().unwrap() as u32,
+            ),
             dpi_scale: 1.0,
             captured_at: Instant::now(),
         };

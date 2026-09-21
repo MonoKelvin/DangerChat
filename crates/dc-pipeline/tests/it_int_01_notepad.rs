@@ -35,10 +35,9 @@
 //! | 3 | 弹窗存续期按 **2** / **3** / **0** | 分别打印 `Cancel / Edit / Snooze`；数字**不会**进入记事本 |
 //! | 4 | 切到浏览器/IDE 后按回车，再切回记事本 | `state=suspended` 期间一律放行；切回即时 `active` |
 //! | 5 | 用拼音打字（`输入法键` 持续增长），组合中按回车选字 | `吞掉` **不增加**；`输入法键` 增长；记事本正常出字 |
-//! | 6 | `DC_IT_PUBLISH=once` 重跑：打完字后静置 > 2s 再按回车 | `吞掉` 不增加（判定超 TTL → fail-open 放行） |
+//! | 6 | `DC_IT_PUBLISH=once` 重跑：打完字后静置 > 2s 再按回车 | `吞掉` **+1**（判定超 TTL → fail-closed 吞键，再按回车仍吞，等重新分析判定） |
 //!
-//! 第 6 项对应 §2.1 原则 2「宁漏勿阻」：判定过时宁可放行，也不吞一个可能安全的按键。
-//! 默认的 `loop` 模式每 200ms 刷新判定，TTL 永不过期，因此该项**必须**用 `once` 模式验证。
+//! 第 6 项对应 §2.2 修订：判定过期（TTL 超出）视为「未就绪」，吞键而非放行。
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -92,7 +91,7 @@ fn it_int_01_notepad_interception() {
     let observer_hook = sys.install_keyboard_hook(observer).expect("观察者注册");
 
     // 判定桩：默认每 200ms 用当前草稿纪元刷新一份判定，模拟完整流水线的产出（§2.3 双速循环）。
-    // `DC_IT_PUBLISH=once` 时只发布一次，用于观察判定超 TTL 后的 fail-open 放行（§2.1 原则 2）。
+    // `DC_IT_PUBLISH=once` 时只发布一次，用于观察判定超 TTL 后的 fail-closed 吞键（§2.2 修订）。
     let stop = Arc::new(AtomicBool::new(false));
     let publisher = {
         let intercept = Arc::clone(&intercept);

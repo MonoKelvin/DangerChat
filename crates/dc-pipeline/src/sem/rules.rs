@@ -78,8 +78,17 @@ pub fn baseline_defs() -> Vec<RuleDef> {
         word("cnm", &["all"]),
         word("mmp", &["formal"]),
         word("wcnm", &["all"]),
+        // 英文脏话（词边界；all 场景拦截）
+        word("fuck", &["all"]),
+        word("f**k", &["all"]),
+        word("f***", &["all"]),
+        // 拉丁拼音缩写（词边界；all 场景拦截）
+        word("mlgb", &["all"]),
+        word("mnsl", &["all"]),
+        word("mdsb", &["all"]),
+        word("ymca", &["all"]),
         // 中文辱骂常见变体（正则容错错别字/谐音；formal 恒拦）
-        re("(傻|沙|煞)(比|逼|叉|缺)", &["formal"]),
+        re("(傻|沙|煞|萨)(比|逼|叉|缺)", &["formal"]),
         re("(草|操|艹|cao)你?(妈|马|吗)", &["all"]),
         re("(滚|滚蛋|滚开)", &["formal"]),
         re("(废|费)物", &["formal"]),
@@ -338,5 +347,25 @@ match = "regex"
         assert!(rs.first_hit("提到内部代号X了", "formal").is_some());
         // 基线仍然生效
         assert!(rs.first_hit("你是 sb", "formal").is_some());
+    }
+
+    /// 英文缩写脏话 + 拉丁拼音：词边界不误伤嵌入词（isbn/abc 不命中 sb/fuck）。
+    #[test]
+    fn english_slurs_word_boundary() {
+        let rs = RuleSet::from_json(r#"{"rule":[]}"#).unwrap();
+        // fuck 拦截（any case variant in future；当前只匹配小写）
+        assert!(rs.first_hit("fuck you", "all").is_some());
+        assert!(rs.first_hit("caonima fuck sb", "all").is_some());
+        // 词边界：不误伤嵌入词
+        assert!(rs.first_hit("absb内嵌", "formal").is_none(), "absb 不命中 sb");
+        assert!(rs.first_hit("isbn书号", "formal").is_none(), "isbn 不命中 sb");
+        assert!(rs.first_hit("sbs", "formal").is_none(), "sbs 不命中 sb");
+        assert!(rs.first_hit("sba", "formal").is_none(), "sba 不命中 sb");
+        assert!(rs.first_hit("isb", "formal").is_none(), "isb 不命中 sb");
+        // 拉丁拼音缩写
+        assert!(rs.first_hit("mlgb", "all").is_some());
+        assert!(rs.first_hit("nmsl", "all").is_some());
+        // 拼音不嵌入词
+        assert!(rs.first_hit("nmsl123", "all").is_none(), "nmsl123 不命中 nmsl");
     }
 }

@@ -11,6 +11,7 @@ use dc_pipeline::intercept::{
 };
 use dc_pipeline::testing::Harness;
 use dc_pipeline::{AlertAction, Verdict};
+use dc_pipeline::clock::Clock;
 use dc_sys::{HookAction, KeyEvent, MockSys, SysApi};
 
 const VK_A: u16 = 0x41;
@@ -213,35 +214,42 @@ fn ut_int_03_block_swallows_and_enqueues_alert() {
     assert_eq!(h2.enter(), HookAction::Swallow);
 }
 
-/// UT-INT-04（§2.2 原则 2「宁漏勿阻」）：判定未就绪 / 纪元不等 / 过期 / 挂起 / 暂停 → 全部放行。
+/// UT-INT-04（§2.2 修订：fail-closed）：判定未就绪 / 纪元不等 / TTL 过期 → 吞键+触发分析；
+/// 挂起 / 暂停 → 放行一切。
 ///
-/// fail-open 是基本可用性的前提：打字远快于分析，回车时判定常没跟上；若吞键会把正常消息也堵死
-/// （实测几乎每条都发不出去）。故判定不就绪时放行，但**触发一次即时分析**让判定尽快追上。
+/// Enter 回车在无新鲜判定时吞掉（fail-closed），记下待发纪元 + 触发即时分析：
+/// worker 算完后 on_analysis_ready 在危险时主动弹窗（消息已阻塞），在安全时清零待发标志
+///（用户再按一次回车即可放行）。判定不就绪不放行，确保危险内容绝不发送出去。
 #[test]
-fn ut_int_04_fail_open_branches() {
-    // 1) 无缓存 → 放行 + 触发分析
+fn ut_int_04_fail_closed_branches() {
+    // 1) 无缓存 → 吞键 + 触发分析（记下待发纪元供 on_analysis_ready 兜底）
     let h = Harness::new();
     h.target_foreground();
     let _ = h.press(VK_A);
     let before = h.intercept.triggers().offered();
-    assert_eq!(h.enter(), HookAction::Pass, "无判定 → 放行（宁漏勿阻）");
-    assert!(h.intercept.triggers().offered() > before, "放行同时触发即时分析");
+    assert_eq!(h.enter(), HookAction::Swallow, "无判定 → 吞键（fail-closed），宁阻勿漏");
+    assert!(h.intercept.triggers().offered() > before, "吞键同时触发即时分析");
+    assert_eq!(
+        h.intercept.pending_send_epoch(),
+        h.intercept.tracker().epoch(),
+        "吞键后记录待发纪元"
+    );
 
-    // 2) 纪元不等：判定基于旧草稿 → 放行
+    // 2) 纪元不等：判定基于旧草稿 → 吞键（旧判定不可信）
     let h = Harness::new();
     h.target_foreground();
     h.publish_with_epoch(Verdict::block("旧判定"), 0);
     let _ = h.press(VK_A); // 纪元 → 1，判定仍是 0
-    assert_eq!(h.enter(), HookAction::Pass, "纪元不等 → 放行");
+    assert_eq!(h.enter(), HookAction::Swallow, "纪元不等 → 吞键");
     assert_eq!(h.intercept.state(), GuardState::Active);
 
-    // 3) 判定过期（TTL 默认 2s）→ 放行
+    // 3) 判定过期（TTL 默认 2s）→ 吞键（过期判定不可信）
     let h = Harness::new();
     h.target_foreground();
     let _ = h.press(VK_A);
     h.publish(Verdict::block("命中"));
     h.advance(2_001);
-    assert_eq!(h.enter(), HookAction::Pass, "超过 TTL → 放行");
+    assert_eq!(h.enter(), HookAction::Swallow, "超过 TTL → 吞键");
 
     // 4) 挂起（目标切走并去抖确认）→ 放行一切（等同未安装）
     let h = Harness::new();
@@ -336,7 +344,8 @@ fn ut_int_07_ime_composing_passes_and_bumps() {
         "既非发送键也非输入法消费键 → 不推进纪元"
     );
 
-    // 被输入法消费的键（VK_PROCESSKEY）：草稿正在变，必须推进纪元并触发快环
+    // 被输入法消费的键（VK_PROCESSKEY）：草稿正在变，推进纪元但**不触发Pipeline**
+    // （候选框进入 msg_input ROI 会造成 OCR 噪声/误判，等组合结束后回车触发）。
     let offered_before = h.intercept.triggers().offered();
     let consumed = dc_sys::KeyEvent {
         vk: dc_sys::VK_PROCESSKEY,
@@ -353,9 +362,10 @@ fn ut_int_07_ime_composing_passes_and_bumps() {
         "组合中绝不吞键"
     );
     assert_eq!(h.intercept.tracker().epoch(), epoch + 1);
-    assert!(
-        h.intercept.triggers().offered() > offered_before,
-        "组合中的输入应触发快环重判"
+    assert_eq!(
+        h.intercept.triggers().offered(),
+        offered_before,
+        "组合中候选框噪声：不触发快环，等 IME 提交后回车时触发"
     );
 
     // 回车 = 选字确认 → 放行 + 纪元再 +1（FR-SRC-09）
@@ -363,9 +373,9 @@ fn ut_int_07_ime_composing_passes_and_bumps() {
     assert_eq!(h.intercept.tracker().epoch(), epoch + 2);
     assert_eq!(h.intercept.alerts().shown(), 0, "组合中不得弹窗");
 
-    // 组合结束：判定纪元已落后 → fail-open 放行（§2.2 宁漏勿阻）
+    // 组合结束：判定纪元已落后 → fail-closed 吞键（§2.2 宁阻勿漏）
     h.sys.set_ime_composing(false);
-    assert_eq!(h.enter(), HookAction::Pass, "组合结束判定未就绪 → 放行");
+    assert_eq!(h.enter(), HookAction::Swallow, "组合结束判定未就绪 → 吞键（fail-closed）");
     h.publish(Verdict::block("命中"));
     assert_eq!(h.enter(), HookAction::Swallow, "组合结束后有新鲜判定 → 恢复拦截");
 }
@@ -624,10 +634,11 @@ fn send_key_hot_switch() {
     );
 }
 
-/// UT-INT-11（fail-open）：判定未就绪时回车放行（不吞键）并触发即时分析。
-/// 保证正常消息秒发不被堵（打字快于分析时也能发出去）。
+/// UT-INT-11（fail-closed）：判定未就绪时回车吞键（不放行）并触发即时分析。
+/// 保证危险内容绝不发送出去：回车被吞，等 worker 判定后 on_analysis_ready 决定。
+/// 另有 on_analysis_ready 补判逻辑测试：判定就绪为危险时，兜底主动弹窗一遍。
 #[test]
-fn fail_open_pass_when_no_verdict() {
+fn fail_closed_swallow_when_no_verdict() {
     let h = Harness::new();
     h.target_foreground();
     let _ = h.press(VK_A); // 打字推进纪元、触发快环；不 publish → 槽位空
@@ -635,13 +646,37 @@ fn fail_open_pass_when_no_verdict() {
     let before = h.intercept.triggers().offered();
     assert_eq!(
         h.enter(),
-        HookAction::Pass,
-        "判定未就绪时回车放行（fail-open），不能堵住正常消息"
+        HookAction::Swallow,
+        "判定未就绪时回车吞键（fail-closed），不能让消息先行发送"
     );
     assert!(
         h.intercept.triggers().offered() > before,
-        "放行同时触发即时分析（让判定尽快追上）"
+        "吞键同时触发即时分析（让判定尽快追上）"
     );
+    assert_eq!(
+        h.intercept.pending_send_epoch(),
+        h.intercept.tracker().epoch(),
+        "吞键后记录待发纪元"
+    );
+
+    // on_analysis_ready 补弹窗：判定就绪为危险 → 兜底主动弹窗进 Cooldown（消息已阻塞）
+    let epoch = h.intercept.tracker().epoch();
+    let danger = Verdict::block("命中违禁词").with_epoch(epoch);
+    h.intercept.on_analysis_ready(&danger);
+    assert_eq!(h.intercept.state(), GuardState::Cooldown, "判定就绪危险 → 主动弹窗进 Cooldown");
+    assert_eq!(h.intercept.alerts().shown(), 1, "fail-closed 补判弹窗一次");
+
+    // 安全判定就绪 → 清零待发标志，槽位新鲕 → 再按回车命中放行
+    let h = Harness::new();
+    h.target_foreground();
+    let _ = h.press(VK_A);
+    assert_eq!(h.enter(), HookAction::Swallow, "判定未就绪 → 吞键（fail-closed）");
+    let epoch = h.intercept.tracker().epoch();
+    let safe = Verdict::safe().with_epoch(epoch);
+    h.intercept.slot().store(safe.clone(), h.clock.now_ms());
+    h.intercept.on_analysis_ready(&safe);
+    assert_eq!(h.intercept.alerts().shown(), 0, "安全判定不弹窗");
+    assert_eq!(h.enter(), HookAction::Pass, "安全判定就绪后再按回车 → 放行");
 }
 
 /// UT-INT-12：有新鲜安全判定时回车放行（正常发送不误拦）。

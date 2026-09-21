@@ -62,6 +62,7 @@ fn slice_input(path: &Path) -> (WindowSnapshot, RegionLayout) {
         WindowSnapshot {
             image: img,
             window_rect: Rect::new(0, 0, w, h),
+            origin: Rect::new(0, 0, w, h),
             dpi_scale: 1.0,
             captured_at: Instant::now(),
         },
@@ -149,6 +150,7 @@ fn tiny_roi_yields_empty_not_err() {
         WindowSnapshot {
             image: img,
             window_rect: Rect::new(0, 0, 100, 100),
+            origin: Rect::new(0, 0, 100, 100),
             dpi_scale: 1.0,
             captured_at: Instant::now(),
         },

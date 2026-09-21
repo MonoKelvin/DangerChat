@@ -9,14 +9,17 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use dc_core::{ConfigField, MetricsRecorder, ModuleContext, ModuleError, ModuleMetrics};
-use dc_sys::{Hwnd, SysApi};
+use dc_sys::{Hwnd, Rect, SysApi};
 
-use crate::contract::{Module, PipelineContext, Stage, StageError, WindowSnapshot};
+use crate::contract::{LoopKind, Module, PipelineContext, Stage, StageError, WindowSnapshot};
 
 /// 截图请求。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CaptureRequest {
     pub hwnd: Hwnd,
+    /// 可选 ROI 提示：仅截取窗口内相对矩形（屏幕坐标）。用于快环/心跳仅需输入框区域时，
+    /// 避免拷贝全窗口位图（§2.3 耗时约束）。为 None 时截全窗口。
+    pub roi: Option<Rect>,
 }
 
 pub struct CaptureStage {
@@ -62,26 +65,30 @@ impl CaptureStage {
             return Err(StageError::Recoverable("窗口矩形为空".to_string()));
         }
 
-        // 3) 屏幕像素直拷窗口矩形
+        // 3) 屏幕像素直拷
+        //    - 快环/心跳：仅需 msg_input ROI，避免拷贝巨幅全窗口（§2.3 耗时约束）。
+        //    - 慢环：拷贝全窗口，以便 layout 阶段推断区域。
+        let capture_rect = req.roi.unwrap_or(window_rect);
         let image = self
             .sys
-            .capture_region(window_rect)
+            .capture_region(capture_rect)
             .map_err(|e| StageError::Recoverable(format!("截图失败：{e}")))?;
 
         ctx.cancel.check()?;
 
         // 4) 图片日志（默认 Noop；落盘失败不阻断本轮，debug 图片不是关键路径）
-        //
-        // 名称带 `<run_id>/` 前缀：sink 的 root 已是 `runs/`，而 §5.1 的约定是
-        // `runs/<run_id>/NN_xxx.png`，run 目录必须显式给出，sink 不会自动补。
-        let name = format!("{}/01_window", ctx.run_id.as_str());
-        if let Err(err) = ctx.image_log.save(&name, &image) {
-            tracing::warn!(error = %err, "窗口截图写入图片日志失败");
+        //    快环图像仅含输入框裁剪，不记录全窗口 debug 图，降低 IO 压（ADR-12）。
+        if ctx.loop_kind != LoopKind::Fast && ctx.loop_kind != LoopKind::Heartbeat {
+            let name = format!("{}/01_window", ctx.run_id.as_str());
+            if let Err(err) = ctx.image_log.save(&name, &image) {
+                tracing::warn!(error = %err, "窗口截图写入图片日志失败");
+            }
         }
 
         Ok(WindowSnapshot {
             image,
             window_rect,
+            origin: capture_rect,
             dpi_scale,
             captured_at: Instant::now(),
         })

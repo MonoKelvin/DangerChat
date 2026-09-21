@@ -152,8 +152,12 @@ impl PipelineContext {
 /// capture 输出：裁剪后的目标窗口图 + 几何信息。
 pub struct WindowSnapshot {
     pub image: RgbaImage,
-    /// 屏幕坐标系（物理像素）。
+    /// 屏幕坐标系（物理像素）：完整窗口矩形。layout 区域 rect 的坐标原点即为此矩形左上。
     pub window_rect: Rect,
+    /// 屏幕坐标系（物理像素）：当前图象的左上角所在屏幕坐标。
+    /// 全窗截图时 == window_rect；ROI 裁剪时为该 ROI 的屏幕矩形。
+    /// 用于将 layout 区域 rect（窗口相对）映射到图象像素坐标（§2.3 快环 ROI 裁剪）。
+    pub origin: Rect,
     pub dpi_scale: f32,
     pub captured_at: Instant,
 }
@@ -163,6 +167,7 @@ impl Clone for WindowSnapshot {
         Self {
             image: self.image.clone(),
             window_rect: self.window_rect,
+            origin: self.origin,
             dpi_scale: self.dpi_scale,
             captured_at: self.captured_at,
         }
@@ -174,6 +179,7 @@ impl std::fmt::Debug for WindowSnapshot {
         f.debug_struct("WindowSnapshot")
             .field("size", &(self.image.width(), self.image.height()))
             .field("window_rect", &self.window_rect)
+            .field("origin", &self.origin)
             .field("dpi_scale", &self.dpi_scale)
             .finish()
     }

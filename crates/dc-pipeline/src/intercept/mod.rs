@@ -196,9 +196,9 @@ pub struct Intercept {
     verdict_ttl_ms: AtomicU64,
     state: AtomicU8,
     /// 待发纪元（fail-closed，§2.2 修订）：回车时若无新鲜/纪元匹配的判定，
-    /// 吞键并记下这次「等待判定」的草稿纪元；`u64::MAX` = 无待发。
-    /// worker 分析完成后经 `on_analysis_ready` 检查此值：匹配且危险→自动弹窗，
-    /// 匹配且安全→清零（用户再按回车放行）。避免快速发送时判定没跟上导致漏拦。
+    /// **吞键**（消息未发出）并记下这次「等待判定」的草稿纪元；`u64::MAX` = 无待发。
+    /// worker 分析完成后经 `on_analysis_ready` 检查此值：匹配且危险→主动弹窗/入 Cooldown，
+    /// 匹配且安全→清零（用户再按回车即可命中放行）。
     pending_send_epoch: AtomicU64,
     foreground: ForegroundTracker,
     tracker: Arc<DraftTracker>,
@@ -296,6 +296,10 @@ impl Intercept {
         &self.log_dir
     }
 
+    pub fn clock_arc(&self) -> Arc<dyn Clock> {
+        Arc::clone(&self.clock)
+    }
+
     pub fn slot_arc(&self) -> Arc<VerdictSlot> {
         Arc::clone(&self.slot)
     }
@@ -330,6 +334,11 @@ impl Intercept {
 
     pub fn metrics(&self) -> ModuleMetrics {
         self.metrics.snapshot()
+    }
+
+    /// 待发纪元（测试用：验证 fail-closed 吞键后是否记录）。`u64::MAX` = 无待发。
+    pub fn pending_send_epoch(&self) -> u64 {
+        self.pending_send_epoch.load(Ordering::SeqCst)
     }
 
     /// 当前守护状态（顺带让到期的挂起去抖落地）。
@@ -373,20 +382,20 @@ impl Intercept {
             return HookAction::Pass;
         }
 
-        // 2) 输入法组合中：绝不吞键（FR-SRC-09）
+        // 2) 输入法组合中：绝不吞键（FR-SRC-09）。
         //
-        // 组合期间草稿**同样在变**（候选词正在输入框里成形），因此必须与普通打字同等对待：
-        //   · 被输入法消费的键（`VK_PROCESSKEY`）→ 视为草稿变化：纪元 +1 并触发快环；
-        //   · 回车 = 选字确认 → 纪元 +1 并触发快环。
-        // 若组合期间不推进纪元，组合结束后那个「纪元仍然匹配」的旧判定就会对已经变了的草稿下手。
+        // 组合期间草稿**同样在变**（候选词正在输入框里成形），因此必须推进纪元
+        // ——但**不触发 Pipeline**（候选框会进入 msg_input ROI 造成 OCR 噪声/误判），
+        // 等组合结束后用户按回车时才触发快环。
         //
         // 注意：组合态优先于 Cooldown 分支，因此组合期间数字键 1/2/3 会被输入法吃掉、
         // 不会路由为弹窗动作——此时用鼠标点弹窗按钮即可（弹窗本身不夺焦点）。
         if self.sys.ime_composing() {
             if ev.is_key_down && (is_send_key(ev, self.current_send_key()) || ev.is_ime_consumed())
             {
+                // 组合期间**不触发Pipeline**：输入法候选框会进入 msg_input ROI，
+                // 造成 OCR 噪声和误判。只推进纪元，等组合结束后用户按回车时才触发。
                 self.tracker.bump();
-                let _ = self.triggers.offer_fast();
             }
             return HookAction::Pass;
         }
@@ -426,10 +435,12 @@ impl Intercept {
             if self.tracker.is_snoozed() {
                 return HookAction::Pass;
             }
-            // fail-open（§2.2 原则 2「宁漏勿阻」）：判定没跟上（无新鲜判定 / 纪元落后）时**放行**。
-            // 吞键会把正常消息也堵死（打字远快于分析），破坏基本可用性——实测几乎每条都发不出去。
-            // 仍**触发一次即时分析**：让判定尽快追上，配合「边打字边预分析」缩小漏拦窗口；
-            // 若这条本就危险且用户又发了同样内容，下一次发送/on_analysis_ready 会拦到。
+            // fail-closed（§2.2 修订）：判定没跟上（无新鲕判定 / 纪元落后）时**吞键**。
+            // 放行会把消息先行发出、弹窗在后的问题：用户看到弹窗时消息已出，对话框形同虚设。
+            // 权守 fail-closed 吞住回车，同时记下待发纪元 + 触发即时分析：
+            //   - worker 判定安全 → on_analysis_ready 清零待发标志，用户再按回车即可放行；
+            //   - worker 判定危险 → on_analysis_ready 主动弹窗进入 Cooldown（消息从未发送出去）。
+            // 宁漏勿阻原则移到「判定纪元不匹配 / 过期」时放行（草稿已变，不等旧判定）。
             let epoch_now = self.tracker.epoch();
             let fresh = self.slot.load_fresh(
                 Duration::from_millis(self.verdict_ttl_ms.load(Ordering::SeqCst)),
@@ -438,11 +449,10 @@ impl Intercept {
             let verdict = match fresh {
                 Some(v) if v.draft_epoch == epoch_now => v,
                 _ => {
-                    // 记下待发纪元 + 触发分析：worker 算完若危险，on_analysis_ready 主动弹窗兜底。
                     self.pending_send_epoch.store(epoch_now, Ordering::SeqCst);
                     let _ = self.triggers.offer_fast();
-                    tracing::debug!(epoch = epoch_now, "fail-open：判定未就绪，放行并触发分析");
-                    return HookAction::Pass;
+                    tracing::debug!(epoch = epoch_now, "fail-closed：判定未就绪，吞键并触发分析（等 on_analysis_ready 补判）");
+                    return HookAction::Swallow;
                 }
             };
             // 本次发送已有就绪判定，裁决它——清掉可能残留的待发标志。
@@ -505,13 +515,39 @@ impl Intercept {
 
     /// worker 分析完成回调（在 pipeline-worker 线程调用）。
     ///
-    /// fail-open 语义下（§2.2 原则 2）：回车判定没跟上时已放行，消息已发出——
-    /// 事后再弹窗会误导（消息其实已发送）。因此本回调**不主动弹窗**，只清理待发标志。
-    /// 保留 hook 是为将来可能的「发送后温和提醒」预留位；当前仅做状态清理，行为纯 fail-open。
+    /// fail-closed 补判闭环（§2.2 修订）：回车判定没跟上时那次回车已吞掉、消息**未发出**，
+    /// 只记下待发纪元。worker 算完在此裁决：
+    /// - 纪元匹配 + 安全 → 清零待发标志（判定已入槽，用户再按回车即可命中放行）；
+    /// - 纪元匹配 + 危险 → 主动入队弹窗并进入 Cooldown（消息从未发送出去）；
+    /// - 纪元不匹配（草稿又改了）→ 不动待发标志，等对应纪元的判定或下次回车重新裁决。
+    ///
+    /// 仅在 Active 态弹窗：Cooldown（已有弹窗）/挂起/暂停时不重复弹，保留待发标志待回前台或下次回车。
     pub fn on_analysis_ready(&self, verdict: &Verdict) {
         let pending = self.pending_send_epoch.load(Ordering::SeqCst);
-        if pending != u64::MAX && verdict.draft_epoch == pending {
+        if pending == u64::MAX || verdict.draft_epoch != pending {
+            return;
+        }
+        // 安全判定：清零待发标志。判定已入槽且新鲜，用户再按回车即命中放行。
+        if !verdict.level.is_dangerous() {
             self.pending_send_epoch.store(u64::MAX, Ordering::SeqCst);
+            return;
+        }
+        // 危险判定：仅 Active 态主动弹窗（Cooldown/挂起/暂停时保留标志，不重复弹）。
+        let now = self.clock.now_ms();
+        if self.refresh_state(now) != GuardState::Active {
+            return;
+        }
+        if self.alerts.request_show(Arc::new(verdict.clone())).is_ok() {
+            self.pending_send_epoch.store(u64::MAX, Ordering::SeqCst);
+            self.transition(GuardEvent::AlertShown, now);
+            tracing::info!(
+                level = verdict.level.as_str(),
+                score = verdict.score,
+                "fail-closed 补判：判定就绪危险，消息已吞住，已入队弹窗"
+            );
+        } else {
+            // 弹窗通道异常：保留待发标志，下次回车/判定再试（绝不静默放过危险内容）。
+            tracing::error!("fail-closed 弹窗入队失败，保留待发标志，下次回车/判定再试");
         }
     }
 

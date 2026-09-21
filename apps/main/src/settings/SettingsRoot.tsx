@@ -1417,7 +1417,18 @@ function RulesEditor({ scenarios }: { scenarios: ScenarioDto[] }) {
 
       <div className="space-y-2">
         {rules.map((r, i) => (
-          <div key={i} className="flex items-center gap-2 rounded-xl bg-[var(--group-bg)] px-3 py-2">
+          <div
+            key={i}
+            className="flex items-center gap-2 rounded-xl bg-[var(--group-bg)] px-3 py-2"
+            // 词库对齐对象画像：条目失焦（焦点真正离开本行——不在输入框/下拉框/删除内）
+            // 且 pattern 去空为空 → 自动删除空条目。下拉面板经 portal 渲染到 body，
+            // relatedTarget 会落在行外，但选值走 onChange 即时更新且 pattern 非空时不触发删除，
+            // 故仅对「留空未填」的行生效，不误删正在选下拉的非空行。
+            onBlur={(e) => {
+              if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+              if (r.pattern.trim() === '') remove(i);
+            }}
+          >
             <input
               className={cn(inputCls, 'flex-1')}
               value={r.pattern}

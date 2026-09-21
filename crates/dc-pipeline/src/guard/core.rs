@@ -103,8 +103,8 @@ where
     /// 心跳 pHash（None = 心跳不做像素比较，直接升级 Slow——测试简化路径）。
     pub heartbeat_probe: Option<HeartbeatProbe>,
     pub last_phash: std::sync::Mutex<Option<u64>>,
-    /// 判定入槽后的回调（fail-closed 闭环）：worker 算完判定后通知 intercept，
-    /// 让「回车吞键后等待判定」的场景在危险时主动弹窗。默认 no-op（测试可注入）。
+    /// 判定入槽后的回调（fail-closed 补判闭环）：worker 算完判定后通知 intercept，
+    /// 让「回车放行后等待判定」的场景在危险时主动补弹窗。默认 no-op（测试可注入）。
     pub on_verdict_stored: Arc<dyn Fn(&Verdict) + Send + Sync>,
 }
 
@@ -148,21 +148,37 @@ where
 
     fn run_fast(&self, request: crate::capture::CaptureRequest) -> TickOutcome {
         // 布局缓存可用性（§5.8）：不可用 → 升级 Slow
-        let cache_ok = {
+        let (cache_ok, input_roi) = {
             let guard = self.layout_cache.lock().ok();
             match guard {
                 Some(cache) if cache.is_some() => {
                     // hwnd/rect 由调用方从 request 携带；快环请求即当前窗口
                     let c = cache.as_ref().unwrap();
-                    c.reusable(request.hwnd, c.rect, self.clock.now_ms())
+                    let ok = c.reusable(request.hwnd, c.rect, self.clock.now_ms());
+                    // 输入框 ROI（屏幕坐标）：用于裁剪截图，减小拷贝量（§2.3 耗时约束）
+                    let roi = c.layout.rect_of(crate::contract::TAG_MSG_INPUT).map(|r| {
+                        // 窗口相对 → 屏幕坐标
+                        dc_sys::Rect::new(
+                            c.rect.x + r.x,
+                            c.rect.y + r.y,
+                            r.w,
+                            r.h,
+                        )
+                    });
+                    (ok, roi)
                 }
-                _ => false,
+                _ => (false, None),
             }
         };
         if !cache_ok {
             return self.run_slow(request);
         }
 
+        // 传入 ROI 裁剪：避免拷贝巨幅全窗口位图，仅截输入框区域
+        let request = crate::capture::CaptureRequest {
+            hwnd: request.hwnd,
+            roi: input_roi,
+        };
         let ctx = (self.ctx_factory)(LoopKind::Fast);
         let snap = match self.capture.process(request, &ctx) {
             Ok(s) => s,
@@ -328,7 +344,7 @@ where
             "流水线判定已入槽"
         );
         let stamped = verdict.with_epoch(epoch);
-        // fail-closed 闭环：先通知 intercept（它据 pending_send_epoch 决定是否主动弹窗），
+        // fail-closed 补判闭环：先通知 intercept（据 pending_send_epoch 决定是否弹窗兜底），
         // 再入槽。回调只读原子量 + try_send，无阻塞。
         (self.on_verdict_stored)(&stamped);
         self.slot.store(stamped, self.clock.now_ms());

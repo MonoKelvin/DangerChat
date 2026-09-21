@@ -210,6 +210,7 @@ fn snapshot(w: u32, h: u32) -> WindowSnapshot {
     WindowSnapshot {
         image: image::RgbaImage::from_pixel(w, h, image::Rgba([120, 130, 140, 255])),
         window_rect: Rect::new(0, 0, w, h),
+        origin: Rect::new(0, 0, w, h),
         dpi_scale: 1.0,
         captured_at: Instant::now(),
     }

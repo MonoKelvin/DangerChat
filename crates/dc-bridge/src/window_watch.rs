@@ -61,7 +61,7 @@ fn watch_loop(app: AppHandle) {
                 let target_active =
                     Arc::new(move || fg_intercept.target_active())
                         as Arc<dyn Fn() -> bool + Send + Sync>;
-                // fail-closed 闭环（§2.2 修订）：判定入槽后通知 intercept，快速发送吞键场景据此主动弹窗。
+                // fail-closed 补判闭环（§2.2 修订）：判定入槽后通知 intercept，快速发送吞键后缺判场景据此补弹窗。
                 let vs_intercept = Arc::clone(&state.intercept);
                 let on_verdict_stored = Arc::new(move |v: &dc_pipeline::verdict::Verdict| {
                     vs_intercept.on_analysis_ready(v)

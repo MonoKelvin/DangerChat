@@ -73,7 +73,7 @@ fn ut_cap_01_region_crop_is_byte_exact() {
     let stage = stage(&sys);
     let snap = stage
         .process(
-            CaptureRequest { hwnd: HWND },
+            CaptureRequest { hwnd: HWND, roi: None },
             &context(ImageLogSink::noop(), false),
         )
         .expect("capture ok");
@@ -108,7 +108,7 @@ fn ut_cap_02_dpi_scaling_no_double_conversion() {
         let stage = stage(&sys);
         let snap = stage
             .process(
-                CaptureRequest { hwnd: HWND },
+                CaptureRequest { hwnd: HWND, roi: None },
                 &context(ImageLogSink::noop(), false),
             )
             .expect("capture ok");
@@ -134,7 +134,7 @@ fn ut_cap_03_unavailable_window_is_recoverable() {
     let sys = MockSys::new();
     setup_window(&sys, Rect::new(0, 0, 300, 200), 1.0, (800, 600));
     let stage = stage(&sys);
-    let req = CaptureRequest { hwnd: HWND };
+    let req = CaptureRequest { hwnd: HWND, roi: None };
 
     // 最小化
     sys.set_minimized(HWND, true);
@@ -165,7 +165,7 @@ fn ut_cap_03_unavailable_window_is_recoverable() {
     // 未登记的窗口
     assert!(stage
         .process(
-            CaptureRequest { hwnd: Hwnd(0xDEAD) },
+            CaptureRequest { hwnd: Hwnd(0xDEAD), roi: None },
             &context(ImageLogSink::noop(), false)
         )
         .is_err());
@@ -200,7 +200,7 @@ fn ut_cap_04_image_log_switch() {
     let sys = MockSys::new();
     setup_window(&sys, Rect::new(0, 0, 64, 48), 1.0, (200, 200));
     let stage = stage(&sys);
-    let req = CaptureRequest { hwnd: HWND };
+    let req = CaptureRequest { hwnd: HWND, roi: None };
 
     let runs = dir.path().join("runs");
 

@@ -2,6 +2,9 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+- 回答请使用中文
+- 没有说明提交就不要擅自提交代码，只要说到“提交”就是将本地应该入库的修改的代码提交并推送，推送失败可以尝试走代理
+
 ## 项目概览
 
 危信（DangerChat）v1.0：Windows-only Tauri 2 桌面应用，监控目标聊天软件窗口（截图 → 区域划分 → OCR → 语义判定），在用户发送敏感/违禁内容前弹窗拦截。Rust workspace + pnpm monorepo。权威设计文档：`docs/危信v1.0_开发设计文档.md`（章节号 §x.x 常出现在代码注释里）。
