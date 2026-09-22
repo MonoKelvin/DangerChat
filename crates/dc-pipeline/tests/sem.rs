@@ -1,4 +1,4 @@
-//! M5 sem 模块集成测试（UT-SEM-01~09 补全；单元级在 src/sem/ 内）。
+//! M5 sem 模块集成测试（UT-SEM-01~13 补全；单元级在 src/sem/ 内）。
 
 use dc_pipeline::contract::{OcrResult, PipelineContext, Stage, TextBlock};
 use dc_pipeline::sem::{contacts::ContactBook, rules::*, SemStage, THRESHOLD_FORMAL};
@@ -132,7 +132,7 @@ fn ut_sem_07_reasons_text() {
     // from_score 的理由由 sem 补充（带分数值）——直接验证文案格式函数面
     let mut scored = Verdict::from_score(0.71, THRESHOLD_FORMAL);
     scored.reasons.push(format!(
-        "与formal场景语义不匹配，危险分 {:.2} ≥ {THRESHOLD_FORMAL:.2}",
+        "与formal场景语义不匹配，危险分 {:.2} > {THRESHOLD_FORMAL:.2}",
         0.71
     ));
     assert!(scored.reasons[0].contains("0.71"), "{}", scored.reasons[0]);
@@ -187,7 +187,76 @@ fn stage_process_passes_context() {
     assert_eq!(v.chat_context.as_deref(), Some("之前聊天内容"));
 }
 
-/// UT-SEM-08：头文件缺失 → 模板兜底；头维度不符 → 降级兜底（不 Err）。
+/// UT-SEM-13：阈值极端值短路（v1.2 优化）。
+/// threshold = 1.0（「禁止」）→ 仅凭聊天对象判定，立即 Block，不经 L1/L2。
+/// threshold = 0.0（「无限制」）→ 仅凭聊天对象判定，立即 Safe，不经 L1/L2。
+#[test]
+fn ut_sem_13_threshold_extreme_short_circuit() {
+    use dc_pipeline::sem::scenarios::ScenarioManager;
+    use std::io::Write;
+
+    // 构造临时 scenes.json：s1 阈值 1.0（禁止），s2 阈值 0.0（无限制）
+    let mut path = std::env::temp_dir();
+    path.push(format!("dc-sem-test-scenes-{}.json", std::process::id()));
+    let json = r#"{
+  "scene": [
+    {"id": "s1", "name": "禁止", "base": "formal", "threshold": 1.0},
+    {"id": "s2", "name": "无限制", "base": "formal", "threshold": 0.0}
+  ]
+}"#;
+    let mut f = std::fs::File::create(&path).unwrap();
+    f.write_all(json.as_bytes()).unwrap();
+    f.flush().unwrap();
+    drop(f);
+
+    let scenarios = ScenarioManager::load(&path);
+
+    // 联系人 → s1（禁止）
+    let contacts = ContactBook::from_toml(r#"
+[[contact]]
+name = "禁聊"
+profile = "s1"
+"#).unwrap();
+
+    let stage = SemStage::l1_only_with_scenarios(
+        RuleSet::from_defs(vec![RuleDef {
+            pattern: "sb".into(),
+            r#match: MatchKind::Word,
+            applies_to: vec!["all".into()],
+        }]).unwrap(),
+        contacts,
+        scenarios,
+    );
+
+    // 草稿含违禁词，但阈值=1.0（禁止）→ 短路 Block，L1 规则不生效
+    let v = stage.judge(&ocr("sb 违禁词", Some("禁聊")));
+    assert_eq!(v.level, VerdictLevel::Block, "threshold=1.0 应短路 Block，忽略 L1");
+    assert!(v.reasons.iter().any(|r| r.contains("禁止场景")));
+
+    // 另一个联系人 → s2（无限制）
+    let contacts2 = ContactBook::from_toml(r#"
+[[contact]]
+name = "随便聊"
+profile = "s2"
+"#).unwrap();
+    let sm2 = ScenarioManager::load(&path);
+    let stage2 = SemStage::l1_only_with_scenarios(
+        RuleSet::from_defs(vec![RuleDef {
+            pattern: "sb".into(),
+            r#match: MatchKind::Word,
+            applies_to: vec!["all".into()],
+        }]).unwrap(),
+        contacts2,
+        sm2,
+    );
+
+    // 草稿含违禁词，但阈值=0.0（无限制）→ 短路 Safe，L1 规则不生效
+    let v2 = stage2.judge(&ocr("sb 违禁词", Some("随便聊")));
+    assert_eq!(v2.level, VerdictLevel::Safe, "threshold=0.0 应短路 Safe，忽略 L1");
+
+    let _ = std::fs::remove_file(&path);
+}
+
 /// 直接构造 head::Heads 场景（文件级）在 src/sem/head.rs 单测覆盖；
 /// 这里验证 Stage 层：embedder 缺失 + 头缺失 → L2 整体跳过，仅 L1。
 #[test]

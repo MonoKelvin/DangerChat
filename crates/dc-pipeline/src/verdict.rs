@@ -35,13 +35,14 @@ impl VerdictLevel {
     }
 }
 
-/// 危险分升 Block 所需的「阈值 + Δ」中的 Δ（§5.7）。
+/// 升 Block 所需的「阈值 + Δ」中的 Δ（§5.7）。
 ///
 /// **0.25**（2026-09-18 由 0.15 上调）：在 1626 条标注语料（四段特征：草稿 ⊕ 对象 ⊕
 /// 逐元素积 ⊕ 差）上实测，Δ=0.15 时 Block 线（formal 0.70 / casual 0.60）的误报率为
-/// 2.4% / 6.9%；Δ=0.25 后 Block 线抬到 0.80 / 0.70，误报降至 **0.3% / 2.5%**，
-/// 而 `Warn` 的覆盖范围（score ≥ 阈值）不变（召回 92% / 85%）。
-/// 取向依据 §2.1 原则 2「宁漏勿阻」：硬拦截只留给高置信样本，其余一律 Warn 提示。
+/// 2.4% / 6.9%；Δ=0.25 后 Block 线抬到 0.80 / 0.70，误报降至 **0.3% / 2.5%**。
+///
+/// **v1.2 起不再用于判定**（`from_score` 直接用 `score > threshold`）。保留常量以供
+/// 文档/外部代码参考；阈值下沉到场景后，场景阈值本身即承担保守性控制。
 pub const BLOCK_MARGIN: f32 = 0.25;
 
 /// 判定结果（sem 输出 / `verdict_slot` 内容）。
@@ -103,16 +104,19 @@ impl Verdict {
         )
     }
 
-    /// L2 危险分（§5.7 阈值规则）：score 越过「阈值 + [`BLOCK_MARGIN`]」升 Block，
-    /// 区间内 Warn。
-    /// 恰好等于阈值即视为越线（≥，与文档「越过」的保守取向一致——正式场景宁严勿松）。
-    /// 比较带 1e-6 容差：0.55+0.25 的 f32 是 0.80000001，不给容差会把整数分值随机降级。
+    /// L2 危险分（§5.7 阈值规则）：score > threshold 时 Block，否则 Safe。
+    ///
+    /// **阈值语义（v1.2 调整）**：
+    /// - `threshold = 1.0`（禁止）：在 `judge()` 中短路 Block，L2 不参与。
+    /// - `threshold = 0.0`（无限制）：在 `judge()` 中短路 Safe，L2 不参与。
+    /// - 常规阈值（如 0.55）：score > 0.55 → Block。
+    ///
+    /// 比较用 `>`（不含等）：分数恰好等于阈值视为「未越过」，宁漏勿阻。
+    /// 容差 1e-6 仅用于抵消 f32 累计误差。
     pub fn from_score(score: f32, threshold: f32) -> Self {
         const EPS: f32 = 1e-6;
-        if score >= threshold + BLOCK_MARGIN - EPS {
+        if score > threshold + EPS {
             Self::new(VerdictLevel::Block, score, vec![])
-        } else if score >= threshold - EPS {
-            Self::new(VerdictLevel::Warn, score, vec![])
         } else {
             Self::new(VerdictLevel::Safe, score, vec![])
         }

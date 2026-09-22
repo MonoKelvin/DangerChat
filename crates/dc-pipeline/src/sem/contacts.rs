@@ -1,7 +1,7 @@
 //! 聊天对象画像（§5.7 ScenarioStore 的 contacts 半边；contacts.json，FR-SEM-03）。
 //!
 //! profile 值为场景 id（ScenarioManager 分发）；未标记对象回落 `formal`。
-//! 解析不做场景合法性校验——已删除场景的残留条目由 `ScenarioManager::base_profile`
+//! 解析不做场景合法性校验——已删除场景的残留条目由 `ScenarioManager::base_of`
 //! 兜底回落 Formal（保守），不因引用失效而拒绝整个画像文件。
 
 use serde::{Deserialize, Serialize};

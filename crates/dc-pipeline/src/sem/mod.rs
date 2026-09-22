@@ -45,21 +45,11 @@ use scenarios::ScenarioManager;
 /// ⚠️ **不再声称「零误报」**（旧注释口径来自 ~300 条语料，已失效）：现语料刻意含大量
 /// 硬负例（吐槽群脏话、死党互损、尴尬但不危险），阈值处误报率 formal 8.8% / casual 13.9%，
 /// 对真实流量的外推偏悲观；零误报需阈值 ≥0.84 / 0.91，此时召回仅 55% / 35%，不可用。
-/// 因语料为对抗性样本，此处以「准确率最优」定阈值，硬拦截的保守性由 [`BLOCK_MARGIN`] 承担。
+/// 因语料为对抗性样本，此处以「准确率最优」定阈值；硬拦截的保守性由场景阈值下沉承担。
 pub const THRESHOLD_FORMAL: f32 = 0.55;
 pub const THRESHOLD_CASUAL: f32 = 0.45;
-/// 升 Block 的边距：定义在 [`crate::verdict::BLOCK_MARGIN`]（实际生效处），
-/// 此处重导出以保留既有引用路径。
+/// `BLOCK_MARGIN` 重导出，供文档参考（v1.2 判定直接用 `score > threshold`）。
 pub use crate::verdict::BLOCK_MARGIN;
-
-/// 模板兜底降级（ADR-14）：无训练头时 L2「只提示不拦截」，
-/// 把 Block 封顶到 Warn（Safe/Warn 原样）。有训练头则不动。
-fn cap_fallback_level(mut v: Verdict, has_weights: bool) -> Verdict {
-    if !has_weights && v.level == crate::verdict::VerdictLevel::Block {
-        v.level = crate::verdict::VerdictLevel::Warn;
-    }
-    v
-}
 
 /// 对象未知时的占位。固定占位而非省略，**保持特征位置稳定**
 /// ——线性头是按位置的加权和，输入缺位会让同一语义落到不同位置。
@@ -139,8 +129,6 @@ pub struct SemStage {
     /// 头权重：小（每头几十 KB），常驻，不随挂起卸载。
     heads: head::Heads,
     l2_enabled: bool,
-    threshold_formal: f32,
-    threshold_casual: f32,
     metrics: MetricsRecorder,
 }
 
@@ -163,24 +151,29 @@ impl SemStage {
             model_dir: RwLock::new(None),
             heads: head::Heads::fallback_only(),
             l2_enabled: false,
-            threshold_formal: THRESHOLD_FORMAL,
-            threshold_casual: THRESHOLD_CASUAL,
             metrics: MetricsRecorder::default(),
         }
     }
 
     /// 测试用：仅 L1。
     pub fn l1_only(rules: RuleSet, contacts: ContactBook) -> Self {
+        Self::l1_only_with_scenarios(rules, contacts, ScenarioManager::builtin_only())
+    }
+
+    /// 测试用：仅 L1，带自定义场景管理器。
+    pub fn l1_only_with_scenarios(
+        rules: RuleSet,
+        contacts: ContactBook,
+        scenarios: ScenarioManager,
+    ) -> Self {
         Self {
             rules: RwLock::new(rules),
             contacts: RwLock::new(contacts),
-            scenarios: RwLock::new(ScenarioManager::builtin_only()),
+            scenarios: RwLock::new(scenarios),
             embedder: RwLock::new(None),
             model_dir: RwLock::new(None),
             heads: head::Heads::fallback_only(),
             l2_enabled: false,
-            threshold_formal: THRESHOLD_FORMAL,
-            threshold_casual: THRESHOLD_CASUAL,
             metrics: MetricsRecorder::default(),
         }
     }
@@ -246,10 +239,26 @@ impl SemStage {
                     .to_string()
             })
             .unwrap_or_default();
-        let (scenario_name, base) = match self.scenarios.read() {
-            Ok(sm) => (sm.name_of(&scenario_id), sm.base_profile(&scenario_id)),
-            Err(_) => (scenario_id.clone(), Profile::Formal),
+        let (scenario_name, base, threshold) = match self.scenarios.read() {
+            Ok(sm) => (
+                sm.name_of(&scenario_id),
+                sm.base_of(&scenario_id),
+                sm.threshold_of(&scenario_id),
+            ),
+            Err(_) => (scenario_id.clone(), Profile::Formal, THRESHOLD_FORMAL),
         };
+
+        // 阈值极端值短路（v1.2 优化）：
+        // - threshold = 1.0（「禁止」）：仅凭聊天对象判断为该场景 → 立即 Block，不经 L1/L2。
+        // - threshold = 0.0（「无限制」）：仅凭聊天对象判断为该场景 → 立即 Safe，不经 L1/L2。
+        // 两种场景均跳过 OCR 文字识别与 L2 推理，仅依据聊天对象所属场景判定。
+        if (threshold - 1.0).abs() < 1e-6 {
+            return Verdict::block("禁止场景").with_scene(scenario_name);
+        }
+        if threshold.abs() < 1e-6 {
+            return Verdict::safe().with_scene(scenario_name);
+        }
+
         // L1（永远启用，毫秒级；命中短路）
         if let Ok(rules) = self.rules.read() {
             if let Some(hit) = rules.first_hit(draft, &scenario_id) {
@@ -274,23 +283,17 @@ impl SemStage {
             let draft_text = draft_embed_text(input.chat_context.as_deref(), draft);
             let object_text = object_embed_text(input.chat_target.as_deref());
             if let Some(score) = self.l2_score(&draft_text, &object_text, base) {
-                let threshold = match base {
-                    Profile::Formal => self.threshold_formal,
-                    Profile::Casual => self.threshold_casual,
-                };
-                // 模板兜底模式（无训练头）只提示不拦截（ADR-14 降级语义）：
-                // 级别封顶 Warn，绝不 Block。有训练头时正常 Warn/Block。
+                // 模板兜底模式（无训练头）不 Block，仅 Safe（ADR-14）；
+                // 有训练头时按阈值判定 Block/Safe。
                 let has_weights = self.heads.has_weights(base);
-                let mut v = cap_fallback_level(Verdict::from_score(score, threshold), has_weights);
-                if v.level != crate::verdict::VerdictLevel::Safe {
-                    // has_weights 只接受 Profile（双头按基线复用，不随场景数增长）
-                    let mode = if has_weights {
-                        "危险分"
-                    } else {
-                        "兜底相似度"
-                    };
+                let mut v = if has_weights {
+                    Verdict::from_score(score, threshold)
+                } else {
+                    Verdict::safe()
+                };
+                if v.level == crate::verdict::VerdictLevel::Block {
                     v.reasons.push(format!(
-                        "场景语义不匹配，{mode} {score:.2} ≥ {threshold:.2}"
+                        "场景语义不匹配，危险分 {score:.2} > {threshold:.2}"
                     ));
                 }
                 return v.with_scene(scenario_name);
@@ -390,24 +393,6 @@ impl Module for SemStage {
                 group: "拦截与提示".into(),
                 owner: "sem".into(),
             },
-            ConfigField {
-                key: "sem.threshold.formal".into(),
-                ty: ConfigType::Float { min: 0.1, max: 0.9 },
-                default: ConfigValue::Float(THRESHOLD_FORMAL as f64),
-                label: "正式基线阈值".into(),
-                help: "正式及基于正式基线的自定义场景使用；危险分超过该值告警，+0.15 内为警告，再高为阻断".into(),
-                group: "拦截与提示".into(),
-                owner: "sem".into(),
-            },
-            ConfigField {
-                key: "sem.threshold.casual".into(),
-                ty: ConfigType::Float { min: 0.1, max: 0.9 },
-                default: ConfigValue::Float(THRESHOLD_CASUAL as f64),
-                label: "个人基线阈值".into(),
-                help: "同上，个人及基于个人基线的自定义场景使用".into(),
-                group: "拦截与提示".into(),
-                owner: "sem".into(),
-            },
         ]
     }
 
@@ -479,12 +464,6 @@ impl Module for SemStage {
 
         // L2：模型 + 头
         self.l2_enabled = mctx.config.bool_or("sem.l2_enabled", true);
-        self.threshold_formal =
-            mctx.config
-                .f64_or("sem.threshold.formal", THRESHOLD_FORMAL as f64) as f32;
-        self.threshold_casual =
-            mctx.config
-                .f64_or("sem.threshold.casual", THRESHOLD_CASUAL as f64) as f32;
 
         if self.l2_enabled {
             // 语义模型可切换（sem.model 配置项，默认内置 bge-large）：
@@ -649,38 +628,32 @@ profile = "casual"
     #[test]
     fn from_score_boundaries() {
         use crate::verdict::VerdictLevel;
-        let m = BLOCK_MARGIN;
-        // 恰好阈值 → Warn（≥语义）
-        assert_eq!(Verdict::from_score(0.55, 0.55).level, VerdictLevel::Warn);
-        // 阈值 + 边距 → Block
-        assert_eq!(
-            Verdict::from_score(0.55 + m, 0.55).level,
-            VerdictLevel::Block
-        );
-        // 阈值 + 边距 - 0.001 → 仍 Warn
-        assert_eq!(
-            Verdict::from_score(0.55 + m - 0.001, 0.55).level,
-            VerdictLevel::Warn
-        );
-        // 阈值下 → Safe
+        // score > threshold → Block
+        assert_eq!(Verdict::from_score(0.80, 0.55).level, VerdictLevel::Block);
+        // score == threshold → Safe（> 不含等）
+        assert_eq!(Verdict::from_score(0.55, 0.55).level, VerdictLevel::Safe);
+        // score > threshold + ε → Block
+        assert_eq!(Verdict::from_score(0.55 + 1e-3, 0.55).level, VerdictLevel::Block);
+        // score < threshold → Safe
         assert_eq!(Verdict::from_score(0.549, 0.55).level, VerdictLevel::Safe);
     }
 
-    /// 模板兜底封顶：无训练头时 Block 降 Warn，有训练头不动（ADR-14）。
+    /// UT-SEM-04 补充：移除 Warn 等级，from_score 仅返回 Block 或 Safe。
     #[test]
-    fn fallback_level_capped_to_warn() {
+    fn from_score_only_block_or_safe() {
         use crate::verdict::VerdictLevel;
-        // 无训练头（模板兜底）：Block → Warn；Warn/Safe 原样
-        let block = Verdict::from_score(0.80, 0.55); // Block
-        assert_eq!(block.level, VerdictLevel::Block);
-        assert_eq!(cap_fallback_level(block, false).level, VerdictLevel::Warn);
-        let warn = Verdict::from_score(0.60, 0.55); // Warn
-        assert_eq!(cap_fallback_level(warn, false).level, VerdictLevel::Warn);
-        let safe = Verdict::from_score(0.10, 0.55); // Safe
-        assert_eq!(cap_fallback_level(safe, false).level, VerdictLevel::Safe);
-        // 有训练头：Block 保持 Block（可拦截）
-        let block2 = Verdict::from_score(0.80, 0.55);
-        assert_eq!(cap_fallback_level(block2, true).level, VerdictLevel::Block);
+        // score > threshold → Block
+        assert_eq!(Verdict::from_score(0.80, 0.55).level, VerdictLevel::Block);
+        // score == threshold → Safe（> 不含等）
+        assert_eq!(Verdict::from_score(0.55, 0.55).level, VerdictLevel::Safe);
+        // score < threshold → Safe
+        assert_eq!(Verdict::from_score(0.54, 0.55).level, VerdictLevel::Safe);
+        // threshold=0（无限制）: judge() 短路 Safe，这里验证 from_score 数学行为
+        assert_eq!(Verdict::from_score(0.01, 0.0).level, VerdictLevel::Block);
+        // threshold=0（无限制）: score = 0 → Safe
+        assert_eq!(Verdict::from_score(0.0, 0.0).level, VerdictLevel::Safe);
+        // threshold=1（禁止）: judge() 短路 Block，这里验证 from_score 数学行为
+        assert_eq!(Verdict::from_score(1.0, 1.0).level, VerdictLevel::Safe);
     }
 
     /// UT-SEM-13：L2 特征串契约（草稿塔 + 对象塔）。

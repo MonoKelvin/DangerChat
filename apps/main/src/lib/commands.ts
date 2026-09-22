@@ -33,16 +33,16 @@ export async function listScenarios(): Promise<ScenarioDto[]> {
   return invoke<ScenarioDto[]>('list_scenarios');
 }
 
-export async function addScenario(name: string, base: 'formal' | 'casual'): Promise<ScenarioDto> {
-  return invoke<ScenarioDto>('add_scenario', { name, base });
+export async function addScenario(name: string, threshold: number): Promise<ScenarioDto> {
+  return invoke<ScenarioDto>('add_scenario', { name, threshold });
 }
 
 export async function updateScenario(
   id: string,
   name: string,
-  base: 'formal' | 'casual',
+  threshold: number,
 ): Promise<ScenarioDto> {
-  return invoke<ScenarioDto>('update_scenario', { id, name, base });
+  return invoke<ScenarioDto>('update_scenario', { id, name, threshold });
 }
 
 export async function removeScenario(id: string): Promise<void> {

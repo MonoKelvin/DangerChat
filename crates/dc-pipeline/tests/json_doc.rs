@@ -14,11 +14,13 @@ fn scene_doc_json_roundtrip() {
                 id: "s1".into(),
                 name: "工作".into(),
                 base: Profile::Formal,
+                threshold: Some(0.55),
             },
             SceneDef {
                 id: "s2".into(),
                 name: "朋友".into(),
                 base: Profile::Casual,
+                threshold: Some(0.45),
             },
         ],
     };

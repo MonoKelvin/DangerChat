@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
-import { Shield, ShieldAlert, ShieldOff, Plus, Trash2, Pencil, FolderOpen, FolderCog, Loader2, Moon, Sun, Monitor, GraduationCap, SlidersHorizontal, MessageSquareWarning, Layers, Info, Palette, MonitorCog, ShieldCheck, ScanText, Users, BookText, Cpu, ScrollText, FileText, AlertTriangle, Code2, Eye, type LucideIcon } from 'lucide-react';
+import { Shield, ShieldAlert, ShieldOff, Plus, Trash2, Pencil, FolderOpen, FolderCog, Loader2, Moon, Sun, Monitor, GraduationCap, SlidersHorizontal, MessageSquareWarning, Layers, Info, Palette, MonitorCog, ShieldCheck, ScanText, Users, BookText, Cpu, ScrollText, FileText, AlertTriangle, Code2, Eye, RotateCcw, type LucideIcon } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { ConfigFieldDto, ContactDto, ModelDto, RuleDto, ScenarioDto, StatusPayload } from '../lib/types';
 import * as api from '../lib/commands';
@@ -10,6 +10,7 @@ import { Checkbox } from '../components/Checkbox';
 import { Modal, ModalButton } from '../components/Modal';
 import { IconButton } from '../components/IconButton';
 import { Combobox, type ComboOption } from '../components/Combobox';
+import { NumberInput } from '../components/NumberInput';
 import { ExtLink } from '../components/ExtLink';
 import { SettingsGroup, SettingsRow, SettingsSection } from '../components/SettingsGroup';
 import { AboutHero } from './AboutHero';
@@ -118,7 +119,7 @@ const ADVANCED_GROUPS: { title: string; keys: string[] }[] = [
   { title: '拦截引擎', keys: [...ADVANCED_KEYS] },
   {
     title: '语义判定',
-    keys: ['sem.model', 'sem.l2_enabled', 'sem.threshold.formal', 'sem.threshold.casual'],
+    keys: ['sem.model', 'sem.l2_enabled'],
   },
   { title: '区域识别', keys: ['layout.model', 'layout.conf_threshold', 'layout.nms_iou'] },
   { title: '文字识别', keys: ['ocr.upscale', 'ocr.min_conf', 'ocr.noise_words'] },
@@ -1128,13 +1129,23 @@ function ContactsGroup() {
 
 /* ── 场景管理：场景列表 + 词库 ── */
 
-/** 判定基线选项（L2 阈值与模型头按基线复用；对应高级设置的基线阈值配置） */
-const BASE_OPTIONS: ComboOption[] = [
-  { value: 'formal', label: '正式', hint: '较严' },
-  { value: 'casual', label: '个人', hint: '较宽' },
+/** 阈值预设选项（对应场景编辑对话框的下拉）
+ *  score > threshold → Block；score ≤ threshold → Safe。
+ *  因此 threshold=0 极其严格（几乎拦截），threshold=1 完全放行。 */
+const THRESHOLD_PRESETS: ComboOption[] = [
+  { value: '1', label: '禁止' },
+  { value: '0.80', label: '严格' },
+  { value: '0.55', label: '正式' },
+  { value: '0.45', label: '个人' },
+  { value: '0.20', label: '宽松' },
+  { value: '0', label: '无限制' },
 ];
 
-const BASE_LABEL: Record<string, string> = { formal: '正式基线', casual: '个人基线' };
+/** 内置场景默认阈值 */
+const BUILTIN_DEFAULT_THRESHOLD: Record<string, number> = {
+  formal: 0.55,
+  casual: 0.45,
+};
 
 /** 场景管理页：上方场景列表（内置「正式」「个人」+ 自定义，共 ≤10），下方词库子分类 */
 function ScenariosPage() {
@@ -1207,10 +1218,13 @@ function ScenarioList({
           <div key={s.id} className="flex h-12 items-center gap-2.5 rounded-xl bg-[var(--group-bg)] px-4">
             <span className="text-sm font-medium text-[var(--text-primary)]">{s.name}</span>
             <span className="rounded-md bg-[var(--input-bg)] px-1.5 py-0.5 text-xs text-[var(--text-tertiary)]">
-              {s.fixed ? '内置' : BASE_LABEL[s.base] ?? s.base}
+              {s.fixed ? '内置' : '自定义'}
+            </span>
+            <span className="ml-auto text-xs text-[var(--text-tertiary)] tabular-nums">
+              阈值 {s.threshold.toFixed(2)}
             </span>
             {!s.fixed && (
-              <div className="ml-auto flex gap-1">
+              <div className="flex gap-1">
                 <IconButton variant="ghost" size="sm" data-tip="编辑" onClick={() => setDialog({ mode: 'edit', target: s })}>
                   <Pencil className="size-4" />
                 </IconButton>
@@ -1219,7 +1233,24 @@ function ScenarioList({
                 </IconButton>
               </div>
             )}
-            {s.fixed && <span className="ml-auto text-xs text-[var(--text-tertiary)]">不可修改</span>}
+            {s.fixed && (
+              <IconButton
+                variant="ghost"
+                size="sm"
+                data-tip={`重置为默认值 (${BUILTIN_DEFAULT_THRESHOLD[s.base] ?? 0.55})`}
+                onClick={async () => {
+                  const threshold = BUILTIN_DEFAULT_THRESHOLD[s.base] ?? 0.55;
+                  try {
+                    await api.updateScenario(s.id, s.name, threshold);
+                    refresh();
+                  } catch (e: any) {
+                    setError(e.message || '重置失败');
+                  }
+                }}
+              >
+                <RotateCcw className="size-4" />
+              </IconButton>
+            )}
           </div>
         ))}
         {scenarios.length === 0 && (
@@ -1272,14 +1303,14 @@ function ScenarioDialog({
   onSaved: () => void;
 }) {
   const [name, setName] = useState(initial?.name ?? '');
-  const [base, setBase] = useState<'formal' | 'casual'>(initial?.base ?? 'formal');
+  const [threshold, setThreshold] = useState<number>(initial?.threshold ?? 0.55);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const save = () => {
     setBusy(true);
     setError(null);
-    const p = initial ? api.updateScenario(initial.id, name, base) : api.addScenario(name, base);
+    const p = initial ? api.updateScenario(initial.id, name, threshold) : api.addScenario(name, threshold);
     void p
       .then(() => {
         onSaved();
@@ -1288,6 +1319,12 @@ function ScenarioDialog({
       .catch((e: Error) => setError(e.message || '保存失败'))
       .finally(() => setBusy(false));
   };
+
+  const presetLabel = (v: number): string => {
+    const p = THRESHOLD_PRESETS.find((p) => Math.abs(parseFloat(p.value) - v) < 1e-6);
+    return p ? p.label : v.toFixed(2);
+  };
+  const selectedPreset = presetLabel(threshold);
 
   return (
     <Modal
@@ -1316,11 +1353,24 @@ function ScenarioDialog({
         onKeyDown={(e) => e.key === 'Enter' && name.trim() && save()}
       />
       <div className="mt-4 flex items-center gap-3">
-        <label className="shrink-0 text-label font-medium text-[var(--text-secondary)]">判定基线</label>
-        <Combobox value={base} options={BASE_OPTIONS} onChange={(v) => setBase(v as 'formal' | 'casual')} className="w-40" />
+        <label className="shrink-0 text-label font-medium text-[var(--text-secondary)]">阈值预设</label>
+        <Combobox
+          value={selectedPreset}
+          options={THRESHOLD_PRESETS}
+          onChange={(v) => setThreshold(parseFloat(v))}
+          className="w-32"
+        />
+        <NumberInput
+          value={threshold}
+          onChange={setThreshold}
+          min={0}
+          max={1}
+          step={0.05}
+          className="w-24"
+        />
       </div>
       <p className="mt-3 text-xs leading-relaxed text-[var(--text-tertiary)]">
-        基线决定语义模型的判定阈值（正式较严、个人较宽），词库规则始终按场景本身生效。
+        阈值决定 L2 语义判定的宽松程度：分数 ＞ 阈值时阻断。
       </p>
       {error && <p className="mt-2.5 text-xs text-[var(--warning)]">{error}</p>}
     </Modal>

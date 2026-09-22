@@ -62,12 +62,14 @@ export interface RuleDto {
   applies_to: string[];
 }
 
-/** 场景（scenes.json；内置「正式」「个人」+ 自定义，共 ≤10） */
+/** 场景（scenes.json；内置「正式」「个人」+ 自定义） */
 export interface ScenarioDto {
   id: string;
   name: string;
-  /** L2 判定基线（阈值/模型头复用） */
-  base: 'formal' | 'casual';
+  /** formal | casual（L2 判定基线，用于线性头选择） */
+  base: string;
+  /** L2 判定阈值 */
+  threshold: number;
   /** 内置场景不可修改/删除 */
   fixed: boolean;
 }

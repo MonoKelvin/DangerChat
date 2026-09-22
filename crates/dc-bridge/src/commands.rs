@@ -368,19 +368,11 @@ pub fn save_rules(state: State<'_, Arc<AppState>>, rules: Vec<RuleDto>) -> CmdRe
 pub struct ScenarioDto {
     pub id: String,
     pub name: String,
-    /// formal | casual（L2 判定基线）
+    /// formal | casual（L2 判定基线，用于线性头选择）
     pub base: String,
+    /// L2 判定阈值
+    pub threshold: f32,
     pub fixed: bool,
-}
-
-fn parse_base(base: &str) -> CmdResult<dc_pipeline::sem::rules::Profile> {
-    match base {
-        "formal" => Ok(dc_pipeline::sem::rules::Profile::Formal),
-        "casual" => Ok(dc_pipeline::sem::rules::Profile::Casual),
-        other => Err(BridgeError::Config(format!(
-            "基线非法：{other}（formal|casual）"
-        ))),
-    }
 }
 
 fn with_scenarios<T>(
@@ -403,6 +395,7 @@ pub fn list_scenarios(state: State<'_, Arc<AppState>>) -> CmdResult<Vec<Scenario
                 id: s.id,
                 name: s.name,
                 base: s.base.as_str().into(),
+                threshold: s.threshold,
                 fixed: s.fixed,
             })
             .collect())
@@ -413,15 +406,15 @@ pub fn list_scenarios(state: State<'_, Arc<AppState>>) -> CmdResult<Vec<Scenario
 pub fn add_scenario(
     state: State<'_, Arc<AppState>>,
     name: String,
-    base: String,
+    threshold: f32,
 ) -> CmdResult<ScenarioDto> {
-    let base = parse_base(&base)?;
     let dto = with_scenarios(&state, |m| {
-        m.add(&name, base)
+        m.add(&name, threshold)
             .map(|s| ScenarioDto {
                 id: s.id,
                 name: s.name,
                 base: s.base.as_str().into(),
+                threshold: s.threshold,
                 fixed: s.fixed,
             })
             .map_err(BridgeError::Config)
@@ -435,15 +428,15 @@ pub fn update_scenario(
     state: State<'_, Arc<AppState>>,
     id: String,
     name: String,
-    base: String,
+    threshold: f32,
 ) -> CmdResult<ScenarioDto> {
-    let base = parse_base(&base)?;
     let dto = with_scenarios(&state, |m| {
-        m.update(&id, &name, base)
+        m.update(&id, &name, threshold)
             .map(|s| ScenarioDto {
                 id: s.id,
                 name: s.name,
                 base: s.base.as_str().into(),
+                threshold: s.threshold,
                 fixed: s.fixed,
             })
             .map_err(BridgeError::Config)
