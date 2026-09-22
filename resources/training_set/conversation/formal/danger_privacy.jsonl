@@ -1,20 +1,20 @@
-{"text": "老公昨晚太主动了，我腰现在还酸", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "宝贝想你了，晚上视频的时候别穿衣服", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "亲爱的，上次那家酒店的情趣套房再订一次呗", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "我妈的乳腺结节报告出来了，恶性的可能性大", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "我爸赌博欠了三十万，家里正愁怎么还", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "跟你说个秘密，隔壁工位小李其实是同性恋", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "张经理背着老婆在外面养了个小三", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "李总那学历是假的，花钱买的野鸡大学文凭", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "我这个月大姨妈推迟了，该不会中招了吧", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "昨天体检查出来我有抑郁症，一直瞒着公司", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "老婆你那些内衣照片我存手机里天天看", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "咱俩离婚的事先别跟双方父母说", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "王姐天天在领导面前装乖，背后骂得可难听了", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "隔壁部门那个新来的其实是老板的私生女", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "我表弟吸毒被抓了，家里托关系在捞人", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "亲爱的今晚穿我最喜欢的那套黑色蕾丝等我", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "老公我把这个月工资偷偷藏了两千当私房钱", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "陈主管其实早就想跳槽了，简历都投出去了", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "我怀孕的事还没跟公司说，怕影响晋升", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "赵总的儿子在国外赌博输光了他给还的", "danger": true, "with_context": false, "object": "未标记"}
+{"text": "老公昨晚太主动了，我腰现在还酸", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "私密性生活内容，误发正式场合社死"}
+{"text": "宝贝想你了，晚上视频的时候别穿衣服", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "露骨亲密内容误发，社死"}
+{"text": "亲爱的，上次那家酒店的情趣套房再订一次呗", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "情趣私密内容误发，社死"}
+{"text": "我妈的乳腺结节报告出来了，恶性的可能性大", "danger": true, "with_context": false, "object": "未标记", "severity": "medium", "why": "家人健康隐私，误发不当"}
+{"text": "我爸赌博欠了三十万，家里正愁怎么还", "danger": true, "with_context": false, "object": "未标记", "severity": "medium", "why": "家庭债务隐私，误发不当"}
+{"text": "跟你说个秘密，隔壁工位小李其实是同性恋", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "泄露同事性取向隐私，严重伤害第三人"}
+{"text": "张经理背着老婆在外面养了个小三", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "散布同事私生活八卦，严重后果"}
+{"text": "李总那学历是假的，花钱买的野鸡大学文凭", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "指控领导学历造假，严重诽谤风险"}
+{"text": "我这个月大姨妈推迟了，该不会中招了吧", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "私密生理内容误发正式场合，社死"}
+{"text": "昨天体检查出来我有抑郁症，一直瞒着公司", "danger": true, "with_context": false, "object": "未标记", "severity": "medium", "why": "自身健康隐私，误发影响自己"}
+{"text": "老婆你那些内衣照片我存手机里天天看", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "露骨私密内容误发，社死"}
+{"text": "咱俩离婚的事先别跟双方父母说", "danger": true, "with_context": false, "object": "未标记", "severity": "medium", "why": "家庭私事，误发不当"}
+{"text": "王姐天天在领导面前装乖，背后骂得可难听了", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "背后八卦贬损同事，误发当事人可见致命"}
+{"text": "隔壁部门那个新来的其实是老板的私生女", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "散布老板私生活八卦，严重后果"}
+{"text": "我表弟吸毒被抓了，家里托关系在捞人", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "涉毒及疑似违法捞人，严重后果"}
+{"text": "亲爱的今晚穿我最喜欢的那套黑色蕾丝等我", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "露骨亲密内容误发，社死"}
+{"text": "老公我把这个月工资偷偷藏了两千当私房钱", "danger": true, "with_context": false, "object": "未标记", "severity": "medium", "why": "家庭私房钱私事，误发不当"}
+{"text": "陈主管其实早就想跳槽了，简历都投出去了", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "泄露同事跳槽计划，误发致其失业"}
+{"text": "我怀孕的事还没跟公司说，怕影响晋升", "danger": true, "with_context": false, "object": "未标记", "severity": "medium", "why": "自身怀孕隐私，误发影响自己"}
+{"text": "赵总的儿子在国外赌博输光了他给还的", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "散布领导家庭八卦，严重后果"}

@@ -457,23 +457,24 @@ impl Intercept {
             };
             // 本次发送已有就绪判定，裁决它——清掉可能残留的待发标志。
             self.pending_send_epoch.store(u64::MAX, Ordering::SeqCst);
-            match verdict.level {
-                crate::verdict::VerdictLevel::Safe => HookAction::Pass,
-                _ => {
-                    if self.alerts.request_show(Arc::clone(&verdict)).is_ok() {
-                        self.transition(GuardEvent::AlertShown, now);
-                        tracing::info!(
-                            level = verdict.level.as_str(),
-                            score = verdict.score,
-                            "拦截发送键：已入队弹窗"
-                        );
-                        HookAction::Swallow
-                    } else {
-                        // 弹窗通道异常 → fail-open，绝不静默吞键（§2.2）
-                        tracing::error!("弹窗入队失败：改判放行（fail-open）");
-                        HookAction::Pass
-                    }
+            // 只有 Block（「已阻断发送」）才吞键拦截；Warn（「发送提醒」）与 Safe 一样放行，
+            // 不吞键、不弹窗（用户要求：提醒级别不打扰，仅阻断级别拦下）。
+            if verdict.level == crate::verdict::VerdictLevel::Block {
+                if self.alerts.request_show(Arc::clone(&verdict)).is_ok() {
+                    self.transition(GuardEvent::AlertShown, now);
+                    tracing::info!(
+                        level = verdict.level.as_str(),
+                        score = verdict.score,
+                        "拦截发送键：已入队弹窗"
+                    );
+                    HookAction::Swallow
+                } else {
+                    // 弹窗通道异常 → fail-open，绝不静默吞键（§2.2）
+                    tracing::error!("弹窗入队失败：改判放行（fail-open）");
+                    HookAction::Pass
                 }
+            } else {
+                HookAction::Pass
             }
         } else {
             if ev.is_key_down && is_content_key(ev.vk) {
@@ -527,12 +528,13 @@ impl Intercept {
         if pending == u64::MAX || verdict.draft_epoch != pending {
             return;
         }
-        // 安全判定：清零待发标志。判定已入槽且新鲜，用户再按回车即命中放行。
-        if !verdict.level.is_dangerous() {
+        // 非阻断判定（Safe/Warn）：清零待发标志放行。判定已入槽且新鲜，用户再按回车即命中放行。
+        // Warn（「发送提醒」）不拦截、不弹窗，与 Safe 同等放行（用户要求：仅 Block 阻断）。
+        if verdict.level != crate::verdict::VerdictLevel::Block {
             self.pending_send_epoch.store(u64::MAX, Ordering::SeqCst);
             return;
         }
-        // 危险判定：仅 Active 态主动弹窗（Cooldown/挂起/暂停时保留标志，不重复弹）。
+        // 阻断判定（Block）：仅 Active 态主动弹窗（Cooldown/挂起/暂停时保留标志，不重复弹）。
         let now = self.clock.now_ms();
         if self.refresh_state(now) != GuardState::Active {
             return;

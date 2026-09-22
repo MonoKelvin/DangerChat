@@ -53,6 +53,8 @@ pub struct Verdict {
     /// 可读理由（FR-SEM-06）。
     pub reasons: Vec<String>,
     pub chat_target: Option<String>,
+    /// 命中场景的展示名（正式/个人/自定义名；弹窗标签用，仅内存传递）。
+    pub scene_name: Option<String>,
     /// 聊天窗口最近对话摘要（弹窗 UI 显示，仅内存传递）。
     pub chat_context: Option<String>,
     /// 草稿原文：仅内存传递供弹窗展示（FR-BRG-02）；日志只写指纹，永不落原文。
@@ -71,6 +73,7 @@ impl Verdict {
             score,
             reasons,
             chat_target: None,
+            scene_name: None,
             chat_context: None,
             draft_text: None,
             draft_fingerprint: 0,
@@ -128,6 +131,12 @@ impl Verdict {
 
     pub fn with_target(mut self, target: impl Into<String>) -> Self {
         self.chat_target = Some(target.into());
+        self
+    }
+
+    /// 附带命中场景的展示名（弹窗标签用）。
+    pub fn with_scene(mut self, scene: impl Into<String>) -> Self {
+        self.scene_name = Some(scene.into());
         self
     }
 

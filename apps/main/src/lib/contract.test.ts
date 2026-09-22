@@ -18,6 +18,7 @@ describe('契约 fixtures 对照（UT-UI-01）', () => {
     expect(typeof p.score).toBe('number');
     expect(Array.isArray(p.reasons)).toBe(true);
     expect(p.chat_target).toBe('张总');
+    expect(p.scene_name).toBe('正式');
     expect(p.chat_context).toBe('昨天的报告怎么样\n已经完成了');
     expect(typeof p.draft_text).toBe('string');
     expect(typeof p.draft_fingerprint).toBe('number');

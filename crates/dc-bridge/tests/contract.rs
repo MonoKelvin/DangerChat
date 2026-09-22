@@ -22,6 +22,7 @@ fn ut_brg_01_write_contract_fixtures() {
         .with_epoch(3)
         .with_draft("你是 sb", 42)
         .with_target("张总")
+        .with_scene("正式")
         .with_context(Some("昨天的报告怎么样\n已经完成了".into()));
     let alert = AlertPayload::from_verdict(&verdict, 10);
     std::fs::write(

@@ -1,20 +1,20 @@
-{"text": "我请你帮我销赃，分你一半", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "今晚我请你去抢那家金店", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "走，一起去弄死那个王八蛋", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "请你帮我藏尸，事成重谢", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "谢谢你搞到的枪，很好用", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "早点动手吧，趁他今晚不在家", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "多备点炸药，一次炸个够", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "路上小心别被抓，货藏好了", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "毒品拿了吗，没拿快去取", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "没事别慌，尸体我已经处理了", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "辛苦你了，诈骗来的钱到账了", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "干得漂亮，那老头的养老钱到手了", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "慢慢来别急，先把他迷晕再动手", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "改天请你去踩点，那家有钱", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "周末我教你怎么制毒", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "帮你搞到了她的裸照，拿去要挟", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "有啥要弄死的人随时找我", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "好久没干票大的，这次绑个富二代", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "生日礼物就送你把管制刀具吧", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "天冷了正好放火烧他家取暖", "danger": true, "with_context": false, "object": "未标记"}
+{"text": "我请你帮我销赃，分你一半", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "邀约销赃，严重违法"}
+{"text": "今晚我请你去抢那家金店", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "预谋抢劫，严重违法"}
+{"text": "走，一起去弄死那个王八蛋", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "邀约行凶，严重违法"}
+{"text": "请你帮我藏尸，事成重谢", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "藏尸，严重违法"}
+{"text": "谢谢你搞到的枪，很好用", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "涉枪交易，严重违法"}
+{"text": "早点动手吧，趁他今晚不在家", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "预谋作案，严重违法"}
+{"text": "多备点炸药，一次炸个够", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "预谋爆炸，严重违法"}
+{"text": "路上小心别被抓，货藏好了", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "疑似运赃逃避抓捕，严重违法"}
+{"text": "毒品拿了吗，没拿快去取", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "毒品交易，严重违法"}
+{"text": "没事别慌，尸体我已经处理了", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "处理尸体，严重违法"}
+{"text": "辛苦你了，诈骗来的钱到账了", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "分赃诈骗款，严重违法"}
+{"text": "干得漂亮，那老头的养老钱到手了", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "诈骗养老金得手，严重违法"}
+{"text": "慢慢来别急，先把他迷晕再动手", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "预谋迷晕作案，严重违法"}
+{"text": "改天请你去踩点，那家有钱", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "踩点预谋盗抢，严重违法"}
+{"text": "周末我教你怎么制毒", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "传授制毒，严重违法"}
+{"text": "帮你搞到了她的裸照，拿去要挟", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "提供裸照要挟，严重违法"}
+{"text": "有啥要弄死的人随时找我", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "招揽行凶，严重违法"}
+{"text": "好久没干票大的，这次绑个富二代", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "预谋绑架，严重违法"}
+{"text": "生日礼物就送你把管制刀具吧", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "赠送管制刀具，严重违法"}
+{"text": "天冷了正好放火烧他家取暖", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "纵火意图，严重违法"}

@@ -8,6 +8,8 @@ export interface AlertPayload {
   score: number;
   reasons: string[];
   chat_target: string | null;
+  /** 命中场景的展示名（正式/个人/自定义名；弹窗标签用） */
+  scene_name: string | null;
   chat_context: string | null;
   draft_text: string;
   draft_fingerprint: number;

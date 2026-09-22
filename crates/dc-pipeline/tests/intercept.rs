@@ -206,12 +206,13 @@ fn ut_int_03_block_swallows_and_enqueues_alert() {
         other => panic!("应为 Show，实际 {other:?}"),
     }
 
-    // Warn 同样拦截
+    // Warn（「发送提醒」）不拦截：放行、不吞键、不弹窗（仅 Block 阻断）
     let h2 = Harness::new();
     h2.target_foreground();
     let _ = h2.press(VK_A);
     h2.publish(Verdict::warn("疑似不匹配"));
-    assert_eq!(h2.enter(), HookAction::Swallow);
+    assert_eq!(h2.enter(), HookAction::Pass, "Warn 放行，不吞键");
+    assert_eq!(h2.intercept.alerts().shown(), 0, "Warn 不弹窗");
 }
 
 /// UT-INT-04（§2.2 修订：fail-closed）：判定未就绪 / 纪元不等 / TTL 过期 → 吞键+触发分析；

@@ -253,13 +253,13 @@ impl SemStage {
         // L1（永远启用，毫秒级；命中短路）
         if let Ok(rules) = self.rules.read() {
             if let Some(hit) = rules.first_hit(draft, &scenario_id) {
-                return Verdict::from_rule(&hit.pattern);
+                return Verdict::from_rule(&hit.pattern).with_scene(scenario_name);
             }
         }
 
         // 空草稫 → Safe
         if draft.is_empty() {
-            return Verdict::safe();
+            return Verdict::safe().with_scene(scenario_name);
         }
 
         // L2（可开关；Embedder 缺失/已卸载 = fail-open 仅 L1）
@@ -290,14 +290,14 @@ impl SemStage {
                         "兜底相似度"
                     };
                     v.reasons.push(format!(
-                        "与「{scenario_name}」场景语义不匹配，{mode} {score:.2} ≥ {threshold:.2}"
+                        "场景语义不匹配，{mode} {score:.2} ≥ {threshold:.2}"
                     ));
                 }
-                return v;
+                return v.with_scene(scenario_name);
             }
         }
 
-        Verdict::safe()
+        Verdict::safe().with_scene(scenario_name)
     }
 
     /// L2 打分。头缺失/推理失败 → None（调用方回 Safe；fail-open）。

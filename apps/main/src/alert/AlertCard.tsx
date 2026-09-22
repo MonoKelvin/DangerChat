@@ -63,11 +63,28 @@ export function AlertCard({
           自然高度）供窗口高度测量——直接量滚动容器会被裁剪，量不到内容增长。 */}
       <div ref={bodyRef} className="min-h-0 flex-1 overflow-y-auto px-4">
         <div ref={contentRef} className="space-y-2">
-          {/* 命中原因（最影响判断，置顶） */}
-          {payload.reasons.length > 0 && (
-            <p className="text-caption leading-snug text-[var(--text-secondary)]">
-              {payload.reasons[0]}
-            </p>
+          {/* 聊天对象 + 场景标签：对象名主题色凸显，场景展示名用圆角矩形背景标签 */}
+          {(payload.chat_target || payload.scene_name) && (
+            <div className="flex items-center gap-1.5">
+              {payload.chat_target && (
+                <span className="text-label font-semibold text-[var(--primary)]">
+                  「{payload.chat_target}」
+                </span>
+              )}
+              {payload.scene_name && (
+                <span
+                  className="rounded-full px-2 py-0.5 text-caption font-medium text-[var(--text-secondary)]"
+                  style={{ backgroundColor: 'color-mix(in oklch, var(--text-primary) 8%, transparent)' }}
+                >
+                  {payload.scene_name}
+                </span>
+              )}
+              {payload.reasons.length > 0 && (
+                  <p className="text-caption leading-snug text-[var(--text-secondary)]">
+                  {payload.reasons[0]}
+                  </p>
+              )}
+            </div>
           )}
 
           {/* 被拦消息 */}
@@ -127,8 +144,9 @@ export function AlertCard({
 export const PREVIEW_ALERT: AlertPayload = {
   level: 'block',
   score: 0.86,
-  reasons: ['与「正式」场景语义不匹配，可能造成误会或冒犯'],
+  reasons: ['场景语义不匹配，可能造成误会或冒犯'],
   chat_target: '张经理',
+  scene_name: '正式',
   chat_context: '张经理：这个方案下午三点前给我\n你：好的，马上整理',
   draft_text: '这点破事都要催，烦不烦啊',
   draft_fingerprint: 0,

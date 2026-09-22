@@ -1,25 +1,25 @@
-{"text": "这破需求一天改八遍，我真服了", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "傻逼领导，天天让加班还不给钱", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "这公司烂透了，我早就想跑路了", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "烦死了，又要陪客户应酬到半夜", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "我要被这个甲方逼疯了，纯粹有病", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "工资这么点还让人干这么多活，无语死了", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "这帮人做事真的离谱，血压都上来了", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "真的受够了，明天就想提离职", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "老板画的饼我一口都咽不下去了", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "开这种无聊的会纯属浪费我生命", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "这方案是哪个脑残想出来的", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "又双叒改需求，你们能不能想清楚再说", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "跟你们对接简直是折磨，效率低到爆", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "这点破事都搞不定，养你们干嘛的", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "别给我甩锅，这明显是你们部门的问题", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "我凭什么给你背这个锅，凭你官大吗", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "天天PUA我，当我傻是吧", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "这待遇我随便找个厂都比这强", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "领导就知道压榨，一点人情味都没有", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "这项目黄了活该，早说过行不通", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "你行你上啊，站着说话不腰疼", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "这数据我编的，反正没人查", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "报告随便糊弄一下得了，谁认真看啊", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "客户就是个冤大头，多收点钱怎么了", "danger": true, "with_context": false, "object": "未标记"}
-{"text": "这合同有漏洞，先签了再说赖账", "danger": true, "with_context": false, "object": "未标记"}
+{"text": "这破需求一天改八遍，我真服了", "danger": false, "with_context": false, "object": "未标记", "severity": "low", "why": "工作吐槽，误发无实害"}
+{"text": "傻逼领导，天天让加班还不给钱", "danger": true, "with_context": false, "object": "未标记", "severity": "medium", "why": "辱骂领导，误发当事人可见则失当"}
+{"text": "这公司烂透了，我早就想跑路了", "danger": false, "with_context": false, "object": "未标记", "severity": "low", "why": "离职情绪吐槽，无实害"}
+{"text": "烦死了，又要陪客户应酬到半夜", "danger": false, "with_context": false, "object": "未标记", "severity": "low", "why": "加班应酬吐槽，无实害"}
+{"text": "我要被这个甲方逼疯了，纯粹有病", "danger": true, "with_context": false, "object": "未标记", "severity": "medium", "why": "骂甲方有病，误发客户处失当"}
+{"text": "工资这么点还让人干这么多活，无语死了", "danger": false, "with_context": false, "object": "未标记", "severity": "low", "why": "薪资吐槽，无实害"}
+{"text": "这帮人做事真的离谱，血压都上来了", "danger": false, "with_context": false, "object": "未标记", "severity": "low", "why": "泛指吐槽，无点名无实害"}
+{"text": "真的受够了，明天就想提离职", "danger": false, "with_context": false, "object": "未标记", "severity": "low", "why": "离职情绪吐槽，无实害"}
+{"text": "老板画的饼我一口都咽不下去了", "danger": false, "with_context": false, "object": "未标记", "severity": "low", "why": "比喻式吐槽，无实害"}
+{"text": "开这种无聊的会纯属浪费我生命", "danger": false, "with_context": false, "object": "未标记", "severity": "low", "why": "开会吐槽，无实害"}
+{"text": "这方案是哪个脑残想出来的", "danger": true, "with_context": false, "object": "未标记", "severity": "medium", "why": "脑残贬损方案作者，误发当事人可见则失当"}
+{"text": "又双叒改需求，你们能不能想清楚再说", "danger": false, "with_context": false, "object": "未标记", "severity": "low", "why": "改需求不满，语气尚可，无实害"}
+{"text": "跟你们对接简直是折磨，效率低到爆", "danger": true, "with_context": false, "object": "未标记", "severity": "medium", "why": "当面贬损对接方，误发失当"}
+{"text": "这点破事都搞不定，养你们干嘛的", "danger": true, "with_context": false, "object": "未标记", "severity": "medium", "why": "贬损下属/协作方，态度失当"}
+{"text": "别给我甩锅，这明显是你们部门的问题", "danger": true, "with_context": false, "object": "未标记", "severity": "medium", "why": "对立指责，误发对应部门则失当"}
+{"text": "我凭什么给你背这个锅，凭你官大吗", "danger": true, "with_context": false, "object": "未标记", "severity": "medium", "why": "顶撞上级，态度失当"}
+{"text": "天天PUA我，当我傻是吧", "danger": true, "with_context": false, "object": "未标记", "severity": "medium", "why": "指控上级PUA，误发失当"}
+{"text": "这待遇我随便找个厂都比这强", "danger": false, "with_context": false, "object": "未标记", "severity": "low", "why": "待遇吐槽，无实害"}
+{"text": "领导就知道压榨，一点人情味都没有", "danger": false, "with_context": false, "object": "未标记", "severity": "low", "why": "情绪吐槽领导，非侮辱语，无实害"}
+{"text": "这项目黄了活该，早说过行不通", "danger": true, "with_context": false, "object": "未标记", "severity": "medium", "why": "幸灾乐祸，态度失当"}
+{"text": "你行你上啊，站着说话不腰疼", "danger": true, "with_context": false, "object": "未标记", "severity": "medium", "why": "挑衅式回怼，态度失当"}
+{"text": "这数据我编的，反正没人查", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "自曝伪造数据，严重职业/合规后果"}
+{"text": "报告随便糊弄一下得了，谁认真看啊", "danger": true, "with_context": false, "object": "未标记", "severity": "medium", "why": "自曝敷衍工作，误发上级则失当"}
+{"text": "客户就是个冤大头，多收点钱怎么了", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "自曝宰客欺诈，误发客户致命"}
+{"text": "这合同有漏洞，先签了再说赖账", "danger": true, "with_context": false, "object": "未标记", "severity": "high", "why": "自曝合同欺诈赖账，严重法律后果"}

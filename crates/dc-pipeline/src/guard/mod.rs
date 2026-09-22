@@ -251,18 +251,22 @@ fn spawn_worker(
                         return;
                     }
                     // 前台态巡检（每个触发都查一次，O(1) 原子读）：离开前台 → 卸载释放内存；
-                    // 回到前台 → 装入（~600ms，装入完成前该轮 fail-open 放行）。
+                    // 在前台 → 确保装入（~600ms，装入完成前该轮 fail-open 放行）。
                     // 放在触发处理**之前**，保证用户一打字（Fast 触发）即触发按需装入，
                     // 不必等下一次 1.5s 心跳。
+                    //
+                    // 为何前台时**每轮**调 ensure_loaded 而非仅在跳变时调：ensure_loaded 幂等，
+                    // 已加载则只取 read 锁判 is_some 即返回（无 IO）；未加载（含**上一轮装入失败**）
+                    // 才真正装入。旧实现用 was_active 门控 ensure，一旦某次装入失败便把 was_active
+                    // 置真，此后前台态不再跳变 → 永不重试，模型永久停在「已卸载」——用户实测
+                    // 「切走目标再切回后语义失效、提示模型未加载」即此故障（一次性失败无从恢复）。
                     let active = target_active();
-                    if active != was_active {
-                        if active {
-                            core.sem.ensure_loaded();
-                        } else {
-                            core.sem.unload_model();
-                        }
-                        was_active = active;
+                    if active {
+                        core.sem.ensure_loaded();
+                    } else if was_active {
+                        core.sem.unload_model();
                     }
+                    was_active = active;
                     if t == Trigger::Heartbeat {
                         next_heartbeat = std::time::Instant::now() + heartbeat;
                     }
