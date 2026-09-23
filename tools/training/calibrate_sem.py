@@ -11,7 +11,7 @@
   · 用同一套带标注样本，分别给 fp32 / int8 求最优阈值与准确率；再看「沿用 fp32 阈值」时 int8 的表现
 
 用法：
-    python tools/training/calibrate_sem.py resources/models/bge-large
+    python tools/training/calibrate_sem.py resources/models/bge-small
 """
 
 from __future__ import annotations
@@ -49,6 +49,9 @@ SAFE_EXEMPLARS = [
 # BGE-zh v1.5 官方建议的查询指令前缀（查询→段落模式）
 BGE_QUERY_PREFIX = "为这个句子生成表示以用于检索相关文章："
 
+# [unused1] 标记 ID（与 embedder.rs MARKER_DRAFT 一致）
+MARKER_DRAFT = 1
+
 # ---- 标注样本：(草稿, 在正式场景下是否安全) ----
 SAMPLES: list[tuple[str, bool]] = [
     ("好的，我下午把这个方案发您", True),
@@ -84,12 +87,16 @@ def make_session(path: Path, cuda_free: bool = True) -> ort.InferenceSession:
 
 
 def embed(session: ort.InferenceSession, tok: Tokenizer, texts: list[str]) -> np.ndarray:
-    """mean-pooling + L2 归一化。"""
+    """标记位置读取 + L2 归一化（与 embedder.rs::embed_at_marker 对齐）。
+
+    [CLS] [unused1] text... -> 读取位置 1 的隐藏状态（L2 归一化）。
+    """
     out = []
     for text in texts:
         enc = tok.encode(text)
-        ids = np.array([enc.ids], dtype=np.int64)
-        mask = np.array([enc.attention_mask], dtype=np.int64)
+        ids_list = [101, MARKER_DRAFT] + enc.ids[1:127]
+        ids = np.array([ids_list], dtype=np.int64)
+        mask = np.ones((1, len(ids_list)), dtype=np.int64)
         types = np.zeros_like(ids)
         feeds = {
             "input_ids": ids,
@@ -98,10 +105,12 @@ def embed(session: ort.InferenceSession, tok: Tokenizer, texts: list[str]) -> np
         }
         # 只喂模型真正声明的输入（不同导出可能缺 token_type_ids）
         feeds = {k: v for k, v in feeds.items() if k in {i.name for i in session.get_inputs()}}
-        hidden = session.run(None, feeds)[0]  # [1, seq, 512]
-        m = mask[0][:, None].astype(np.float32)
-        vec = (hidden[0] * m).sum(axis=0) / np.clip(m.sum(), 1e-9, None)
-        vec = vec / np.linalg.norm(vec)
+        hidden = session.run(None, feeds)[0]
+        vec = hidden[0, 1, :]
+        norm = np.linalg.norm(vec)
+        if norm < 1e-9:
+            raise ValueError("嵌入退化")
+        vec = vec / norm
         out.append(vec)
     return np.array(out)
 
@@ -146,7 +155,7 @@ def loo_probe(x: np.ndarray, y: np.ndarray, l2: float = 0.5, epochs: int = 800, 
 
 
 def main() -> int:
-    model_dir = Path(sys.argv[1] if len(sys.argv) > 1 else "resources/models/bge-large")
+    model_dir = Path(sys.argv[1] if len(sys.argv) > 1 else "resources/models/bge-small")
     tok = Tokenizer.from_file(str(model_dir / "tokenizer.json"))
     drafts = [s[0] for s in SAMPLES]
     labels = np.array([s[1] for s in SAMPLES])

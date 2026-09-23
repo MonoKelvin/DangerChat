@@ -21,6 +21,8 @@ pub mod head;
 pub mod rules;
 pub mod scenarios;
 
+pub use head::{FastPath, ScoreResult};
+
 use std::sync::RwLock;
 use std::time::Instant;
 
@@ -121,8 +123,8 @@ pub struct SemStage {
     scenarios: RwLock<ScenarioManager>,
     /// L2 编码器：None = 未加载（fail-open 仅 L1）。
     /// 用 RwLock 而非裸 Option：挂起态（目标非前台）由 worker 线程 `unload_model`
-    /// 释放 bge-large 的 ~350MB 会话内存，回到前台再 `ensure_loaded` 重载
-    /// （§2.4 挂起卸载；bge-large 常驻内存与「内存极低」目标冲突，靠按需装卸解决）。
+    /// 释放 bge-small 的 ~50MB 会话内存，回到前台再 `ensure_loaded` 重载
+    /// （§2.4 挂起卸载；bge-small 常驻内存与「内存极低」目标冲突，靠按需装卸解决）。
     embedder: RwLock<Option<embedder::Embedder>>,
     /// 已解析的模型目录（init 时确定；卸载后重载的依据）。
     model_dir: RwLock<Option<std::path::PathBuf>>,
@@ -282,46 +284,78 @@ impl SemStage {
             // 详见 draft_embed_text / object_embed_text 的文档注释与实测对比）。
             let draft_text = draft_embed_text(input.chat_context.as_deref(), draft);
             let object_text = object_embed_text(input.chat_target.as_deref());
-            if let Some(score) = self.l2_score(&draft_text, &object_text, base) {
-                // 模板兜底模式（无训练头）不 Block，仅 Safe（ADR-14）；
-                // 有训练头时按阈值判定 Block/Safe。
-                let has_weights = self.heads.has_weights(base);
-                let mut v = if has_weights {
-                    Verdict::from_score(score, threshold)
-                } else {
-                    Verdict::safe()
-                };
-                if v.level == crate::verdict::VerdictLevel::Block {
-                    v.reasons.push(format!(
-                        "场景语义不匹配，危险分 {score:.2} > {threshold:.2}"
-                    ));
+            if let Some(draft) = self.l2_draft(&draft_text) {
+                // fast-path： draft-only 得分落在 safe_band/block_band → 短路判定。
+                match self.heads.judge_fast(&draft, base) {
+                    ScoreResult::ShortCircuitSafe => {
+                        return Verdict::safe().with_scene(scenario_name);
+                    }
+                    ScoreResult::ShortCircuitBlock => {
+                        return Verdict::block("语义 fast-path 短路").with_scene(scenario_name);
+                    }
+                    ScoreResult::FullScore { .. } => {}
                 }
-                return v.with_scene(scenario_name);
+                // fast-path 未命中 → 完整双塔评分
+                let dim = self.heads.feature_dim(base);
+                if dim == embedder::EMBED_DIM {
+                    if let Some(score) = self.heads.score(&draft, base) {
+                        let has_weights = self.heads.has_weights(base);
+                        let mut v = if has_weights {
+                            Verdict::from_score(score, threshold)
+                        } else {
+                            Verdict::safe()
+                        };
+                        if v.level == crate::verdict::VerdictLevel::Block {
+                            v.reasons.push(format!(
+                                "场景语义不匹配，危险分 {score:.2} > {threshold:.2}"
+                            ));
+                        }
+                        return v.with_scene(scenario_name);
+                    }
+                } else {
+                    if let Some(score) = self.l2_score_obj(&draft, &object_text, base) {
+                        let has_weights = self.heads.has_weights(base);
+                        let mut v = if has_weights {
+                            Verdict::from_score(score, threshold)
+                        } else {
+                            Verdict::safe()
+                        };
+                        if v.level == crate::verdict::VerdictLevel::Block {
+                            v.reasons.push(format!(
+                                "场景语义不匹配，危险分 {score:.2} > {threshold:.2}"
+                            ));
+                        }
+                        return v.with_scene(scenario_name);
+                    }
+                }
             }
         }
 
         Verdict::safe().with_scene(scenario_name)
     }
 
-    /// L2 打分。头缺失/推理失败 → None（调用方回 Safe；fail-open）。
-    ///
-    /// 特征按 head 维度装配（见 [`assemble_features`]）；维度不符由 head 侧守卫拒绝。
-    /// 旧 head 文件（512/1024）无需重训即可继续工作，重训产出 2048 维头才启用交互项。
-    fn l2_score(&self, draft_text: &str, object_text: &str, base: Profile) -> Option<f32> {
+    /// draft 塔嵌入：[CLS] [unused1] {draft_text} → 位置 1 隐藏态（L2 归一化）。
+    fn l2_draft(&self, draft_text: &str) -> Option<[f32; embedder::EMBED_DIM]> {
         let guard = self.embedder.read().ok()?;
         let embedder = guard.as_ref()?;
-        let draft = embedder.embed(draft_text).ok()?;
-        let dim = self.heads.feature_dim(base);
-        if dim == embedder::EMBED_DIM {
-            return self.heads.score(&draft, base);
-        }
-        let object = embedder.embed(object_text).ok()?;
-        self.heads
-            .score(&assemble_features(&draft, &object, dim), base)
+        embedder.embed_draft(draft_text).ok()
     }
 
-    /// 挂起态卸载（§2.4）：目标程序离开前台时释放 bge-large 会话内存（~350MB）。
-    /// heads（小）与配置保留，回到前台经 [`ensure_loaded`] 重载（~600ms）。
+    /// 完整双塔评分（head 维度决定是否拼接对象塔）。
+    fn l2_score_obj(&self, draft: &[f32], object_text: &str, base: Profile) -> Option<f32> {
+        let dim = self.heads.feature_dim(base);
+        if dim == embedder::EMBED_DIM {
+            return self.heads.score(draft, base);
+        }
+        let guard = self.embedder.read().ok()?;
+        let embedder = guard.as_ref()?;
+        // 对象塔用 [unused2] 标记：[CLS] [unused2] {object_text}
+        let object = embedder.embed_object(object_text).ok()?;
+        self.heads.score(&assemble_features(draft, &object, dim), base)
+    }
+
+    /// 挂起态卸载（§2.4）：目标程序离开前台时释放 bge-small 会话内存（~50MB）。
+    /// heads（小）与配置保留，回到前台经 [`ensure_loaded`] 重载（~100ms）。
     /// 幂等：已卸载再调无副作用。仅在 l2_enabled 且已加载过时打印日志。
     pub fn unload_model(&self) {
         if let Ok(mut w) = self.embedder.write() {
@@ -378,9 +412,9 @@ impl Module for SemStage {
             ConfigField {
                 key: "sem.model".into(),
                 ty: ConfigType::Text { max_len: 64 },
-                default: ConfigValue::Str("bge-large".into()),
+                default: ConfigValue::Str("bge-small".into()),
                 label: "语义模型".into(),
-                help: "models/ 下 kind=sem 的模型目录名；内置 bge-large，用户可放入自训练/替换模型后在此切换".into(),
+                help: "models/ 下 kind=sem 的模型目录名；内置 bge-small，用户可放入自训练/替换模型后在此切换".into(),
                 group: "模型与设备".into(),
                 owner: "sem".into(),
             },
@@ -466,15 +500,15 @@ impl Module for SemStage {
         self.l2_enabled = mctx.config.bool_or("sem.l2_enabled", true);
 
         if self.l2_enabled {
-            // 语义模型可切换（sem.model 配置项，默认内置 bge-large）：
+            // 语义模型可切换（sem.model 配置项，默认内置 bge-small）：
             // 用户把自训练/替换模型（kind=sem）放进数据目录 models/ 下即可在设置里选。
             // 用户层同名覆盖内置层（resolve_dir 语义）。
             //
             // **惰性加载（内存优化）**：init 只解析目录与头权重（几十 KB），
-            // **不加载 ~350MB 的 Embedder 会话**——真正的加载延后到 `ensure_loaded`，
+            // **不加载 ~50MB 的 Embedder 会话**——真正的加载延后到 `ensure_loaded`，
             // 由 worker 在「目标程序前台」时触发。这样目标不在前台/用户不打字时，
-            // 常驻内存只有头权重，实测空闲 RSS 从 ~360MB 降到 ~30-40MB。
-            let model_name = mctx.config.str_or("sem.model", "bge-large");
+            // 常驻内存只有头权重，实测空闲 RSS 从 ~60MB 降到 ~30-40MB。
+            let model_name = mctx.config.str_or("sem.model", "bge-small");
             // kind 校验：非 sem 模型直接拒绝（避免选错把 layout/ocr 模型当语义模型加载）。
             let kind_ok = mctx
                 .models

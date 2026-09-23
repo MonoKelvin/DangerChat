@@ -1,0 +1,4 @@
+kind = "sem"
+file = "model_quantized.onnx"
+version = "bge-small-zh-v1.5-int8"
+note = "BGE 中文小模型，512 维，int8 量化（Xenova 转换版）；tokenizer.json 与双塔线性头同目录。默认内置语义模型。"

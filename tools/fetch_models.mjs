@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 // 拉取「未入库」的模型权重（pnpm install 后由 postinstall 自动触发）。
 //
-// 背景：多数 ONNX 权重已随仓库入库，克隆即用；唯一例外是 bge-large 的
-// model_quantized.onnx（311MB，超 GitHub 100MB 单文件限制，见 resources/models/README.md）。
-// 本脚本把「手动下载」自动化：幂等——已存在且大小正确的文件直接跳过，只补缺失/损坏的。
+// 背景：所有 ONNX 权重均已随仓库入库（克隆即可用）。本脚本保留用于将来
+// 新加入的大模型权重下载所需，但目前无需下载任何文件。
 //
 // 设计取向：
 //   · 零依赖（Node 18+ 原生 fetch，仓库要求 Node 24）；
@@ -31,17 +30,9 @@ const ENDPOINTS = [
   'https://hf-mirror.com',
 ].filter(Boolean);
 
-// 需要拉取的「未入库」权重清单。已入库的模型不列在此（它们随 git 而来）。
-// size 为精确字节数，用于幂等判定与完整性校验（大小不符视为损坏，重下）。
-const MODELS = [
-  {
-    name: 'bge-large 语义向量权重',
-    dest: 'resources/models/bge-large/model_quantized.onnx',
-    // Xenova 转换版 int8；仓库里重命名为 model_quantized.onnx
-    repoPath: 'Xenova/bge-large-zh-v1.5/resolve/main/onnx/model_int8.onnx',
-    size: 326164024,
-  },
-];
+// 需要拉取的「未入库」权重清单。目前所有权重均已入库，清单为空。
+// 若将来新增超 100MB 权重需下载，此处补充条目。
+const MODELS = [];
 
 function fmtMB(bytes) {
   return `${(bytes / 1048576).toFixed(0)}MB`;

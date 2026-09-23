@@ -917,8 +917,7 @@ pub struct MigrateReport {
 /// 内置模型目录名（kind 前缀匹配）：迁移数据目录时跳过，这些应随程序资源走 exe 侧。
 fn is_builtin_model_dir(name: &std::ffi::OsStr) -> bool {
     let n = name.to_string_lossy();
-    n == "bge"
-        || n == "bge-large"
+    n == "bge-small"
         || n.starts_with("ocr-")
         || (n.starts_with("dc-layout-") && !n.starts_with("dc-layout-user"))
 }

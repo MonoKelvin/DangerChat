@@ -237,7 +237,7 @@ export function SettingsRoot() {
       );
     }
     if (key === 'sem.model') {
-      const def = String(byKey.get(key)?.default ?? 'bge-large');
+      const def = String(byKey.get(key)?.default ?? 'bge-small');
       return (
         <SemModelRow
           key={key}
@@ -857,7 +857,7 @@ function LayoutModelRow({
   );
 }
 
-/** 语义模型行：下拉列出 models/ 有效 sem 模型（内置 bge-large + 用户放入的替换模型）。
+/** 语义模型行：下拉列出 models/ 有效 sem 模型（内置 bge-small + 用户放入的替换模型）。
  *  切换后下次启动生效（模型在 init 读取，与区域模型一致）。 */
 function SemModelRow({
   value,
@@ -889,7 +889,7 @@ function SemModelRow({
   return (
     <SettingsRow
       label="语义模型"
-      subtitle="models/ 下 kind=sem 的模型；默认内置 bge-large，放入自训练/替换模型后可切换（重启生效）"
+      subtitle="models/ 下 kind=sem 的模型；默认内置 bge-small，放入自训练/替换模型后可切换（重启生效）"
       dirty={dirty}
       onReset={() => defaultValue != null && onChange(defaultValue)}
     >

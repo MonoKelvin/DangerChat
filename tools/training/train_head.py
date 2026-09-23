@@ -53,8 +53,7 @@ from tokenizers import Tokenizer
 THRESHOLD_FORMAL = 0.55
 THRESHOLD_CASUAL = 0.45
 BLOCK_MARGIN = 0.25   # 仅用于打印 Block 线；实际扣分在 verdict.rs::from_score
-EMBED_DIM = 1024         # 单塔维度（= embedder.rs::EMBED_DIM，bge-large-zh）
-FEATURE_DIM = 4 * EMBED_DIM   # 草稿塔 ⊕ 对象塔 ⊕ 逐元素积 ⊕ 差（含交互项）
+# EMBED_DIM 从 ONNX 模型输出维度自动推断（bge-small 512；兼容 bge-large 1024）
 
 # severity → 软目标（回归目标 y ∈ [0,1]）。
 # 为何回归而非二值分类：danger 只有 0/1，把 low（平庸不合场景，无实害）和 high（严重后果）
@@ -79,24 +78,35 @@ BASES = ("formal", "casual")
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def embed(session: ort.InferenceSession, tok: Tokenizer, texts: list[str]) -> np.ndarray:
-    """mean-pooling + L2 归一化（BGE 官方；与 embedder.rs 对齐）。"""
+MARKER_DRAFT = 1   # [unused1]：draft 塔嵌入用（与 embedder.rs::MARKER_DRAFT 一致）
+MARKER_OBJECT = 2  # [unused2]：object 塔嵌入用（与 embedder.rs::MARKER_OBJECT 一致）
+
+
+def embed(session: ort.InferenceSession, tok: Tokenizer, texts: list[str], marker_id: int = MARKER_DRAFT) -> np.ndarray:
+    """标记位置读取 + L2 归一化（与 embedder.rs::embed_at_marker 对齐）。
+
+    [CLS] {marker} text... -> 读取位置 1 的隐藏状态（L2 归一化）。
+    marker_id=1（[unused1]）用于草稿塔，marker_id=2（[unused2]）用于对象塔。
+    """
     names = {i.name for i in session.get_inputs()}
     out = []
     for text in texts:
         enc = tok.encode(text)
-        ids = np.array([enc.ids[:128]], dtype=np.int64)
-        mask = np.array([enc.attention_mask[:128]], dtype=np.int64)
+        ids_list = [101, marker_id] + enc.ids[1:127]
+        ids = np.array([ids_list], dtype=np.int64)
+        mask = np.ones((1, len(ids_list)), dtype=np.int64)
         feeds = {
             "input_ids": ids,
             "attention_mask": mask,
             "token_type_ids": np.zeros_like(ids),
         }
         feeds = {k: v for k, v in feeds.items() if k in names}
-        hidden = session.run(None, feeds)[0]  # [1, seq, 512]
-        m = mask[0][:, None].astype(np.float32)
-        vec = (hidden[0] * m).sum(axis=0) / np.clip(m.sum(), 1e-9, None)
-        vec = vec / np.linalg.norm(vec)
+        hidden = session.run(None, feeds)[0]
+        vec = hidden[0, 1, :]
+        norm = np.linalg.norm(vec)
+        if norm < 1e-9:
+            raise ValueError("嵌入退化")
+        vec = vec / norm
         out.append(vec.astype(np.float32))
     return np.array(out, dtype=np.float32)
 
@@ -192,7 +202,7 @@ def fit_logreg(x: np.ndarray, y: np.ndarray, l2: float = 0.5,
                epochs: int = 2000, lr: float = 0.5) -> tuple[np.ndarray, float]:
     """纯 numpy 逻辑回归（与 calibrate_sem.loo_probe 同内核）。返回 (w, b)。
 
-    全程 float32：4096 维特征 × 近千样本，float64 会让每轮 `x @ w` 把整个矩阵
+    全程 float32：2048 维特征 × 近千样本，float64 会让每轮 `x @ w` 把整个矩阵
     上采样为 float64（翻倍内存 + 碎片），在 311MB ONNX arena 之上易触发 OOM。
     """
     n, dim = x.shape
@@ -299,7 +309,7 @@ def suggest_threshold(scores: np.ndarray, y: np.ndarray) -> tuple[float, float]:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model-dir", default=str(REPO_ROOT / "resources/models/bge-large"))
+    ap.add_argument("--model-dir", default=str(REPO_ROOT / "resources/models/bge-small"))
     ap.add_argument("--corpus", default=str(REPO_ROOT / "resources/training_set/conversation"))
     ap.add_argument("--dry-run", action="store_true", help="只训练打印，不写 head 文件")
     ap.add_argument("--no-loo", action="store_true", help="跳过 LOO 交叉验证（语料增大后耗时线性上升）")
@@ -310,7 +320,11 @@ def main() -> int:
     tok = Tokenizer.from_file(str(model_dir / "tokenizer.json"))
     weight = model_dir / "model_quantized.onnx"
     sess = ort.InferenceSession(str(weight), providers=["CPUExecutionProvider"])
-    print(f"模型：{weight}（int8，与运行时一致）\n")
+
+    # 从 ONNX 输出维度自动推断 EMBED_DIM（bge-small 512；兼容 bge-large 1024）
+    embed_dim = sess.get_outputs()[0].shape[-1]
+    feature_dim = 4 * embed_dim
+    print(f"模型：{weight}（int8，EMBED_DIM={embed_dim}）\n")
 
     corpus = load_corpus(corpus_dir)
 
@@ -325,12 +339,12 @@ def main() -> int:
             print(f"[{scene}] 无语料，跳过")
             continue
         # 特征装配顺序必须与 sem/mod.rs::assemble_features 一致（改动即需同步两者）
-        xd = embed(sess, tok, texts)
-        xo = embed(sess, tok, objs)
+        xd = embed(sess, tok, texts, MARKER_DRAFT)
+        xo = embed(sess, tok, objs, MARKER_OBJECT)
         x = np.concatenate([xd, xo, xd * xo, xd - xo], axis=1)
-        assert x.shape[1] == FEATURE_DIM, f"特征维度 {x.shape[1]} != {FEATURE_DIM}"
+        assert x.shape[1] == feature_dim, f"特征维度 {x.shape[1]} != {feature_dim}"
         # 训练用连续软目标（severity 分层）；评估用二值 danger（误报/漏判口径）
-        w, b = fit_logreg(x, y_soft)
+        w, b = fit_logreg(x, y_soft, l2=0.1, epochs=8000, lr=2.0)
         scores = 1.0 / (1.0 + np.exp(-(x @ w + b)))
 
         tr_acc = train_accuracy(x, y_bool, w, b)
@@ -374,10 +388,17 @@ def main() -> int:
                 existing = json.loads(head_path.read_text(encoding="utf-8"))
             else:
                 existing = {"templates": []}
-            # dim=4096（4×1024）→ 运行时启用 草稿⊕对象⊕积⊕差（sem/head.rs 接受 1×/2×/4×）
-            existing["dim"] = FEATURE_DIM
+            # dim=4×EMBED_DIM（当前 bge-small 为 2048）→ 运行时启用双塔+交互项
+            existing["dim"] = feature_dim
             existing["weights"] = [float(v) for v in w]
             existing["bias"] = float(b)
+            # fast-path：draft-only 得分落在 safe_band/block_band → 短路判定（§5.7-jev）。
+            # safe_band [0.0, 0.30] → 明显安全，跳过完整双塔；
+            # block_band [0.70, 1.0] → 明显危险，直接 Block。
+            existing["fast_path"] = {
+                "safe_band": [0.0, 0.30],
+                "block_band": [0.70, 1.0],
+            }
             head_path.write_text(
                 json.dumps(existing, ensure_ascii=False, indent=2),
                 encoding="utf-8",
