@@ -229,6 +229,14 @@ impl SemStage {
     ///   `"之前的对话：{context}\n现在要发送：{draft}"` 再嵌入，
     ///   让线性头在对话语境下判定危险概率。
     pub fn judge(&self, input: &OcrResult) -> Verdict {
+        self.judge_result(input).unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "L2 判定失败，直接调用 judge 时降级为 Safe");
+            Verdict::safe()
+        })
+    }
+
+    /// Stage 路径使用的可失败判定：L2 推理错误必须交给 Guard 清槽。
+    fn judge_result(&self, input: &OcrResult) -> Result<Verdict, StageError> {
         let draft = input.draft_text.trim();
 
         // 读取联系人画像 → 场景 id；经场景表折算展示名与 L2 基线
@@ -255,22 +263,22 @@ impl SemStage {
         // - threshold = 0.0（「无限制」）：仅凭聊天对象判断为该场景 → 立即 Safe，不经 L1/L2。
         // 两种场景均跳过 OCR 文字识别与 L2 推理，仅依据聊天对象所属场景判定。
         if (threshold - 1.0).abs() < 1e-6 {
-            return Verdict::block("禁止场景").with_scene(scenario_name);
+            return Ok(Verdict::block("禁止场景").with_scene(scenario_name));
         }
         if threshold.abs() < 1e-6 {
-            return Verdict::safe().with_scene(scenario_name);
+            return Ok(Verdict::safe().with_scene(scenario_name));
         }
 
         // L1（永远启用，毫秒级；命中短路）
         if let Ok(rules) = self.rules.read() {
             if let Some(hit) = rules.first_hit(draft, &scenario_id) {
-                return Verdict::from_rule(&hit.pattern).with_scene(scenario_name);
+                return Ok(Verdict::from_rule(&hit.pattern).with_scene(scenario_name));
             }
         }
 
         // 空草稫 → Safe
         if draft.is_empty() {
-            return Verdict::safe().with_scene(scenario_name);
+            return Ok(Verdict::safe().with_scene(scenario_name));
         }
 
         // L2（可开关；Embedder 缺失/已卸载 = fail-open 仅 L1）
@@ -280,14 +288,15 @@ impl SemStage {
             // 详见 draft_embed_text / object_embed_text 的文档注释与实测对比）。
             let draft_text = draft_embed_text(input.chat_context.as_deref(), draft);
             let object_text = object_embed_text(input.chat_target.as_deref());
-            if let Some(draft) = self.l2_draft(&draft_text) {
+            let draft = self.l2_draft(&draft_text)?;
+            {
                 // fast-path： draft-only 得分落在 safe_band/block_band → 短路判定。
                 match self.heads.judge_fast(&draft, base) {
                     ScoreResult::ShortCircuitSafe => {
-                        return Verdict::safe().with_scene(scenario_name);
+                        return Ok(Verdict::safe().with_scene(scenario_name));
                     }
                     ScoreResult::ShortCircuitBlock => {
-                        return Verdict::block("语义 fast-path 短路").with_scene(scenario_name);
+                        return Ok(Verdict::block("语义 fast-path 短路").with_scene(scenario_name));
                     }
                     ScoreResult::FullScore { .. } => {}
                 }
@@ -306,10 +315,10 @@ impl SemStage {
                                 "场景语义不匹配，危险分 {score:.2} > {threshold:.2}"
                             ));
                         }
-                        return v.with_scene(scenario_name);
+                        return Ok(v.with_scene(scenario_name));
                     }
                 } else {
-                    if let Some(score) = self.l2_score_obj(&draft, &object_text, base) {
+                    if let Some(score) = self.l2_score_obj(&draft, &object_text, base)? {
                         let has_weights = self.heads.has_weights(base);
                         let mut v = if has_weights {
                             Verdict::from_score(score, threshold)
@@ -321,34 +330,50 @@ impl SemStage {
                                 "场景语义不匹配，危险分 {score:.2} > {threshold:.2}"
                             ));
                         }
-                        return v.with_scene(scenario_name);
+                        return Ok(v.with_scene(scenario_name));
                     }
                 }
             }
         }
 
-        Verdict::safe().with_scene(scenario_name)
+        Ok(Verdict::safe().with_scene(scenario_name))
     }
 
     /// draft 塔嵌入：[CLS] [unused1] {draft_text} → 位置 1 隐藏态（L2 归一化）。
-    fn l2_draft(&self, draft_text: &str) -> Option<[f32; embedder::EMBED_DIM]> {
-        let guard = self.embedder.read().ok()?;
-        let embedder = guard.as_ref()?;
-        embedder.embed_draft(draft_text).ok()
+    fn l2_draft(&self, draft_text: &str) -> Result<[f32; embedder::EMBED_DIM], StageError> {
+        let guard = self
+            .embedder
+            .read()
+            .map_err(|_| StageError::Recoverable("语义模型锁中毒".into()))?;
+        let embedder = guard
+            .as_ref()
+            .ok_or_else(|| StageError::Recoverable("语义模型未加载".into()))?;
+        embedder.embed_draft(draft_text)
     }
 
     /// 完整双塔评分（head 维度决定是否拼接对象塔）。
-    fn l2_score_obj(&self, draft: &[f32], object_text: &str, base: Profile) -> Option<f32> {
+    fn l2_score_obj(
+        &self,
+        draft: &[f32],
+        object_text: &str,
+        base: Profile,
+    ) -> Result<Option<f32>, StageError> {
         let dim = self.heads.feature_dim(base);
         if dim == embedder::EMBED_DIM {
-            return self.heads.score(draft, base);
+            return Ok(self.heads.score(draft, base));
         }
-        let guard = self.embedder.read().ok()?;
-        let embedder = guard.as_ref()?;
+        let guard = self
+            .embedder
+            .read()
+            .map_err(|_| StageError::Recoverable("语义模型锁中毒".into()))?;
+        let embedder = guard
+            .as_ref()
+            .ok_or_else(|| StageError::Recoverable("语义模型未加载".into()))?;
         // 对象塔用 [unused2] 标记：[CLS] [unused2] {object_text}
-        let object = embedder.embed_object(object_text).ok()?;
-        self.heads
-            .score(&assemble_features(draft, &object, dim), base)
+        let object = embedder.embed_object(object_text)?;
+        Ok(self
+            .heads
+            .score(&assemble_features(draft, &object, dim), base))
     }
 
     /// 挂起态卸载（§2.4）：目标程序离开前台时释放 bge-small 会话内存（~50MB）。
@@ -388,7 +413,7 @@ impl SemStage {
 
     fn run(&self, input: OcrResult, ctx: &PipelineContext) -> Result<Verdict, StageError> {
         ctx.cancel.check()?;
-        let verdict = self.judge(&input);
+        let verdict = self.judge_result(&input)?;
         Ok(verdict
             .with_draft(
                 input.draft_text.clone(),

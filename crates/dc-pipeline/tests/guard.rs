@@ -199,6 +199,27 @@ fn ut_grd_03_recoverable_clears_slot() {
     assert!(f.slot.load().is_none(), "fail-open：槽位清空");
 }
 
+/// L2/sem StageError 必须穿透到 Guard，并清除上一轮判定槽。
+#[test]
+fn sem_recoverable_clears_existing_slot() {
+    let f = fixture();
+    f.core.run_trigger(Trigger::Slow, request());
+    assert!(f.slot.load().is_some(), "先写入上一轮判定");
+
+    f.sem
+        .outputs
+        .lock()
+        .unwrap()
+        .push_front(Err(StageError::Recoverable("L2 推理失败".into())));
+    let out = f.core.run_trigger(Trigger::Slow, request());
+
+    assert!(matches!(out, TickOutcome::Cleared(msg) if msg.contains("L2 推理失败")));
+    assert!(
+        f.slot.load().is_none(),
+        "L2 错误后必须清槽，避免复用过期判定"
+    );
+}
+
 /// Fatal → 停用，后续触发全部跳过。
 #[test]
 fn fatal_disables_subsequent_triggers() {
