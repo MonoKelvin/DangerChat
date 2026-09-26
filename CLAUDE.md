@@ -9,6 +9,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 危信（DangerChat）v1.0：Windows-only Tauri 2 桌面应用，监控目标聊天软件窗口（截图 → 区域划分 → OCR → 语义判定），在用户发送敏感/违禁内容前弹窗拦截。Rust workspace + pnpm monorepo。权威设计文档：`docs/危信v1.0_开发设计文档.md`（章节号 §x.x 常出现在代码注释里）。
 
+## 目标
+
+* 性能指标：从用户输入完成消息按下回车（或者软件中配置的消息发送快捷键）到消息最终判定是否可以放行之间的时间，不能超过160ms
+* 精确度指标：通过OCR识别正确用户的消息，并通过语义分析模型，结合聊天对象、上下文消息，最终识别到拦截或者不拦截的成功率至少90%
+* 内容指标：软件工作运行期间小于350MB，不工作状态小于10MB
+
+
 ## 常用命令
 
 ```bash

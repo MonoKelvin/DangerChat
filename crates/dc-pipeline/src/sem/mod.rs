@@ -274,11 +274,7 @@ impl SemStage {
         }
 
         // L2（可开关；Embedder 缺失/已卸载 = fail-open 仅 L1）
-        let embedder_loaded = self
-            .embedder
-            .read()
-            .map(|e| e.is_some())
-            .unwrap_or(false);
+        let embedder_loaded = self.embedder.read().map(|e| e.is_some()).unwrap_or(false);
         if self.l2_enabled && embedder_loaded {
             // 上下文与对象各成一个特征塔（对象塔仅在 1024 维头下参与拼接，
             // 详见 draft_embed_text / object_embed_text 的文档注释与实测对比）。
@@ -351,7 +347,8 @@ impl SemStage {
         let embedder = guard.as_ref()?;
         // 对象塔用 [unused2] 标记：[CLS] [unused2] {object_text}
         let object = embedder.embed_object(object_text).ok()?;
-        self.heads.score(&assemble_features(draft, &object, dim), base)
+        self.heads
+            .score(&assemble_features(draft, &object, dim), base)
     }
 
     /// 挂起态卸载（§2.4）：目标程序离开前台时释放 bge-small 会话内存（~50MB）。
@@ -449,7 +446,8 @@ impl Module for SemStage {
                 Err(e) => {
                     tracing::warn!(error = %e, "规则库非法，回落内置基线词库");
                     if let Ok(mut w) = self.rules.write() {
-                        *w = RuleSet::from_defs(rules::baseline_defs()).map_err(ModuleError::Fatal)?;
+                        *w = RuleSet::from_defs(rules::baseline_defs())
+                            .map_err(ModuleError::Fatal)?;
                     }
                 }
             },
@@ -667,7 +665,10 @@ profile = "casual"
         // score == threshold → Safe（> 不含等）
         assert_eq!(Verdict::from_score(0.55, 0.55).level, VerdictLevel::Safe);
         // score > threshold + ε → Block
-        assert_eq!(Verdict::from_score(0.55 + 1e-3, 0.55).level, VerdictLevel::Block);
+        assert_eq!(
+            Verdict::from_score(0.55 + 1e-3, 0.55).level,
+            VerdictLevel::Block
+        );
         // score < threshold → Safe
         assert_eq!(Verdict::from_score(0.549, 0.55).level, VerdictLevel::Safe);
     }

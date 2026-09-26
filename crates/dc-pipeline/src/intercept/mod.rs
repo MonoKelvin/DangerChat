@@ -195,11 +195,6 @@ pub struct Intercept {
     /// 判定有效期毫秒（热更新；回车裁决读）。
     verdict_ttl_ms: AtomicU64,
     state: AtomicU8,
-    /// 待发纪元（fail-closed，§2.2 修订）：回车时若无新鲜/纪元匹配的判定，
-    /// **吞键**（消息未发出）并记下这次「等待判定」的草稿纪元；`u64::MAX` = 无待发。
-    /// worker 分析完成后经 `on_analysis_ready` 检查此值：匹配且危险→主动弹窗/入 Cooldown，
-    /// 匹配且安全→清零（用户再按回车即可命中放行）。
-    pending_send_epoch: AtomicU64,
     foreground: ForegroundTracker,
     tracker: Arc<DraftTracker>,
     slot: Arc<VerdictSlot>,
@@ -237,7 +232,6 @@ impl Intercept {
             enabled,
             verdict_ttl_ms,
             state: AtomicU8::new(GuardState::Suspended.to_u8()),
-            pending_send_epoch: AtomicU64::new(u64::MAX),
             foreground,
             tracker: Arc::new(tracker),
             slot: Arc::new(VerdictSlot::new()),
@@ -336,11 +330,6 @@ impl Intercept {
         self.metrics.snapshot()
     }
 
-    /// 待发纪元（测试用：验证 fail-closed 吞键后是否记录）。`u64::MAX` = 无待发。
-    pub fn pending_send_epoch(&self) -> u64 {
-        self.pending_send_epoch.load(Ordering::SeqCst)
-    }
-
     /// 当前守护状态（顺带让到期的挂起去抖落地）。
     pub fn state(&self) -> GuardState {
         let now = self.clock.now_ms();
@@ -435,12 +424,8 @@ impl Intercept {
             if self.tracker.is_snoozed() {
                 return HookAction::Pass;
             }
-            // fail-closed（§2.2 修订）：判定没跟上（无新鲕判定 / 纪元落后）时**吞键**。
-            // 放行会把消息先行发出、弹窗在后的问题：用户看到弹窗时消息已出，对话框形同虚设。
-            // 权守 fail-closed 吞住回车，同时记下待发纪元 + 触发即时分析：
-            //   - worker 判定安全 → on_analysis_ready 清零待发标志，用户再按回车即可放行；
-            //   - worker 判定危险 → on_analysis_ready 主动弹窗进入 Cooldown（消息从未发送出去）。
-            // 宁漏勿阻原则移到「判定纪元不匹配 / 过期」时放行（草稿已变，不等旧判定）。
+            // 严格 fail-open：判定未就绪、纪元不匹配或 TTL 过期时立即放行，
+            // 同时异步触��发当前草稿分析。发送钩子不等待，也不因缺少判定而吞键。
             let epoch_now = self.tracker.epoch();
             let fresh = self.slot.load_fresh(
                 Duration::from_millis(self.verdict_ttl_ms.load(Ordering::SeqCst)),
@@ -449,14 +434,14 @@ impl Intercept {
             let verdict = match fresh {
                 Some(v) if v.draft_epoch == epoch_now => v,
                 _ => {
-                    self.pending_send_epoch.store(epoch_now, Ordering::SeqCst);
                     let _ = self.triggers.offer_fast();
-                    tracing::debug!(epoch = epoch_now, "fail-closed：判定未就绪，吞键并触发分析（等 on_analysis_ready 补判）");
-                    return HookAction::Swallow;
+                    tracing::debug!(
+                        epoch = epoch_now,
+                        "fail-open：判定未就绪，放行并异步触发分析"
+                    );
+                    return HookAction::Pass;
                 }
             };
-            // 本次发送已有就绪判定，裁决它——清掉可能残留的待发标志。
-            self.pending_send_epoch.store(u64::MAX, Ordering::SeqCst);
             // 只有 Block（「已阻断发送」）才吞键拦截；Warn（「发送提醒」）与 Safe 一样放行，
             // 不吞键、不弹窗（用户要求：提醒级别不打扰，仅阻断级别拦下）。
             if verdict.level == crate::verdict::VerdictLevel::Block {
@@ -516,42 +501,11 @@ impl Intercept {
 
     /// worker 分析完成回调（在 pipeline-worker 线程调用）。
     ///
-    /// fail-closed 补判闭环（§2.2 修订）：回车判定没跟上时那次回车已吞掉、消息**未发出**，
     /// 只记下待发纪元。worker 算完在此裁决：
     /// - 纪元匹配 + 安全 → 清零待发标志（判定已入槽，用户再按回车即可命中放行）；
     /// - 纪元匹配 + 危险 → 主动入队弹窗并进入 Cooldown（消息从未发送出去）；
     /// - 纪元不匹配（草稿又改了）→ 不动待发标志，等对应纪元的判定或下次回车重新裁决。
     ///
-    /// 仅在 Active 态弹窗：Cooldown（已有弹窗）/挂起/暂停时不重复弹，保留待发标志待回前台或下次回车。
-    pub fn on_analysis_ready(&self, verdict: &Verdict) {
-        let pending = self.pending_send_epoch.load(Ordering::SeqCst);
-        if pending == u64::MAX || verdict.draft_epoch != pending {
-            return;
-        }
-        // 非阻断判定（Safe/Warn）：清零待发标志放行。判定已入槽且新鲜，用户再按回车即命中放行。
-        // Warn（「发送提醒」）不拦截、不弹窗，与 Safe 同等放行（用户要求：仅 Block 阻断）。
-        if verdict.level != crate::verdict::VerdictLevel::Block {
-            self.pending_send_epoch.store(u64::MAX, Ordering::SeqCst);
-            return;
-        }
-        // 阻断判定（Block）：仅 Active 态主动弹窗（Cooldown/挂起/暂停时保留标志，不重复弹）。
-        let now = self.clock.now_ms();
-        if self.refresh_state(now) != GuardState::Active {
-            return;
-        }
-        if self.alerts.request_show(Arc::new(verdict.clone())).is_ok() {
-            self.pending_send_epoch.store(u64::MAX, Ordering::SeqCst);
-            self.transition(GuardEvent::AlertShown, now);
-            tracing::info!(
-                level = verdict.level.as_str(),
-                score = verdict.score,
-                "fail-closed 补判：判定就绪危险，消息已吞住，已入队弹窗"
-            );
-        } else {
-            // 弹窗通道异常：保留待发标志，下次回车/判定再试（绝不静默放过危险内容）。
-            tracing::error!("fail-closed 弹窗入队失败，保留待发标志，下次回车/判定再试");
-        }
-    }
 
     /// 应用弹窗动作（dc-alert → dc-bridge → 这里）。
     pub fn apply_alert_action(&self, action: AlertAction) {

@@ -81,7 +81,13 @@ impl Embedder {
             .map_err(|e| StageError::Recoverable(format!("分词失败：{e}")))?;
         // [CLS] + marker + 其余内容（跳过 enc 的 [CLS]，取 [1:127]）
         let mut ids: Vec<i64> = vec![101, marker_id];
-        ids.extend(enc.get_ids().iter().skip(1).take(MAX_SEQ - 2).map(|&v| v as i64));
+        ids.extend(
+            enc.get_ids()
+                .iter()
+                .skip(1)
+                .take(MAX_SEQ - 2)
+                .map(|&v| v as i64),
+        );
         if ids.is_empty() {
             return Err(StageError::Recoverable("分词结果为空".into()));
         }

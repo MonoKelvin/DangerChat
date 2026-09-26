@@ -296,7 +296,10 @@ mod tests {
         tint(&mut active, 9.0, 0.8, 1.0);
         tint(&mut suspended, 9.0, 0.8, 0.6);
         let lum = |px: [u8; 4]| px[0] as u32 + px[1] as u32 + px[2] as u32;
-        assert!(lum(suspended) < lum(active), "挂起({suspended:?}) 应暗于 守护({active:?})");
+        assert!(
+            lum(suspended) < lum(active),
+            "挂起({suspended:?}) 应暗于 守护({active:?})"
+        );
     }
 
     /// 无彩色像素（黑白灰描边）：保持中性，只随 l_mul 压暗，不染色

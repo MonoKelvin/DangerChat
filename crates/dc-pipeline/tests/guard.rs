@@ -129,7 +129,10 @@ fn fixture() -> Fixture {
 }
 
 fn request() -> dc_pipeline::capture::CaptureRequest {
-    dc_pipeline::capture::CaptureRequest { hwnd: HWND, roi: None }
+    dc_pipeline::capture::CaptureRequest {
+        hwnd: HWND,
+        roi: None,
+    }
 }
 
 /// UT-GRD-01：全 mock Stage 的 Fast/Slow 端到端——槽位内容与纪元正确。
@@ -222,7 +225,10 @@ fn ut_grd_04_layout_cache_invalidation() {
     f.core.run_trigger(Trigger::Slow, request()); // 填缓存（hwnd=HWND）
 
     // 1) hwnd 变化
-    let other = dc_pipeline::capture::CaptureRequest { hwnd: Hwnd(0x9999), roi: None };
+    let other = dc_pipeline::capture::CaptureRequest {
+        hwnd: Hwnd(0x9999),
+        roi: None,
+    };
     let before = f.layout.call_count();
     f.core.run_trigger(Trigger::Fast, other);
     assert_eq!(f.layout.call_count(), before + 1, "hwnd 变 → 升级 Slow");
@@ -390,4 +396,30 @@ fn ut_grd_08_context_cache() {
     let out = f.core.run_trigger(Trigger::Fast, request());
     assert_eq!(out, TickOutcome::Stored);
     assert_eq!(f.sem.call_count(), before_sem_calls + 1, "快环仍需 sem");
+}
+
+/// UT-GRD-09：流水线运行期间草稿纪元变化时，旧判定不得覆盖当前槽位。
+#[test]
+fn stale_draft_result_is_not_published() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    let mut f = fixture();
+    let epoch = Arc::new(AtomicU64::new(7));
+    let read_count = Arc::new(AtomicU64::new(0));
+    let epoch_reader = Arc::clone(&epoch);
+    let count_reader = Arc::clone(&read_count);
+    f.core.draft_epoch = Arc::new(move || {
+        let call = count_reader.fetch_add(1, Ordering::SeqCst);
+        if call == 0 {
+            7
+        } else {
+            epoch_reader.load(Ordering::SeqCst)
+        }
+    });
+
+    epoch.store(8, Ordering::SeqCst);
+    let out = f.core.run_trigger(Trigger::Slow, request());
+
+    assert_eq!(out, TickOutcome::Skipped("stale draft"));
+    assert!(f.slot.load().is_none(), "旧草稿判定不得发布到槽位");
 }

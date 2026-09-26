@@ -42,3 +42,4 @@ crates/dc-pipeline/tests/fixtures/golden/*.json
 # 训练用的原始权重与数据集（各目录附 LICENSE）
 models/dc-layout-wechat/best.pt
 weights/
+resources/models/bge-large/model_quantized.onnx

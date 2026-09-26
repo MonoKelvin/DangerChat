@@ -139,14 +139,16 @@ where
         if self.fatal.load(std::sync::atomic::Ordering::Relaxed) {
             return TickOutcome::Skipped("fatal");
         }
+        // 在流水线启动时固定草稿纪元。完成�时若纪元已变化，结果属于旧草稿，禁止发布。
+        let run_epoch = (self.draft_epoch)();
         match trigger {
-            Trigger::Fast => self.run_fast(request),
-            Trigger::Slow => self.run_slow(request),
-            Trigger::Heartbeat => self.run_heartbeat(request),
+            Trigger::Fast => self.run_fast(request, run_epoch),
+            Trigger::Slow => self.run_slow(request, run_epoch),
+            Trigger::Heartbeat => self.run_heartbeat(request, run_epoch),
         }
     }
 
-    fn run_fast(&self, request: crate::capture::CaptureRequest) -> TickOutcome {
+    fn run_fast(&self, request: crate::capture::CaptureRequest, run_epoch: u64) -> TickOutcome {
         // 布局缓存可用性（§5.8）：不可用 → 升级 Slow
         let (cache_ok, input_roi) = {
             let guard = self.layout_cache.lock().ok();
@@ -158,12 +160,7 @@ where
                     // 输入框 ROI（屏幕坐标）：用于裁剪截图，减小拷贝量（§2.3 耗时约束）
                     let roi = c.layout.rect_of(crate::contract::TAG_MSG_INPUT).map(|r| {
                         // 窗口相对 → 屏幕坐标
-                        dc_sys::Rect::new(
-                            c.rect.x + r.x,
-                            c.rect.y + r.y,
-                            r.w,
-                            r.h,
-                        )
+                        dc_sys::Rect::new(c.rect.x + r.x, c.rect.y + r.y, r.w, r.h)
                     });
                     (ok, roi)
                 }
@@ -171,7 +168,7 @@ where
             }
         };
         if !cache_ok {
-            return self.run_slow(request);
+            return self.run_slow(request, run_epoch);
         }
 
         // 传入 ROI 裁剪：避免拷贝巨幅全窗口位图，仅截输入框区域
@@ -206,11 +203,10 @@ where
             Ok(v) => v,
             Err(e) => return self.stage_failed(e),
         };
-        self.store(verdict);
-        TickOutcome::Stored
+        self.store(verdict, run_epoch)
     }
 
-    fn run_slow(&self, request: crate::capture::CaptureRequest) -> TickOutcome {
+    fn run_slow(&self, request: crate::capture::CaptureRequest, run_epoch: u64) -> TickOutcome {
         let ctx = (self.ctx_factory)(LoopKind::Slow);
         let snap = match self.capture.process(request, &ctx) {
             Ok(s) => s,
@@ -243,15 +239,18 @@ where
             Ok(v) => v,
             Err(e) => return self.stage_failed(e),
         };
-        self.store(verdict);
-        TickOutcome::Stored
+        self.store(verdict, run_epoch)
     }
 
-    fn run_heartbeat(&self, request: crate::capture::CaptureRequest) -> TickOutcome {
+    fn run_heartbeat(
+        &self,
+        request: crate::capture::CaptureRequest,
+        run_epoch: u64,
+    ) -> TickOutcome {
         // 1.5s 心跳：capture + chat_target ROI pHash（§2.3）。
         // 无探测函数（测试简化）或无布局 → 直接触发 Slow（拿不到 ROI）。
         let Some(probe) = &self.heartbeat_probe else {
-            return self.run_slow(request);
+            return self.run_slow(request, run_epoch);
         };
         let ctx = (self.ctx_factory)(LoopKind::Heartbeat);
         let snap = match self.capture.process(request, &ctx) {
@@ -263,7 +262,7 @@ where
             guard.and_then(|c| c.as_ref().map(|c| c.layout.clone()))
         };
         let Some(layout) = layout else {
-            return self.run_slow(request);
+            return self.run_slow(request, run_epoch);
         };
         let hash = probe(&snap, &layout);
         // 海明距 ≤4 视为未变（抗渲染抖动/抗锯齿；见 phash::unchanged）。
@@ -271,7 +270,9 @@ where
         // 占满 worker 饿死快环，正是回车迟钝的元凶之一。
         let unchanged = match self.last_phash.lock() {
             Ok(mut last) => {
-                let same = last.map(|h| crate::guard::phash::unchanged(h, hash)).unwrap_or(false);
+                let same = last
+                    .map(|h| crate::guard::phash::unchanged(h, hash))
+                    .unwrap_or(false);
                 *last = Some(hash);
                 same
             }
@@ -282,11 +283,11 @@ where
             let _ = self.slot.refresh(self.clock.now_ms());
             TickOutcome::Refreshed
         } else {
-            self.run_slow_from_snapshot(snap)
+            self.run_slow_from_snapshot(snap, run_epoch)
         }
     }
 
-    fn run_slow_from_snapshot(&self, snap: WindowSnapshot) -> TickOutcome {
+    fn run_slow_from_snapshot(&self, snap: WindowSnapshot, run_epoch: u64) -> TickOutcome {
         let ctx = (self.ctx_factory)(LoopKind::Slow);
         let layout = match self.layout.process(snap.clone(), &ctx) {
             Ok(l) => l,
@@ -315,8 +316,7 @@ where
             Ok(v) => v,
             Err(e) => return self.stage_failed(e),
         };
-        self.store(verdict);
-        TickOutcome::Stored
+        self.store(verdict, run_epoch)
     }
 
     fn stage_failed(&self, e: StageError) -> TickOutcome {
@@ -335,8 +335,13 @@ where
         }
     }
 
-    fn store(&self, verdict: Verdict) {
-        let epoch = (self.draft_epoch)();
+    fn store(&self, verdict: Verdict, run_epoch: u64) -> TickOutcome {
+        let current_epoch = (self.draft_epoch)();
+        if current_epoch != run_epoch {
+            tracing::debug!(run_epoch, current_epoch, "草稿已更新，丢弃陈旧判定");
+            return TickOutcome::Skipped("stale draft");
+        }
+        let epoch = run_epoch;
         tracing::info!(
             level = verdict.level.as_str(),
             score = verdict.score,
@@ -344,9 +349,8 @@ where
             "流水线判定已入槽"
         );
         let stamped = verdict.with_epoch(epoch);
-        // fail-closed 补判闭环：先通知 intercept（据 pending_send_epoch 决定是否弹窗兜底），
-        // 再入槽。回调只读原子量 + try_send，无阻塞。
+        self.slot.store(stamped.clone(), self.clock.now_ms());
         (self.on_verdict_stored)(&stamped);
-        self.slot.store(stamped, self.clock.now_ms());
+        TickOutcome::Stored
     }
 }

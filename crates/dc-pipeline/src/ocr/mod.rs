@@ -35,7 +35,16 @@ const UPSCALE_BELOW: u32 = 32;
 /// 短敏感词（见 `assemble::filter_lines`）。本表可通过设置 `ocr.noise_words` 覆盖。
 const DEFAULT_NOISE_WORDS: &[&str] = &[
     "发送",
-    "按住鼠标 语音输入文字"
+    "按住鼠标 语音输入文字",
+    "%",
+    ")",
+    "?",
+    "M",
+    "R",
+    "Y",
+    "白",
+    "白(",
+    "白（",
 ];
 
 pub struct OcrStage {
@@ -53,7 +62,7 @@ impl OcrStage {
     pub fn new() -> Self {
         Self {
             engine: None,
-            noise_words: vec!["发送".into(), "按住鼠标 语音输入文字".into()],
+            noise_words: DEFAULT_NOISE_WORDS.iter().map(|word| (*word).into()).collect(),
             min_conf: 0.5,
             upscale: true,
             metrics: MetricsRecorder::default(),

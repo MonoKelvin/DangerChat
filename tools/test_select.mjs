@@ -9,7 +9,7 @@
 //   前端侧：apps/main → vitest main；apps/uitag → vitest uitag；
 //            crates/dc-bridge → main 契约 fixtures 双写检测也要跑
 //
-// 退出码：任一测试失败即非零；nextest 缺失时直接报错退出（纯 nextest 路线）。
+// 退出码：任一测试失败即非零；nextest 缺失时回退到 cargo test，仍排除黄金层与手工用例。
 
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -73,11 +73,67 @@ if (changedRustPkgs.size > 0) {
     '(' + [...changedRustPkgs].map((p) => `rdeps(${p})`).join(' + ') + ')' +
     ' - binary(golden_layout) - binary(golden_ocr)';
   console.log(`nextest 过滤式：${expr}\n`);
+  const hasNextest = (() => {
+    try {
+      execFileSync('cargo', ['nextest', '--version'], { stdio: 'ignore', cwd: ROOT });
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+
   try {
-    execFileSync('cargo', ['nextest', 'run', '--workspace', '-E', expr], {
-      stdio: 'inherit',
-      cwd: ROOT,
-    });
+    if (hasNextest) {
+      execFileSync('cargo', ['nextest', 'run', '--workspace', '-E', expr], {
+        stdio: 'inherit',
+        cwd: ROOT,
+      });
+    } else {
+      const affected = new Set(changedRustPkgs);
+      let expanded = true;
+      while (expanded) {
+        expanded = false;
+        for (const pkg of members) {
+          if (affected.has(pkg.name)) continue;
+          const dependsOnAffected = pkg.dependencies.some(
+            (dep) => dep.path && affected.has(dep.name),
+          );
+          if (dependsOnAffected) {
+            affected.add(pkg.name);
+            expanded = true;
+          }
+        }
+      }
+      const excludedTargets = new Set([
+        'golden_layout',
+        'golden_ocr',
+        'it_int_01_notepad',
+      ]);
+      console.warn(
+        `cargo-nextest 未安装，回退到按 target 执行 cargo test（受影响包：${[...affected].join(', ')}；` +
+          '排除 golden 与手工集成测试）。\n',
+      );
+      for (const pkgName of affected) {
+        const pkg = members.find((candidate) => candidate.name === pkgName);
+        if (!pkg) continue;
+
+        const baseArgs = ['test', '-p', pkgName];
+        if (pkg.targets.some((target) => target.kind.includes('lib'))) {
+          execFileSync('cargo', [...baseArgs, '--lib'], { stdio: 'inherit', cwd: ROOT });
+        }
+        if (pkg.targets.some((target) => target.kind.includes('bin'))) {
+          execFileSync('cargo', [...baseArgs, '--bins'], { stdio: 'inherit', cwd: ROOT });
+        }
+        for (const target of pkg.targets) {
+          if (target.kind.includes('test') && !excludedTargets.has(target.name)) {
+            execFileSync('cargo', [...baseArgs, '--test', target.name], {
+              stdio: 'inherit',
+              cwd: ROOT,
+            });
+          }
+        }
+      }
+    }
   } catch {
     process.exit(1);
   }

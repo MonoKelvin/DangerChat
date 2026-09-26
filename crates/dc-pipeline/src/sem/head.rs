@@ -167,8 +167,21 @@ impl Heads {
         let mut embedder: Option<std::sync::Arc<super::embedder::Embedder>> = None;
         let mut make = |parsed: ParsedHead| -> Head {
             match parsed {
-                ParsedHead::Linear { weights, bias, draft_w, draft_b, fast_path, jev } =>
-                    Head::Linear { weights, bias, draft_w, draft_b, fast_path, jev },
+                ParsedHead::Linear {
+                    weights,
+                    bias,
+                    draft_w,
+                    draft_b,
+                    fast_path,
+                    jev,
+                } => Head::Linear {
+                    weights,
+                    bias,
+                    draft_w,
+                    draft_b,
+                    fast_path,
+                    jev,
+                },
                 ParsedHead::None => Head::None,
                 ParsedHead::Templates(templates) => {
                     if embedder.is_none() {
@@ -245,7 +258,7 @@ impl Heads {
                     draft_b,
                     jev: parsed.jev,
                 }
-            },
+            }
             Some(_) => {
                 tracing::warn!(
                     path = %path.display(),
@@ -315,7 +328,9 @@ impl Heads {
     /// 得到看似合理却错误的分数。
     pub fn score(&self, features: &[f32], profile: Profile) -> Option<f32> {
         match self.head_of(profile) {
-            Head::Linear { weights, bias, jev, .. } => {
+            Head::Linear {
+                weights, bias, jev, ..
+            } => {
                 // jev.danger 优先：替代 legacy weights 打分
                 if let Some(ref jev_heads) = jev {
                     if let Some(ref danger) = jev_heads.danger {
@@ -327,7 +342,8 @@ impl Heads {
                             );
                             return None;
                         }
-                        let z: f32 = danger.weights
+                        let z: f32 = danger
+                            .weights
                             .iter()
                             .zip(features.iter())
                             .map(|(w, x)| w * x)
@@ -381,7 +397,9 @@ impl Heads {
     /// 返回 draft-only sigmoid 得分，不涉及对象信息。
     pub fn draft_score(&self, draft: &[f32], profile: Profile) -> Option<f32> {
         match self.head_of(profile) {
-            Head::Linear { draft_w, draft_b, .. } => {
+            Head::Linear {
+                draft_w, draft_b, ..
+            } => {
                 if draft_w.len() != draft.len() {
                     return None;
                 }
@@ -425,8 +443,12 @@ impl Heads {
     /// 状态描述（日志用）。
     pub fn describe(&self) -> &'static str {
         match (&self.formal, &self.casual) {
-            (Head::Linear { jev: Some(_), .. }, Head::Linear { jev: Some(_), .. }) => "formal+casual jev 线性头+fast-path",
-            (Head::Linear { jev: Some(_), .. }, _) | (_, Head::Linear { jev: Some(_), .. }) => "部分 jev 线性头+其余兜底",
+            (Head::Linear { jev: Some(_), .. }, Head::Linear { jev: Some(_), .. }) => {
+                "formal+casual jev 线性头+fast-path"
+            }
+            (Head::Linear { jev: Some(_), .. }, _) | (_, Head::Linear { jev: Some(_), .. }) => {
+                "部分 jev 线性头+其余兜底"
+            }
             (Head::Linear { .. }, Head::Linear { .. }) => "formal+casual 线性头+fast-path",
             (Head::Linear { .. }, _) | (_, Head::Linear { .. }) => "部分线性头+其余兜底",
             (Head::Templates { .. }, _) | (_, Head::Templates { .. }) => "模板兜底（只提示不拦截）",

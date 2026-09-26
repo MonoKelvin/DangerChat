@@ -357,8 +357,14 @@ match = "regex"
         assert!(rs.first_hit("fuck you", "all").is_some());
         assert!(rs.first_hit("caonima fuck sb", "all").is_some());
         // 词边界：不误伤嵌入词
-        assert!(rs.first_hit("absb内嵌", "formal").is_none(), "absb 不命中 sb");
-        assert!(rs.first_hit("isbn书号", "formal").is_none(), "isbn 不命中 sb");
+        assert!(
+            rs.first_hit("absb内嵌", "formal").is_none(),
+            "absb 不命中 sb"
+        );
+        assert!(
+            rs.first_hit("isbn书号", "formal").is_none(),
+            "isbn 不命中 sb"
+        );
         assert!(rs.first_hit("sbs", "formal").is_none(), "sbs 不命中 sb");
         assert!(rs.first_hit("sba", "formal").is_none(), "sba 不命中 sb");
         assert!(rs.first_hit("isb", "formal").is_none(), "isb 不命中 sb");
@@ -366,6 +372,9 @@ match = "regex"
         assert!(rs.first_hit("mlgb", "all").is_some());
         assert!(rs.first_hit("nmsl", "all").is_some());
         // 拼音不嵌入词
-        assert!(rs.first_hit("nmsl123", "all").is_none(), "nmsl123 不命中 nmsl");
+        assert!(
+            rs.first_hit("nmsl123", "all").is_none(),
+            "nmsl123 不命中 nmsl"
+        );
     }
 }

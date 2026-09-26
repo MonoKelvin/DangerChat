@@ -126,7 +126,9 @@ impl ScenarioManager {
                 id: s.id,
                 name: s.name.trim().to_string(),
                 base: s.base,
-                threshold: s.threshold.unwrap_or_else(|| default_threshold_for_base(s.base)),
+                threshold: s
+                    .threshold
+                    .unwrap_or_else(|| default_threshold_for_base(s.base)),
                 fixed: false,
             });
         }
@@ -156,7 +158,9 @@ impl ScenarioManager {
 
     /// 场景 → L2 判定阈值；未知 id 回退 0.55。
     pub fn threshold_of(&self, id: &str) -> f32 {
-        self.get(id).map(|s| s.threshold).unwrap_or(THRESHOLD_FORMAL)
+        self.get(id)
+            .map(|s| s.threshold)
+            .unwrap_or(THRESHOLD_FORMAL)
     }
 
     /// 展示名；未知 id 原样返回（reasons 文案兜底）。

@@ -212,47 +212,63 @@ fn ut_sem_13_threshold_extreme_short_circuit() {
     let scenarios = ScenarioManager::load(&path);
 
     // 联系人 → s1（禁止）
-    let contacts = ContactBook::from_toml(r#"
+    let contacts = ContactBook::from_toml(
+        r#"
 [[contact]]
 name = "禁聊"
 profile = "s1"
-"#).unwrap();
+"#,
+    )
+    .unwrap();
 
     let stage = SemStage::l1_only_with_scenarios(
         RuleSet::from_defs(vec![RuleDef {
             pattern: "sb".into(),
             r#match: MatchKind::Word,
             applies_to: vec!["all".into()],
-        }]).unwrap(),
+        }])
+        .unwrap(),
         contacts,
         scenarios,
     );
 
     // 草稿含违禁词，但阈值=1.0（禁止）→ 短路 Block，L1 规则不生效
     let v = stage.judge(&ocr("sb 违禁词", Some("禁聊")));
-    assert_eq!(v.level, VerdictLevel::Block, "threshold=1.0 应短路 Block，忽略 L1");
+    assert_eq!(
+        v.level,
+        VerdictLevel::Block,
+        "threshold=1.0 应短路 Block，忽略 L1"
+    );
     assert!(v.reasons.iter().any(|r| r.contains("禁止场景")));
 
     // 另一个联系人 → s2（无限制）
-    let contacts2 = ContactBook::from_toml(r#"
+    let contacts2 = ContactBook::from_toml(
+        r#"
 [[contact]]
 name = "随便聊"
 profile = "s2"
-"#).unwrap();
+"#,
+    )
+    .unwrap();
     let sm2 = ScenarioManager::load(&path);
     let stage2 = SemStage::l1_only_with_scenarios(
         RuleSet::from_defs(vec![RuleDef {
             pattern: "sb".into(),
             r#match: MatchKind::Word,
             applies_to: vec!["all".into()],
-        }]).unwrap(),
+        }])
+        .unwrap(),
         contacts2,
         sm2,
     );
 
     // 草稿含违禁词，但阈值=0.0（无限制）→ 短路 Safe，L1 规则不生效
     let v2 = stage2.judge(&ocr("sb 违禁词", Some("随便聊")));
-    assert_eq!(v2.level, VerdictLevel::Safe, "threshold=0.0 应短路 Safe，忽略 L1");
+    assert_eq!(
+        v2.level,
+        VerdictLevel::Safe,
+        "threshold=0.0 应短路 Safe，忽略 L1"
+    );
 
     let _ = std::fs::remove_file(&path);
 }

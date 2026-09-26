@@ -83,7 +83,7 @@ describe('NoticePage（UT-UI-05）', () => {
   it('两块内容齐全（风险/原则底线）', () => {
     render(<NoticePage onAgree={() => {}} />);
     expect(screen.getAllByText(/协议风险/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/原则与底线/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/原则和底线/).length).toBeGreaterThan(0);
     // 风险原文关键词
     expect(screen.getAllByText(/自行承担/).length).toBeGreaterThan(0);
     // 原则底线关键词

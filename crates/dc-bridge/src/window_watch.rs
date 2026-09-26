@@ -58,14 +58,12 @@ fn watch_loop(app: AppHandle) {
                 let ctx_state = Arc::clone(&state);
                 // 挂起态卸载判据（§2.4）：worker 巡检目标是否前台。
                 let fg_intercept = Arc::clone(&state.intercept);
-                let target_active =
-                    Arc::new(move || fg_intercept.target_active())
-                        as Arc<dyn Fn() -> bool + Send + Sync>;
-                // fail-closed 补判闭环（§2.2 修订）：判定入槽后通知 intercept，快速发送吞键后缺判场景据此补弹窗。
-                let vs_intercept = Arc::clone(&state.intercept);
-                let on_verdict_stored = Arc::new(move |v: &dc_pipeline::verdict::Verdict| {
-                    vs_intercept.on_analysis_ready(v)
-                }) as Arc<dyn Fn(&dc_pipeline::verdict::Verdict) + Send + Sync>;
+                let target_active = Arc::new(move || fg_intercept.target_active())
+                    as Arc<dyn Fn() -> bool + Send + Sync>;
+                // 当前发送路径采用严格 fail-open：判定缺失时按键已直接放行，
+                // 因此判定入槽后无需补拦截，仅保留回调以满足 Guard 的装配契约。
+                let on_verdict_stored = Arc::new(|_: &dc_pipeline::Verdict| {})
+                    as Arc<dyn Fn(&dc_pipeline::Verdict) + Send + Sync>;
                 match dc_pipeline::guard::Guard::spawn(
                     &state.intercept,
                     Arc::clone(&state.sys),

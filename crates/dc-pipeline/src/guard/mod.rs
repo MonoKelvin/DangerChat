@@ -58,7 +58,7 @@ impl Guard {
         // 目标是否前台（挂起态卸载判据，§2.4）。由调用方从 Arc<Intercept> 构造：
         // { let i = intercept.clone(); move || i.target_active() }
         target_active: Arc<dyn Fn() -> bool + Send + Sync>,
-        // 判定入槽回调（fail-closed 补判闭环，§2.2 修订）。由调用方从 Arc<Intercept> 构造：
+        // 判定入槽回调（fail-closed 补判闭环，§2.2 修订）。由��调用方从 Arc<Intercept> 构造：
         // { let i = intercept.clone(); move |v| i.on_analysis_ready(v) }
         on_verdict_stored: Arc<dyn Fn(&crate::verdict::Verdict) + Send + Sync>,
     ) -> Result<Self, String> {
@@ -104,15 +104,20 @@ impl Guard {
         // 心跳 pHash 探针（§2.3）：裁 chat_target ROI（拿不到则整窗）算感知哈希。
         // **必须接线**——缺它心跳会退化成每 1.5s 一次全链路慢环，占满 worker，
         // 快环判定被饿死，导致回车迟钝 + 同消息时而漏弹。
-        let heartbeat_probe: HeartbeatProbe = Arc::new(
-            |snap: &WindowSnapshot, layout: &RegionLayout| -> u64 {
+        let heartbeat_probe: HeartbeatProbe =
+            Arc::new(|snap: &WindowSnapshot, layout: &RegionLayout| -> u64 {
                 let (iw, ih) = (snap.image.width(), snap.image.height());
                 // ROI：优先聊天对象区；缺失时退整窗（心跳只需回答「聊天对象是否变了」）
                 let (x, y, w, h) = match layout.rect_of(crate::contract::TAG_CHAT_TARGET) {
                     Some(r) => {
                         let x = r.x.max(0) as u32;
                         let y = r.y.max(0) as u32;
-                        (x, y, r.w.min(iw.saturating_sub(x)), r.h.min(ih.saturating_sub(y)))
+                        (
+                            x,
+                            y,
+                            r.w.min(iw.saturating_sub(x)),
+                            r.h.min(ih.saturating_sub(y)),
+                        )
                     }
                     None => (0, 0, iw, ih),
                 };
@@ -121,8 +126,7 @@ impl Guard {
                 }
                 let roi = image::imageops::crop_imm(&snap.image, x, y, w, h).to_image();
                 phash::phash(&roi)
-            },
-        );
+            });
 
         let core = Arc::new(GuardCore {
             capture: Arc::clone(&capture),
